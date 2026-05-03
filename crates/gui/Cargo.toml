@@ -1,0 +1,25 @@
+[package]
+name = "pharmakon-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+xilem = "0.4.0"
+masonry = "0.4.0"
+vello = "0.6.0"
+accesskit = "0.21.1"
+peniko = "0.5.0"
+tray-icon = "0.19"
+muda = "0.15"
+winit = "0.30"
+masonry_winit = "0.4.0"
+tokio = { workspace = true, features = ["full"] }
+pharmakon-core = { path = "../core" }
+pharmakon-common = { path = "../common" }
+pharmakon-tools = { path = "../tools" }
+log = { workspace = true }
+env_logger = { workspace = true }
+serde_json = { workspace = true }
+futures = "0.3"
+tracing = "0.1"
+xilem_core = "0.4.0"

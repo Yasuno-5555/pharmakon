@@ -1,0 +1,56 @@
+[workspace]
+members = [
+    "crates/*",
+    "crates/plugin-sdk", "scratch/test_skill",
+]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+async-trait = "0.1.89"
+axum = { version = "0.8.9", features = ["ws"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+clap = { version = "4.6.1", features = ["derive"] }
+dirs = "6.0.0"
+env_logger = "0.11.10"
+futures = "0.3.32"
+http-body-util = "0.1.3"
+hyper = { version = "1.9.0", features = ["full"] }
+log = "0.4.29"
+reqwest = { version = "0.12.9", features = ["json", "multipart"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+teloxide = { version = "0.17.0", features = ["macros"] }
+tokio = { version = "1.52.1", features = ["full"] }
+tower = { version = "0.5.3", features = ["full"] }
+tower-http = { version = "0.6.8", features = ["full"] }
+uuid = { version = "1.12.1", features = ["v4", "serde"] }
+sqlx = { version = "0.8.3", features = ["sqlite", "runtime-tokio", "macros", "chrono"] }
+bollard = "0.18.1"
+serenity = { version = "0.12.3", default-features = false, features = ["client", "gateway", "rustls_backend", "model"] }
+slack-morphism = { version = "2.20.0", features = ["hyper"] }
+wasmtime = "29.0.1"
+notify = "8.0.0"
+headless_chrome = "1.0.15"
+rand = "0.8.5"
+tokio-cron-scheduler = "0.13.0"
+qdrant-client = "1.12.3"
+keyring = "3.2.1"
+rust-i18n = "3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+serde_yaml = "0.9"
+fastembed = "4.0"
+lancedb = "0.27"
+arrow = "57"
+petgraph = "0.7"
+xcap = "0.0.10"
+
+
+pharmakon-common = { path = "crates/common" }
+pharmakon-memory = { path = "crates/memory" }
+pharmakon-core = { path = "crates/core" }
+pharmakon-gateway = { path = "crates/gateway" }
+pharmakon-channels = { path = "crates/channels" }
+pharmakon-tools = { path = "crates/tools" }
+pharmakon-mcp = { path = "crates/mcp" }

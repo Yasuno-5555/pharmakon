@@ -1,0 +1,100 @@
+ --> crates/gui/src/tray.rs:3:32
+  |
+3 |     TrayIcon, TrayIconBuilder, TrayIconEvent,
+  |                                ^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> crates/gui/src/tray.rs:5:5
+  |
+5 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::sync::Mutex`
+ --> crates/gui/src/tray.rs:6:5
+  |
+6 | use tokio::sync::Mutex;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `pharmakon_core::agent::Agent`
+ --> crates/gui/src/tray.rs:7:5
+  |
+7 | use pharmakon_core::agent::Agent;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `from_u64` found for struct `xilem::WindowId` in the current scope
+   --> crates/gui/src/app.rs:116:30
+    |
+116 |             xilem::WindowId::from_u64(1),
+    |                              ^^^^^^^^ function or associated item not found in `xilem::WindowId`
+    |
+note: if you're trying to build a new `xilem::WindowId`, consider using `xilem::WindowId::next` which returns `xilem::WindowId`
+   --> /Users/yasuno/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/masonry_winit-0.4.0/src/app_driver.rs:31:5
+    |
+ 31 |     pub fn next() -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^
+help: there is an associated function `from` with a similar name
+    |
+116 -             xilem::WindowId::from_u64(1),
+116 +             xilem::WindowId::from(1),
+    |
+
+error[E0599]: no method named `color` found for struct `xilem::view::Label` in the current scope
+   --> crates/gui/src/app.rs:148:26
+    |
+146 | /                     label(format!("Thought: {}", thought))
+147 | |                         .text_size(11.0)
+148 | |                         .color(xilem::palette::css::LIGHT_SLATE_GRAY)
+    | |                         -^^^^^ method not found in `xilem::view::Label`
+    | |_________________________|
+    |
+    |
+   ::: /Users/yasuno/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xilem-0.4.0/src/style.rs:26:8
+    |
+ 26 |       fn color(self, color: Color) -> Prop<ContentColor, Self, State, Action>
+    |          ----- the method is available for `xilem::view::Label` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Style` which provides `color` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use xilem::style::Style;
+    |
+
+error[E0599]: no method named `padding` found for struct `xilem::view::Flex<Seq, State, Action>` in the current scope
+   --> crates/gui/src/app.rs:164:8
+    |
+155 |       let input_area = flex_row((
+    |  ______________________-
+156 | |         text_input(data.input_text.clone(), |data: &mut AppData, input| {
+157 | |             data.input_text = input;
+158 | |         })
+...   |
+163 | |         }),
+164 | |     )).padding(20.0);
+    | |       -^^^^^^^ method not found in `Flex<(FlexItem<TextInput<AppData, ()>, AppData, ()>, ...), ...>`
+    | |_______|
+    |
+    |
+   ::: /Users/yasuno/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xilem-0.4.0/src/style.rs:183:8
+    |
+183 |       fn padding(self, padding: impl Into<Padding>) -> Prop<Padding, Self, State, Action>
+    |          ------- the method is available for `xilem::view::Flex<(FlexItem<xilem::view::TextInput<AppData, ()>, AppData, ()>, xilem::view::Button<impl (for<'a> Fn(&'a mut AppData, Option<PointerButton>) -> MessageResult<()>) + Send + 'static, xilem::view::Label>), AppData>` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+    = note: the full name for the type has been written to '/Users/yasuno/projects/Pharmakon/pharmakon/target/debug/deps/pharmakon_gui-55bd13d7d875c6e2.long-type-12556573333806307663.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+help: trait `Style` which provides `padding` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use xilem::style::Style;
+    |
+
+error[E0599]: no method named `padding` found for struct `xilem::view::SizedBox<V, State, Action>` in the current scope
+   --> crates/gui/src/app.rs:176:23
+    |
+169 |       let swarm_sidebar = sized_box(
+    |  _________________________-
+170 | |         flex_col((
+171 | |             label("Autonomy Matrix")
+172 | |                 .text_size(16.0)
+...   |
+175 | |         ))
+176 | |     ).width(200.px()).padding(10.0);

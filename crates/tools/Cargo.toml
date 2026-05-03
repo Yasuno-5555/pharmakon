@@ -1,0 +1,28 @@
+[package]
+name = "pharmakon-tools"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bollard.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+uuid.workspace = true
+futures.workspace = true
+wasmtime.workspace = true
+headless_chrome.workspace = true
+reqwest.workspace = true
+log.workspace = true
+base64 = "0.22"
+scraper = "0.22.0"
+pharmakon-common.workspace = true
+pharmakon-memory.workspace = true
+tokio.workspace = true
+lazy_static = "1.5"
+pharmakon-mcp.workspace = true
+chrono.workspace = true
+screenshots = "0.8.10"
+nokhwa = { version = "0.10.4", features = ["input-native"] }
+image = "0.25.5"
+dirs = "6.0.0"

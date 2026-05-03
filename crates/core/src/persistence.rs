@@ -1,0 +1,405 @@
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use async_trait::async_trait;
+use anyhow::Result;
+use crate::model::Message;
+use crate::trajectory::Trajectory;
+use std::str::FromStr;
+use chrono::{DateTime, Utc};
+
+pub struct DbSessionStore {
+    pool: SqlitePool,
+}
+
+impl DbSessionStore {
+    pub async fn new(database_url: &str) -> Result<Self> {
+        let options = SqliteConnectOptions::from_str(database_url)?
+            .create_if_missing(true);
+        
+        let pool = SqlitePool::connect_with(options).await?;
+        
+        // Initialize schema
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                tool_calls TEXT,
+                tool_call_id TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).execute(&pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS usage_stats (
+                id INTEGER PRIMARY KEY,
+                session_id TEXT,
+                provider TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS traffic_capture (
+                id INTEGER PRIMARY KEY,
+                session_id TEXT,
+                url TEXT,
+                method TEXT,
+                status INTEGER,
+                request_body TEXT,
+                response_body TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS delivery_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                retry_count INTEGER DEFAULT 0,
+                next_retry TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'pending'
+            )"
+        ).execute(&pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS trajectories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                steps_json TEXT NOT NULL,
+                model TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).execute(&pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS commitments (
+                id TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                deadline DATETIME,
+                status TEXT NOT NULL,
+                metadata TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).execute(&pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS approved_users (
+                channel_id TEXT PRIMARY KEY,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).execute(&pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS agent_souls (
+                name TEXT PRIMARY KEY,
+                description TEXT,
+                instruction TEXT NOT NULL,
+                avatar_url TEXT,
+                metadata TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).execute(&pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS facts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                source TEXT,
+                importance INTEGER DEFAULT 1,
+                metadata TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).execute(&pool).await?;
+
+        Ok(Self { pool })
+    }
+
+    pub async fn save_message(&self, session_id: &str, msg: &Message) -> Result<()> {
+        let content_json = msg.content.as_ref().map(|c| serde_json::to_string(c).unwrap());
+        let tool_calls_json = msg.tool_calls.as_ref().map(|tc| serde_json::to_string(tc).unwrap());
+        
+        sqlx::query(
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id)
+             VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(session_id)
+        .bind(&msg.role)
+        .bind(content_json)
+        .bind(tool_calls_json)
+        .bind(&msg.tool_call_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn load_history(&self, session_id: &str) -> Result<Vec<Message>> {
+        let rows = sqlx::query_as::<_, MessageRow>(
+            "SELECT role, content, tool_calls, tool_call_id FROM messages 
+             WHERE session_id = ? ORDER BY created_at ASC"
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let messages = rows.into_iter().map(|row| {
+            let content = row.content.and_then(|c| {
+                // Try to parse as JSON first (MessageContent), fallback to raw text
+                serde_json::from_str(&c).ok().or_else(|| Some(crate::model::MessageContent::Text(c)))
+            });
+            Message {
+                role: row.role,
+                content,
+                tool_calls: row.tool_calls.and_then(|tc| serde_json::from_str(&tc).ok()),
+                tool_call_id: row.tool_call_id,
+            }
+        }).collect();
+
+        Ok(messages)
+    }
+
+    pub async fn enqueue_delivery(&self, session_id: &str, payload: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO delivery_queue (session_id, payload) VALUES (?, ?)"
+        )
+        .bind(session_id)
+        .bind(payload)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_pending_deliveries(&self) -> Result<Vec<(i64, String, String)>> {
+        let rows = sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT id, session_id, payload FROM delivery_queue WHERE status = 'pending' AND next_retry <= CURRENT_TIMESTAMP"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn mark_delivered(&self, id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM delivery_queue WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn log_usage(&self, session_id: &str, provider: &str, model: &str, prompt: u32, completion: u32) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO usage_stats (session_id, provider, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(session_id)
+        .bind(provider)
+        .bind(model)
+        .bind(prompt)
+        .bind(completion)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn log_traffic(&self, session_id: &str, url: &str, method: &str, status: u16, req: &str, res: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO traffic_capture (session_id, url, method, status, request_body, response_body) VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        .bind(session_id)
+        .bind(url)
+        .bind(method)
+        .bind(status as i32)
+        .bind(req)
+        .bind(res)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn save_commitment(&self, id: &str, description: &str, deadline: Option<DateTime<Utc>>, status: &str, metadata: &Value) -> Result<()> {
+        let metadata_json = serde_json::to_string(metadata)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO commitments (id, description, deadline, status, metadata) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(id)
+        .bind(description)
+        .bind(deadline)
+        .bind(status)
+        .bind(metadata_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn load_commitments(&self) -> Result<Vec<Value>> {
+        let rows = sqlx::query_as::<_, (String, String, Option<DateTime<Utc>>, String, String)>(
+            "SELECT id, description, deadline, status, metadata FROM commitments ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let commitments = rows.into_iter().map(|(id, desc, deadline, status, meta)| {
+            serde_json::json!({
+                "id": id,
+                "description": desc,
+                "deadline": deadline,
+                "status": status,
+                "metadata": serde_json::from_str::<Value>(&meta).unwrap_or_default()
+            })
+        }).collect();
+
+        Ok(commitments)
+    }
+
+    pub async fn update_commitment_status(&self, id: &str, status: &str) -> Result<()> {
+        sqlx::query("UPDATE commitments SET status = ? WHERE id = ?")
+            .bind(status)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn approve_user(&self, channel_id: &str) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO approved_users (channel_id) VALUES (?)")
+            .bind(channel_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn is_user_approved(&self, channel_id: &str) -> Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM approved_users WHERE channel_id = ?")
+            .bind(channel_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.is_some())
+    }
+
+    pub async fn add_fact(&self, content: &str, source: Option<&str>, importance: i32, metadata: &Value) -> Result<()> {
+        let metadata_json = serde_json::to_string(metadata)?;
+        sqlx::query(
+            "INSERT INTO facts (content, source, importance, metadata) VALUES (?, ?, ?, ?)"
+        )
+        .bind(content)
+        .bind(source)
+        .bind(importance)
+        .bind(metadata_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn search_facts(&self, query: &str) -> Result<Vec<Value>> {
+        // Simple keyword search for now, will be replaced by vector search
+        let search_query = format!("%{}%", query);
+        let rows = sqlx::query_as::<_, (String, Option<String>, i32, String)>(
+            "SELECT content, source, importance, metadata FROM facts 
+             WHERE content LIKE ? OR source LIKE ? ORDER BY importance DESC, created_at DESC"
+        )
+        .bind(&search_query)
+        .bind(&search_query)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let facts = rows.into_iter().map(|(content, source, importance, meta)| {
+            serde_json::json!({
+                "content": content,
+                "source": source,
+                "importance": importance,
+                "metadata": serde_json::from_str::<Value>(&meta).unwrap_or_default()
+            })
+        }).collect();
+
+        Ok(facts)
+    }
+}
+
+#[async_trait]
+impl pharmakon_common::CommitmentPersistence for DbSessionStore {
+    async fn save_commitment(&self, id: &str, description: &str, deadline: Option<DateTime<Utc>>, status: &str, metadata: &Value) -> Result<()> {
+        self.save_commitment(id, description, deadline, status, metadata).await
+    }
+
+    async fn load_commitments(&self) -> Result<Vec<Value>> {
+        self.load_commitments().await
+    }
+
+    async fn update_commitment_status(&self, id: &str, status: &str) -> Result<()> {
+        self.update_commitment_status(id, status).await
+    }
+}
+
+
+use serde_json::Value;
+
+
+#[derive(sqlx::FromRow)]
+struct MessageRow {
+    role: String,
+    content: Option<String>,
+    tool_calls: Option<String>,
+    tool_call_id: Option<String>,
+}
+
+impl DbSessionStore {
+    pub async fn save_trajectory(&self, trajectory: &Trajectory) -> Result<()> {
+        let steps_json = serde_json::to_string(&trajectory.steps)?;
+        sqlx::query(
+            "INSERT INTO trajectories (session_id, steps_json, model) VALUES (?, ?, ?)"
+        )
+        .bind(&trajectory.session_id)
+        .bind(&steps_json)
+        .bind(&trajectory.metadata.model)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn load_trajectory(&self, session_id: &str) -> Result<Option<Trajectory>> {
+        #[derive(sqlx::FromRow)]
+        struct TrajectoryRow {
+            steps_json: String,
+            model: Option<String>,
+            created_at: Option<DateTime<Utc>>,
+        }
+
+        let row = sqlx::query_as::<_, TrajectoryRow>(
+            "SELECT steps_json, model, created_at FROM trajectories WHERE session_id = ? ORDER BY created_at DESC LIMIT 1"
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(r) = row {
+            let steps: Vec<crate::trajectory::TrajectoryStep> = serde_json::from_str(&r.steps_json)?;
+            Ok(Some(Trajectory {
+                session_id: session_id.to_string(),
+                steps,
+                metadata: crate::trajectory::TrajectoryMetadata {
+                    model: r.model.unwrap_or_default(),
+                    created_at: r.created_at.unwrap_or_else(Utc::now),
+                },
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn list_trajectories(&self) -> Result<Vec<(String, String, String)>> {
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT session_id, model, created_at FROM trajectories ORDER BY created_at DESC LIMIT 50"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+}

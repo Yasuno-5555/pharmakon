@@ -1,0 +1,94 @@
+use keyring::Entry;
+use anyhow::{Result, anyhow};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+
+pub struct SecretStore {
+    service: String,
+}
+
+impl SecretStore {
+    pub fn new() -> Self {
+        Self {
+            service: "pharmakon".to_string(),
+        }
+    }
+
+    fn get_fallback_path(&self) -> Result<PathBuf> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow!("Home directory not found"))?;
+        let path = home.join(".pharmakon").join("secrets.json");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        Ok(path)
+    }
+
+    fn save_to_fallback(&self, name: &str, value: &str) -> Result<()> {
+        let path = self.get_fallback_path()?;
+        let mut secrets: HashMap<String, String> = if path.exists() {
+            let content = fs::read_to_string(&path)?;
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+        secrets.insert(name.to_string(), value.to_string());
+        let content = serde_json::to_string_pretty(&secrets)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+
+    fn get_from_fallback(&self, name: &str) -> Result<String> {
+        let path = self.get_fallback_path()?;
+        if !path.exists() {
+            return Err(anyhow!("Fallback secrets file not found"));
+        }
+        let content = fs::read_to_string(&path)?;
+        let secrets: HashMap<String, String> = serde_json::from_str(&content)?;
+        secrets.get(name).cloned().ok_or_else(|| anyhow!("Secret not found in fallback"))
+    }
+
+    pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
+        // Try keyring first
+        match Entry::new(&self.service, name) {
+            Ok(entry) => {
+                if let Err(e) = entry.set_password(value) {
+                    log::warn!("Keyring set failed: {}. Falling back to file.", e);
+                    self.save_to_fallback(name, value)?;
+                }
+            }
+            Err(_) => {
+                self.save_to_fallback(name, value)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_secret(&self, name: &str) -> Result<String> {
+        // Try keyring first
+        if let Ok(entry) = Entry::new(&self.service, name) {
+            if let Ok(password) = entry.get_password() {
+                return Ok(password);
+            }
+        }
+        
+        // Fallback to file
+        self.get_from_fallback(name)
+    }
+
+    pub fn delete_secret(&self, name: &str) -> Result<()> {
+        if let Ok(entry) = Entry::new(&self.service, name) {
+            let _ = entry.delete_credential();
+        }
+        
+        let path = self.get_fallback_path()?;
+        if path.exists() {
+            let content = fs::read_to_string(&path)?;
+            let mut secrets: HashMap<String, String> = serde_json::from_str(&content).unwrap_or_default();
+            secrets.remove(name);
+            let content = serde_json::to_string_pretty(&secrets)?;
+            fs::write(path, content)?;
+        }
+        Ok(())
+    }
+}

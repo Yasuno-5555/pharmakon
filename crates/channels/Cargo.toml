@@ -1,0 +1,17 @@
+[package]
+name = "pharmakon-channels"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pharmakon-core.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+log.workspace = true
+teloxide.workspace = true
+serenity.workspace = true
+slack-morphism.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

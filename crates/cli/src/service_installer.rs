@@ -1,0 +1,97 @@
+use std::fs;
+use std::path::PathBuf;
+use anyhow::{Result, anyhow};
+use std::env;
+
+pub fn install_service(port: u16) -> Result<()> {
+    let os = env::consts::OS;
+    let exe_path = env::current_exe()?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+
+    match os {
+        "macos" => install_macos_launchd(exe_path, home, port),
+        "linux" => install_linux_systemd(exe_path, home, port),
+        _ => Err(anyhow!("Service installation not supported on {}", os)),
+    }
+}
+
+fn install_macos_launchd(exe_path: PathBuf, home: PathBuf, port: u16) -> Result<()> {
+    let plist_dir = home.join("Library").join("LaunchAgents");
+    fs::create_dir_all(&plist_dir)?;
+    
+    let plist_path = plist_dir.join("ai.openclaw.pharmakon.plist");
+    let label = "ai.openclaw.pharmakon";
+    
+    let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+        <string>gateway</string>
+        <string>--port</string>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{}/.pharmakon/logs/gateway.out</string>
+    <key>StandardErrorPath</key>
+    <string>{}/.pharmakon/logs/gateway.err</string>
+</dict>
+</plist>"#, 
+        label, 
+        exe_path.to_str().unwrap(), 
+        port,
+        home.to_str().unwrap(),
+        home.to_str().unwrap()
+    );
+
+    fs::write(&plist_path, plist_content)?;
+    
+    println!("✅ Launchd plist created at {:?}", plist_path);
+    println!("To start the service, run:");
+    println!("  launchctl load {:?}", plist_path);
+    
+    Ok(())
+}
+
+fn install_linux_systemd(exe_path: PathBuf, home: PathBuf, port: u16) -> Result<()> {
+    let systemd_dir = home.join(".config").join("systemd").join("user");
+    fs::create_dir_all(&systemd_dir)?;
+    
+    let service_path = systemd_dir.join("pharmakon.service");
+    
+    let service_content = format!(r#"[Unit]
+Description=Pharmakon Personal AI Assistant Gateway
+After=network.target
+
+[Service]
+ExecStart={} gateway --port {}
+Restart=always
+RestartSec=10
+StandardOutput=append:{}/.pharmakon/logs/gateway.out
+StandardError=append:{}/.pharmakon/logs/gateway.err
+
+[Install]
+WantedBy=default.target"#, 
+        exe_path.to_str().unwrap(), 
+        port,
+        home.to_str().unwrap(),
+        home.to_str().unwrap()
+    );
+
+    fs::write(&service_path, service_content)?;
+    
+    println!("✅ Systemd service created at {:?}", service_path);
+    println!("To start the service, run:");
+    println!("  systemctl --user daemon-reload");
+    println!("  systemctl --user enable --now pharmakon");
+    
+    Ok(())
+}
