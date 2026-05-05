@@ -206,12 +206,26 @@ async fn run_gateway_service(port: u16, session_store: Arc<DbSessionStore>, conf
         _ => Arc::new(MockModel)
     };
     
-    // Instantiate the router
-    let mut agent_router = pharmakon_core::agent_router::AgentRouter::new(model.clone(), session_store.clone(), config.clone());
+    let home = dirs::home_dir().expect("Could not find home directory");
+    let weaver_db_path = home.join(".pharmakon").join("memory_weaver.db");
+    let weaver = Arc::new(pharmakon_memory::weaver::MemoryWeaver::new(weaver_db_path.to_str().unwrap()).await?);
+
+    let mut agent_router = pharmakon_core::agent_router::AgentRouter::new(model.clone(), session_store.clone(), config.clone(), Some(weaver.clone()));
     
     // For now, the gateway operates with a single "default" agent.
     // The Gateway will be updated later to use the router directly.
     let agent = agent_router.get_agent("default").await?;
+
+    let vision_stream = Arc::new(Mutex::new(pharmakon_tools::media::vision_stream::VisionRingBuffer::new(10)));
+    let graph_db_path = home.join(".pharmakon").join("graph_memory.db");
+    let graph_store = Arc::new(pharmakon_memory::graph::GraphStore::new(graph_db_path.to_str().unwrap()).await?);
+    let telemetry = Arc::new(Mutex::new(pharmakon_common::telemetry::SystemTelemetry::new(288))); // 24 hours of 5-min samples
+
+    {
+        let mut agent_lock = agent.lock().await;
+        agent_lock.vision_stream = Some(vision_stream.clone());
+        agent_lock.graph_store = Some(graph_store);
+    }
 
     // Register Hooks
     {
@@ -254,8 +268,17 @@ async fn run_gateway_service(port: u16, session_store: Arc<DbSessionStore>, conf
         agent_lock.add_tool(Arc::new(FactTool::new(fact_mem.expect("Fact memory not initialized"))));
         agent_lock.add_tool(Arc::new(CanvasTool::new(event_tx)));
         agent_lock.add_tool(Arc::new(LinkUnderstandingTool::new()));
-        agent_lock.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model)));
+        let weaver = agent_lock.memory_weaver.clone();
+        agent_lock.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model, weaver)));
         agent_lock.add_tool(Arc::new(pharmakon_tools::media::capture::CameraTool));
+
+        // Add Self-Diagnostic Tool
+        let v_stream = agent_lock.vision_stream.clone();
+        agent_lock.add_tool(Arc::new(pharmakon_tools::diagnostic::DiagnosticTool {
+            vision_stream: v_stream,
+            telemetry: Some(telemetry.clone()),
+            mcp_stats_source: "internal".to_string(),
+        }));
         
         let mut connector_tool = ContextConnectorTool::new();
         connector_tool.add_connector(Arc::new(pharmakon_tools::connectors::SlackConnector { token: "placeholder".to_string() }));
@@ -478,7 +501,7 @@ async fn main() -> Result<()> {
             agent.add_tool(Arc::new(FactTool::new(fact_mem.expect("Fact memory not initialized"))));
             agent.add_tool(Arc::new(CanvasTool::new(agent.event_tx.clone())));
             agent.add_tool(Arc::new(LinkUnderstandingTool::new()));
-            agent.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model)));
+            agent.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model, agent.memory_weaver.clone())));
 
             agent.add_tool(Arc::new(CommitmentTool::new(session_store.clone())));
             
@@ -630,7 +653,7 @@ async fn main() -> Result<()> {
             agent.add_tool(Arc::new(FactTool::new(fact_mem.expect("Fact memory not initialized"))));
             agent.add_tool(Arc::new(CanvasTool::new(agent.event_tx.clone())));
             agent.add_tool(Arc::new(LinkUnderstandingTool::new()));
-            agent.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model)));
+            agent.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model, agent.memory_weaver.clone())));
             agent.add_tool(Arc::new(CommitmentTool::new(session_store.clone())));
             
             let agent_arc = Arc::new(Mutex::new(agent));

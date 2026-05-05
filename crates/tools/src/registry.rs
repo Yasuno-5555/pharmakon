@@ -10,6 +10,7 @@ pub struct ToolDependencies {
     pub store: Option<Arc<dyn CommitmentPersistence>>,
     pub soul_manager: Option<Arc<dyn SoulManager>>,
     pub event_tx: Option<broadcast::Sender<Event>>,
+    pub weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
 }
 
 impl ToolRegistry {
@@ -28,7 +29,7 @@ impl ToolRegistry {
             "web_fetch" => Some(Arc::new(WebFetchTool::new())),
             "link_understanding" => Some(Arc::new(LinkUnderstandingTool::new())),
             "media_understanding" => {
-                deps.model.as_ref().map(|m| Arc::new(MediaUnderstandingTool::new(m.clone())) as Arc<dyn Tool>)
+                deps.model.as_ref().map(|m| Arc::new(MediaUnderstandingTool::new(m.clone(), deps.weaver.clone())) as Arc<dyn Tool>)
             }
             "canvas" => {
                 deps.event_tx.as_ref().map(|tx| Arc::new(CanvasTool::new(tx.clone())) as Arc<dyn Tool>)

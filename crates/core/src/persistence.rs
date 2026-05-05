@@ -13,7 +13,9 @@ pub struct DbSessionStore {
 impl DbSessionStore {
     pub async fn new(database_url: &str) -> Result<Self> {
         let options = SqliteConnectOptions::from_str(database_url)?
-            .create_if_missing(true);
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal);
         
         let pool = SqlitePool::connect_with(options).await?;
         
@@ -153,7 +155,6 @@ impl DbSessionStore {
 
         let messages = rows.into_iter().map(|row| {
             let content = row.content.and_then(|c| {
-                // Try to parse as JSON first (MessageContent), fallback to raw text
                 serde_json::from_str(&c).ok().or_else(|| Some(crate::model::MessageContent::Text(c)))
             });
             Message {
@@ -166,6 +167,15 @@ impl DbSessionStore {
         }).collect();
 
         Ok(messages)
+    }
+
+    pub async fn list_sessions(&self) -> Result<Vec<String>> {
+        let rows = sqlx::query_as::<_, (String,)>(
+            "SELECT DISTINCT session_id FROM messages ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
     pub async fn enqueue_delivery(&self, session_id: &str, payload: &str) -> Result<()> {

@@ -16,6 +16,7 @@ struct TerminalSession {
     child: Child,
     stdin: tokio::process::ChildStdin,
     stdout_reader: BufReader<tokio::process::ChildStdout>,
+    stderr_reader: BufReader<tokio::process::ChildStderr>,
 }
 
 impl TerminalTool {
@@ -38,11 +39,13 @@ impl TerminalTool {
 
             let stdin = child.stdin.take().ok_or_else(|| AgentError("Failed to open stdin".to_string()))?;
             let stdout = child.stdout.take().ok_or_else(|| AgentError("Failed to open stdout".to_string()))?;
+            let stderr = child.stderr.take().ok_or_else(|| AgentError("Failed to open stderr".to_string()))?;
             
             *session_lock = Some(TerminalSession {
                 child,
                 stdin,
                 stdout_reader: BufReader::new(stdout),
+                stderr_reader: BufReader::new(stderr),
             });
         }
         Ok(self.session.clone())
@@ -77,18 +80,40 @@ impl Tool for TerminalTool {
         session.stdin.flush().await.map_err(|e| AgentError(e.to_string()))?;
 
         let mut output = String::new();
-        let mut line = String::new();
+        let mut error_output = String::new();
         
-        // Read until marker is found
-        while session.stdout_reader.read_line(&mut line).await.map_err(|e| AgentError(e.to_string()))? > 0 {
-            if line.trim() == marker {
-                break;
+        let timeout_duration = std::time::Duration::from_secs(30);
+        let result = tokio::time::timeout(timeout_duration, async {
+            loop {
+                let mut stdout_line = String::new();
+                let mut stderr_line = String::new();
+                
+                tokio::select! {
+                    res = session.stdout_reader.read_line(&mut stdout_line) => {
+                        if res.unwrap_or(0) > 0 {
+                            if stdout_line.trim() == marker { return Ok::<(), anyhow::Error>(()); }
+                            output.push_str(&stdout_line);
+                        } else { return Ok::<(), anyhow::Error>(()); }
+                    }
+                    res = session.stderr_reader.read_line(&mut stderr_line) => {
+                        if res.unwrap_or(0) > 0 {
+                            error_output.push_str(&stderr_line);
+                        }
+                    }
+                }
             }
-            output.push_str(&line);
-            line.clear();
-        }
+        }).await;
 
-        Ok(output)
+        match result {
+            Ok(_) => {
+                if error_output.is_empty() {
+                    Ok(output)
+                } else {
+                    Ok(format!("{}\n[Errors]:\n{}", output, error_output))
+                }
+            }
+            Err(_) => Err(AgentError("Command timed out after 30 seconds".to_string())),
+        }
     }
 
     fn requires_approval(&self, _args: &Value) -> bool { true }

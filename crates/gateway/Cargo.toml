@@ -18,4 +18,4 @@ serde_json.workspace = true
 rand.workspace = true
 dirs.workspace = true
 tracing.workspace = true
-tower-http = { workspace = true, features = ["fs", "cors", "trace"] }
+tower-http = { workspace = true, features = ["fs", "cors", "trace", "compression-full", "set-header"] }

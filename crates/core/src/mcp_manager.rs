@@ -23,17 +23,17 @@ pub struct McpManager;
 
 impl McpManager {
     pub async fn load_tools() -> Result<Vec<Arc<dyn pharmakon_tools::Tool>>> {
-        let mut tools: Vec<Arc<dyn pharmakon_tools::Tool>> = Vec::new();
         let config_path = Self::get_config_path()?;
         
         if !config_path.exists() {
-            return Ok(tools);
+            return Ok(Vec::new());
         }
 
         let content = fs::read_to_string(config_path)?;
         let config: McpConfig = serde_json::from_str(&content)?;
 
-        for server_cfg in config.servers {
+        let futures = config.servers.into_iter().map(|server_cfg| async move {
+            let mut tools: Vec<Arc<dyn pharmakon_tools::Tool>> = Vec::new();
             log::info!("Initializing MCP server: {}", server_cfg.name);
             let args: Vec<&str> = server_cfg.args.iter().map(|s| s.as_str()).collect();
             
@@ -47,13 +47,13 @@ impl McpManager {
                 Ok(c) => Arc::new(c),
                 Err(e) => {
                     log::error!("Failed to spawn MCP server {}: {}", server_cfg.name, e);
-                    continue;
+                    return tools;
                 }
             };
 
             if let Err(e) = client.initialize().await {
                 log::error!("Failed to initialize MCP server {}: {}", server_cfg.name, e);
-                continue;
+                return tools;
             }
 
             match client.list_tools().await {
@@ -78,9 +78,12 @@ impl McpManager {
                     log::error!("Failed to list tools for MCP server {}: {}", server_cfg.name, e);
                 }
             }
-        }
+            tools
+        });
 
-        Ok(tools)
+        let results = futures::future::join_all(futures).await;
+        let all_tools = results.into_iter().flatten().collect();
+        Ok(all_tools)
     }
 
     fn get_config_path() -> Result<PathBuf> {

@@ -5,6 +5,7 @@ pub mod semantic_search;
 pub mod fact_memory;
 pub mod commitment;
 pub mod weaver;
+pub mod graph;
 
 pub use fact_memory::{Fact, FactMemory};
 pub use commitment::Commitment;

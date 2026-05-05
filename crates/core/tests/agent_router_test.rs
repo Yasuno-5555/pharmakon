@@ -9,7 +9,7 @@ async fn setup_test_router(config: Config) -> AgentRouter {
     let store = Arc::new(DbSessionStore::new("sqlite::memory:").await.expect("Failed to create in-memory store"));
     let default_model = Arc::new(MockModel);
     
-    AgentRouter::new(default_model, store, config)
+    AgentRouter::new(default_model, store, config, None)
 }
 
 #[tokio::test]

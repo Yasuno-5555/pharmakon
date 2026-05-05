@@ -64,42 +64,84 @@ impl MemoryWeaver {
     }
 
     pub async fn remember(&self, text: &str) -> anyhow::Result<()> {
-        let vector = self.embedding_model.generate_embedding(text).await
-            .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
+        self.remember_batch(vec![text.to_string()]).await
+    }
+
+    pub async fn remember_batch(&self, texts: Vec<String>) -> anyhow::Result<()> {
+        if texts.is_empty() { return Ok(()); }
         
-        let id = rand::random::<u64>();
+        let mut meaningful_texts = Vec::new();
+        for text in texts {
+            if text.trim().is_empty() { continue; }
+            
+            // Deduplication check
+            if let Ok(existing) = self.search(&text, 1).await {
+                if let Some(top) = existing.first() {
+                    if top.trim() == text.trim() {
+                        log::debug!("MemoryWeaver: Skipping duplicate.");
+                        continue;
+                    }
+                }
+            }
+            meaningful_texts.push(text);
+        }
+
+        if meaningful_texts.is_empty() { return Ok(()); }
+
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::UInt64, false),
             Field::new("text", DataType::Utf8, false),
             Field::new("vector", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 384), false),
         ]));
 
-        let id_array = UInt64Array::from(vec![id]);
-        let text_array = StringArray::from(vec![text]);
-        
-        let vector_data = Float32Array::from(vector.clone());
-        let vector_array = FixedSizeListArray::try_new(
-            Arc::new(Field::new("item", DataType::Float32, true)),
-            384,
-            Arc::new(vector_data),
-            None,
-        )?;
-        
-        let batch = RecordBatch::try_new(schema, vec![
-            Arc::new(id_array) as ArrayRef,
-            Arc::new(text_array) as ArrayRef,
-            Arc::new(vector_array) as ArrayRef,
-        ])?;
+        let mut batches = Vec::new();
+        for text in meaningful_texts {
+            let model = self.embedding_model.clone();
+            let text_clone = text.clone();
+            
+            let vector = tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async move {
+                    model.generate_embedding(&text_clone).await
+                })
+            }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
+            
+            let id = rand::random::<u64>();
+            let id_array = UInt64Array::from(vec![id]);
+            let text_array = StringArray::from(vec![text]);
+            let vector_data = Float32Array::from(vector);
+            let vector_array = FixedSizeListArray::try_new(
+                Arc::new(Field::new("item", DataType::Float32, true)),
+                384,
+                Arc::new(vector_data),
+                None,
+            )?;
+            
+            batches.push(RecordBatch::try_new(schema.clone(), vec![
+                Arc::new(id_array) as ArrayRef,
+                Arc::new(text_array) as ArrayRef,
+                Arc::new(vector_array) as ArrayRef,
+            ])?);
+        }
 
         let table = self.conn.open_table(&self.table_name).execute().await?;
-        table.add(vec![batch]).execute().await?;
+        table.add(batches).execute().await?;
         
         Ok(())
     }
 
     pub async fn search(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
-        let vector = self.embedding_model.generate_embedding(query).await
-            .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
+        let model = self.embedding_model.clone();
+        let query_clone = query.to_string();
+        
+        let vector = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async move {
+                model.generate_embedding(&query_clone).await
+            })
+        }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
+        .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
         
         let table = self.conn.open_table(&self.table_name).execute().await?;
         let mut results = table.vector_search(vector)?

@@ -1,6 +1,7 @@
 pub mod image_gen;
 pub mod ffmpeg;
 pub mod capture;
+pub mod vision_stream;
 
 pub use image_gen::ImageGenTool;
 pub use ffmpeg::FfmpegSidecar;

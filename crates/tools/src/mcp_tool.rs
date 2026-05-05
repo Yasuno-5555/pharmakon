@@ -24,7 +24,24 @@ impl Tool for McpTool {
     fn parameters(&self) -> Value { self.parameters.clone() }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let result: Value = self.client.call_tool(&self.name, args).await.map_err(|e| AgentError(e.to_string()))?;
+        let start = std::time::Instant::now();
+
+        // Context Injection: Add background info if it's an object
+        let mut final_args = args.clone();
+        if let Some(obj) = final_args.as_object_mut() {
+            if !obj.contains_key("_pharmakon_context") {
+                obj.insert("_pharmakon_context".to_string(), serde_json::json!({
+                    "tool_name": &self.name,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+        }
+
+        let result: Value = self.client.call_tool(&self.name, final_args).await
+            .map_err(|e| AgentError(e.to_string()))?;
+        
+        let elapsed = start.elapsed();
+        log::info!("MCP Tool {} finished in {}ms", self.name, elapsed.as_millis());
         
         // MCP results often have a 'content' field with a list of parts
         if let Some(content) = result.get("content").and_then(|c| c.as_array()) {

@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TrajectoryStep {
     Thought { content: String, timestamp: DateTime<Utc> },
     Action { tool: String, args: serde_json::Value, timestamp: DateTime<Utc> },

@@ -14,6 +14,8 @@ use anyhow::Context;
 use std::fs;
 use async_trait::async_trait;
 pub mod secrets;
+pub mod plugin_context;
+pub mod telemetry;
 pub use secrets::SecretStore;
 
 use crate::agent::AgentConfig;
@@ -168,6 +170,35 @@ pub enum Event {
     ApprovalRequest { id: String, tool: String, args: serde_json::Value },
     Error { message: String },
     CronJobList { jobs: Vec<CronJobInfo> },
+    SessionList { sessions: Vec<String> },
+    OrchestrationState { supervisor_active: bool, sub_agents: Vec<SubAgentInfo> },
+    GatewayStatus { uptime: u64, connected_clients: usize, memory_usage: u64 },
+    AgentInsight { insight: String },
+    McpStats { stats: Vec<McpToolStat> },
+    VisionUpdate { frames: Vec<VisionFrameInfo> },
+    GraphUpdate { relations: Vec<String> },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct McpToolStat {
+    pub name: String,
+    pub avg_latency_ms: u64,
+    pub call_count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VisionFrameInfo {
+    pub path: String,
+    pub captured_at: String,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SubAgentInfo {
+    pub name: String,
+    pub role: String,
+    pub last_task: Option<String>,
+    pub status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -180,6 +211,13 @@ pub enum Request {
     InteractiveResponse { element_id: String, action: String, value: serde_json::Value },
     GetCronJobs,
     CancelCronJob { id: String },
+    GetSessions,
+    SwitchSession { id: String },
+    GetOrchestration,
+    GetGatewayStatus,
+    GetMcpStats,
+    GetVisionFrames,
+    GetGraphMemory { query: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

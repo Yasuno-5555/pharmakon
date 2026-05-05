@@ -36,6 +36,7 @@ function App() {
   const [input, setInput] = useState('');
   const [cronJobs, setCronJobs] = useState<CronJobInfo[]>([]);
   const [canvasPrimitives, setCanvasPrimitives] = useState<CanvasPrimitive[]>([]);
+  const [insights, setInsights] = useState<string[]>([]);
   const [healthStats, setHealthStats] = useState<any>(null);
   const [activeSwarms, setActiveSwarms] = useState<{id: string, role: string, status: string}[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -149,6 +150,10 @@ function App() {
       case 'HealthUpdate':
         setHealthStats(payload);
         break;
+
+      case 'AgentInsight':
+        setInsights(prev => [...prev.slice(-4), payload.insight]);
+        break;
         
       case 'Error':
         setMessages(prev => [...prev, { id: Math.random().toString(), role: 'system', content: `Error: ${payload.message}` }]);
@@ -202,142 +207,139 @@ function App() {
   };
 
   return (
-    <div className="app-container">
-      <div className="chat-section glass-panel">
-        <div className="chat-header">
-          <motion.div animate={{ rotate: connected ? 360 : 0 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
-            <Zap size={24} color="var(--accent)" fill={connected ? "var(--accent)" : "none"} />
-          </motion.div>
-          <h1>Pharmakon Interface</h1>
-          <div className="status-indicator">
-            <div className={`status-dot ${connected ? 'connected' : 'disconnected'}`}></div>
-            {connected ? 'Active' : 'Offline'}
+    <div className="app-container premium-theme">
+      {/* Left Sidebar: Sessions & Metrics */}
+      <aside className="sidebar left-sidebar glass-panel">
+        <div className="sidebar-section">
+          <div className="section-header">
+            <Layout size={18} />
+            <span>SESSIONS</span>
           </div>
-          <button onClick={() => setMessages([])} className="header-action-btn" title="Clear history">
-            <Trash2 size={18} />
-          </button>
+          <div className="session-list">
+            {['Current Session', 'Research - Project X', 'Debug Log - May 5'].map((s, i) => (
+              <div key={i} className={`session-item ${i === 0 ? 'active' : ''}`}>
+                <Clock size={14} />
+                <span>{s}</span>
+              </div>
+            ))}
+          </div>
         </div>
-
-        <div className="chat-messages">
-          <AnimatePresence initial={false}>
-            {messages.length === 0 ? (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="empty-state" 
-                style={{ marginTop: 'auto', marginBottom: 'auto' }}
-              >
-                <Bot size={64} opacity={0.2} />
-                <p>Ready for sequence deployment. How can I assist?</p>
-              </motion.div>
-            ) : (
-              messages.map(msg => (
-                <MessageItem key={msg.id} msg={msg} socket={socket} />
-              ))
-            )}
-          </AnimatePresence>
-          <div ref={messagesEndRef} />
-        </div>
-
-        <form onSubmit={sendMessage} className="chat-input-area">
-          <textarea
-            ref={textareaRef}
-            className="chat-input"
-            placeholder="Type a message or press '/' for commands..."
-            value={input}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            disabled={!connected}
-            rows={1}
-            style={{ resize: 'none', overflow: 'hidden' }}
-          />
-          <button type="submit" className="send-btn" disabled={!connected || !input.trim()}>
-            <Send size={20} />
-          </button>
-        </form>
-      </div>
-
-      <div className="sidebar">
-        <div className="panel-header">
-          <Layout size={20} color="var(--accent)" />
-          Operations Hub
-        </div>
-
-        <div className="sidebar-scroll">
+        
+        <div className="sidebar-section metrics-section">
           <HealthMonitor stats={healthStats} />
-          
-          <div className="swarm-panel glass-panel" style={{ margin: '0 20px' }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)', fontSize: '0.9rem' }}>
-              <Bot size={18} color="var(--accent)" />
-              Autonomy Matrix
+        </div>
+      </aside>
+
+      {/* Main Content: Chat & Console */}
+      <main className="main-content">
+        <div className="chat-section glass-panel">
+          <header className="chat-header">
+            <div className="agent-info">
+              <div className="agent-avatar">P</div>
+              <div>
+                <h2>Pharmakon Supervisor</h2>
+                <span className="status-text">Ready for instructions</span>
+              </div>
             </div>
-            <div className="cron-list" style={{ padding: '12px' }}>
-              <AnimatePresence>
-                {activeSwarms.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No active sub-agents.</div>
-                ) : (
-                  activeSwarms.map(swarm => (
-                    <motion.div 
-                      key={swarm.id} 
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      className="cron-job-card"
-                    >
-                      <div className="cron-header">
-                        <span className="cron-type" style={{ background: 'rgba(139, 92, 246, 0.2)', color: '#a78bfa' }}>{swarm.role}</span>
-                        <div className="status-dot connected" style={{ width: '6px', height: '6px' }}></div>
-                      </div>
-                      <div className="cron-message">{swarm.status}</div>
-                    </motion.div>
-                  ))
-                )}
-              </AnimatePresence>
+            <div className="header-actions">
+              <Zap size={18} className={connected ? 'pulsing' : ''} />
+              <button onClick={() => setMessages([])}><Trash2 size={18} /></button>
             </div>
+          </header>
+
+          <div className="chat-messages">
+            <AnimatePresence initial={false}>
+              {messages.length === 0 ? (
+                <div className="empty-state">
+                  <Bot size={48} />
+                  <p>Awaiting sequence deployment.</p>
+                </div>
+              ) : (
+                messages.map(msg => (
+                  <MessageItem key={msg.id} msg={msg} socket={socket} />
+                ))
+              )}
+            </AnimatePresence>
+            <div ref={messagesEndRef} />
           </div>
 
-          <SoulConfigurator socket={socket} />
-          
-          <SkillBrowser />
+          <footer className="chat-input-area">
+            <textarea
+              ref={textareaRef}
+              className="chat-input"
+              placeholder="Deploy instruction..."
+              value={input}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              rows={1}
+            />
+            <button onClick={sendMessage} className="send-btn"><Send size={18} /></button>
+          </footer>
+        </div>
 
-          <div className="cron-panel glass-panel">
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)', fontSize: '0.9rem' }}>
-              <Clock size={18} color="var(--accent)" />
-              Scheduled Sequences
-              <button onClick={refreshJobs} className="cancel-btn" style={{ marginLeft: 'auto' }}>↻</button>
-            </div>
-
-            <div className="cron-list">
-              <AnimatePresence>
-                {cronJobs.length === 0 ? (
-                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No active cron sequences.</div>
-                ) : (
-                  cronJobs.map(job => (
-                    <motion.div 
-                      key={job.id} 
-                      initial={{ x: 20, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      exit={{ x: -20, opacity: 0 }}
-                      className="cron-job-card"
-                    >
-                      <div className="cron-header">
-                        <span className={`cron-type ${job.schedule_type}`}>{job.schedule_type}</span>
-                        <button onClick={() => cancelJob(job.id)} className="cancel-btn"><Trash2 size={16} /></button>
-                      </div>
-                      <div className="cron-expr">⏱️ {job.schedule_type === 'delay' ? `${job.expr}s` : job.expr}</div>
-                      <div className="cron-message">"{job.message}"</div>
-                    </motion.div>
-                  ))
-                )}
-              </AnimatePresence>
-            </div>
+        {/* Bottom Console */}
+        <div className="console-panel glass-panel">
+          <div className="console-header">
+            <span>CONSOLE</span>
+            <span className="gateway-ip">Gateway: 100.64.0.1 (Tailscale)</span>
           </div>
-
-          <div style={{ padding: '0 20px 20px 20px' }}>
-            <CanvasRenderer primitives={canvasPrimitives} />
+          <div className="console-body">
+            {insights.map((insight, i) => (
+              <div key={`insight-${i}`} className="log-line insight-line">
+                <span className="log-tag">[INSIGHT]</span> {insight}
+              </div>
+            ))}
+            {['[14:21:05] Initiating web search query...', 
+              '[14:21:08] Researcher: Analyzing results...',
+              '[14:21:12] Coder: Writing module_A.rs...'].map((log, i) => (
+              <div key={i} className="log-line">{log}</div>
+            ))}
           </div>
         </div>
-      </div>
+      </main>
+
+      {/* Right Sidebar: Swarm & Cron */}
+      <aside className="sidebar right-sidebar glass-panel">
+        <div className="sidebar-section">
+          <div className="section-header">
+            <Zap size={18} />
+            <span>SUB-AGENT SWARM</span>
+          </div>
+          <div className="swarm-list">
+            {[
+              { role: 'SUPERVISOR', name: 'Coordination', status: 'Active' },
+              { role: 'RESEARCHER', name: 'Knowledge', status: 'Idle' },
+              { role: 'CODER', name: 'Implementation', status: 'Active' },
+            ].map((s, i) => (
+              <div key={i} className="swarm-card">
+                <div className="card-header">
+                  <span className="role-tag">{s.role}</span>
+                  <div className={`status-dot ${s.status === 'Active' ? 'online' : 'offline'}`} />
+                </div>
+                <div className="card-body">
+                  <span className="agent-name">{s.name}</span>
+                  <p className="agent-status-text">Status: {s.status}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="sidebar-section">
+          <div className="section-header">
+            <Clock size={18} />
+            <span>CRON SEQUENCES</span>
+          </div>
+          <div className="cron-list-mini">
+            {cronJobs.map(job => (
+              <div key={job.id} className="cron-item-mini">
+                <span className="cron-expr">{job.expr}</span>
+                <span className="cron-msg">{job.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }

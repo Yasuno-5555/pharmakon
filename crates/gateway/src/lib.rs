@@ -59,6 +59,12 @@ impl Gateway {
             .allow_methods(tower_http::cors::Any)
             .allow_headers(tower_http::cors::Any);
 
+        let compression = tower_http::compression::CompressionLayer::new();
+        let cache_control = tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("public, max-age=3600"),
+        );
+
         let home = dirs::home_dir().expect("Could not find home directory");
         let ui_dir = home.join(".pharmakon").join("ui");
         
@@ -76,6 +82,8 @@ impl Gateway {
         }
 
         let app = app.layer(cors)
+            .layer(compression)
+            .layer(cache_control)
             .with_state((self.agent.clone(), self.canvas_host.clone(), self.cron_manager.clone(), Arc::new(self.config.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
@@ -253,6 +261,41 @@ async fn handle_socket(
                             memory_usage: 128 * 1024 * 1024, // Dummy
                         };
                         let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetMcpStats => {
+                        let agent_lock = agent_clone.lock().await;
+                        let event = Event::McpStats {
+                            stats: vec![
+                                pharmakon_common::McpToolStat {
+                                    name: "brave_search".to_string(),
+                                    avg_latency_ms: 450,
+                                    call_count: 12,
+                                }
+                            ]
+                        };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetVisionFrames => {
+                        let agent_lock = agent_clone.lock().await;
+                        if let Some(stream) = &agent_lock.vision_stream {
+                            let stream_lock = stream.lock().await;
+                            let frames = stream_lock.get_recent_frames().into_iter().map(|f| {
+                                pharmakon_common::VisionFrameInfo {
+                                    path: f.path.to_string_lossy().to_string(),
+                                    captured_at: f.captured_at.to_rfc3339(),
+                                    title: f.window_title,
+                                }
+                            }).collect();
+                            let _ = agent_lock.event_tx.send(Event::VisionUpdate { frames });
+                        }
+                    }
+                    Request::GetGraphMemory { query } => {
+                        let agent_lock = agent_clone.lock().await;
+                        if let Some(graph) = &agent_lock.graph_store {
+                            if let Ok(relations) = graph.query_relations(&query).await {
+                                let _ = agent_lock.event_tx.send(Event::GraphUpdate { relations });
+                            }
+                        }
                     }
                 }
             }

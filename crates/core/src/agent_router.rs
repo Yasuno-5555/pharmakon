@@ -14,15 +14,17 @@ pub struct AgentRouter {
     model: Arc<dyn AgentModel>,
     store: Arc<DbSessionStore>,
     config: Config,
+    weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
 }
 
 impl AgentRouter {
-    pub fn new(model: Arc<dyn AgentModel>, store: Arc<DbSessionStore>, config: Config) -> Self {
+    pub fn new(model: Arc<dyn AgentModel>, store: Arc<DbSessionStore>, config: Config, weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>) -> Self {
         Self {
             agents: HashMap::new(),
             model,
             store,
             config,
+            weaver,
         }
     }
 
@@ -70,6 +72,7 @@ impl AgentRouter {
                     store: Some(self.store.clone() as Arc<dyn pharmakon_common::CommitmentPersistence>),
                     soul_manager: None, // TODO: Initialize SoulManager if needed
                     event_tx: None,      // TODO: Initialize Event broadcaster if needed
+                    weaver: self.weaver.clone(),
                 };
 
                 for tool_name in allowed_tools {

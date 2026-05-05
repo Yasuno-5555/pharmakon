@@ -16,3 +16,4 @@ futures.workspace = true
 keyring.workspace = true
 chrono.workspace = true
 toml = "0.8"
+sysinfo = "0.38.4"

@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 pub struct MediaUnderstandingTool {
     pub model: Arc<dyn AgentModel>,
+    pub weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
 }
 
 impl MediaUnderstandingTool {
-    pub fn new(model: Arc<dyn AgentModel>) -> Self {
-        Self { model }
+    pub fn new(model: Arc<dyn AgentModel>, weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>) -> Self {
+        Self { model, weaver }
     }
 }
 
@@ -61,6 +62,12 @@ impl Tool for MediaUnderstandingTool {
         let result = response.content.as_ref()
             .and_then(|c| c.as_text())
             .unwrap_or("Failed to get textual description from vision model.");
+
+        // Index the visual description for future RAG retrieval
+        if let Some(weaver) = &self.weaver {
+            let memory_text = format!("[VISUAL MEMORY] File: {}\nDescription: {}", path, result);
+            let _ = weaver.remember(&memory_text).await;
+        }
 
         Ok(result.to_string())
     }

@@ -52,7 +52,7 @@ async fn test_dynamic_agent_loading() {
     let store = Arc::new(DbSessionStore::new("sqlite::memory:").await.expect("Failed to create in-memory store"));
     let default_model = create_default_model();
     
-    let mut router = AgentRouter::new(default_model, store, config);
+    let mut router = AgentRouter::new(default_model, store, config, None);
 
     // 3. Test the Gemini agent
     let gemini_agent_handle = router.get_agent("gemini_researcher").await.expect("Failed to get gemini_researcher agent");

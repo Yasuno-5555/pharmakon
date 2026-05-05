@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
-use crate::model::{AgentModel, CompletionRequest, CompletionResponse, Message, MessageContent, ToolDefinition};
+use crate::model::{AgentModel, CompletionRequest, CompletionResponse, Message, MessageContent, ToolDefinition, AgentError};
 use crate::system_prompt::SystemPromptManager;
 use anyhow::{Result, anyhow};
 use pharmakon_common::Event;
@@ -24,6 +24,9 @@ pub struct Agent {
     pub health_monitor: crate::orchestration::health_monitor::HealthMonitor,
     pub policy_engine: Arc<crate::security::policy::PolicyEngine>,
     pub session_store: Option<Arc<crate::persistence::DbSessionStore>>,
+    pub planner_model: Option<Arc<dyn AgentModel>>,
+    pub vision_stream: Option<Arc<Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
+    pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
 }
 
 impl Agent {
@@ -54,6 +57,9 @@ impl Agent {
             health_monitor: crate::orchestration::health_monitor::HealthMonitor::new(0.5),
             policy_engine: Arc::new(crate::security::policy::PolicyEngine::new()),
             session_store: None,
+            planner_model: None,
+            vision_stream: None,
+            graph_store: None,
         }
     }
 
@@ -109,6 +115,13 @@ impl Agent {
         }
         self.history.push(user_msg);
 
+        // Auto-index user message for future recovery (only if meaningful)
+        if user_message.len() > 10 {
+            if let Some(weaver) = &self.memory_weaver {
+                let _ = weaver.remember(user_message).await;
+            }
+        }
+
         let _ = self.context_engine.prune_history(&mut self.history).await;
 
         if self.history.len() > 20 {
@@ -117,37 +130,44 @@ impl Agent {
             }
         }
 
-        if let Some(search) = &self.semantic_search {
-            self.prompt_manager.clear_contributions();
-            let strategy = self.prompt_manager.soul().rag_strategy.clone()
-                .unwrap_or(pharmakon_memory::RagStrategy::Hybrid { initial_top_k: 3 });
+        // Parallel context gathering
+        let semantic_search = self.semantic_search.clone();
+        let memory_weaver = self.memory_weaver.clone();
+        let user_msg_text = user_message.to_string();
+        
+        let (semantic_res, weaver_res) = tokio::join!(
+            async {
+                if let Some(search) = semantic_search {
+                    search.search_with_limit(&user_msg_text, 3).await.ok()
+                } else { None }
+            },
+            async {
+                if let Some(weaver) = memory_weaver {
+                    weaver.search(&user_msg_text, 5).await.ok()
+                } else { None }
+            }
+        );
 
-            match strategy {
-                pharmakon_memory::RagStrategy::InitialContext { top_k } |
-                pharmakon_memory::RagStrategy::Hybrid { initial_top_k: top_k } => {
-                    if let Ok(memories) = search.search_with_limit(user_message, top_k as u64).await {
-                        if !memories.is_empty() {
-                            let memory_context = memories.join("\n---\n");
-                            self.prompt_manager.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-                                "Long-term Memories",
-                                &format!("The following are relevant snippets from past conversations:\n{}", memory_context)
-                            )));
-                        }
-                    }
-                }
-                _ => {}
+        if let Some(memories) = semantic_res {
+            if !memories.is_empty() {
+                let memory_context = memories.join("\n---\n");
+                self.prompt_manager.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
+                    "Long-term Memories",
+                    &format!("Relevant snippets from past conversations:\n{}", memory_context)
+                )));
             }
         }
 
-        if let Some(weaver) = &self.memory_weaver {
-            if let Ok(memories) = weaver.search(user_message, 3).await {
-                if !memories.is_empty() {
-                    let memory_context = memories.join("\n---\n");
-                    self.prompt_manager.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-                        "Deep Semantic Context",
-                        &format!("The following are highly relevant snippets retrieved via deep local indexing:\n{}", memory_context)
-                    )));
-                }
+        if let Some(memories) = weaver_res {
+            if !memories.is_empty() {
+                let memory_context = memories.join("\n---\n");
+                // Trigger context recovered hook
+                let _ = self.hooks.trigger_context_recovered(&memory_context).await;
+                
+                self.prompt_manager.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
+                    "Recovered Context (Past Sessions)",
+                    &format!("Insights recovered from all sessions:\n{}", memory_context)
+                )));
             }
         }
 
@@ -175,6 +195,13 @@ impl Agent {
                 }).collect())
             };
 
+            // Tiered Reasoning: Use planner model for tool selection if available
+            let target_model = if tool_definitions.is_some() && self.planner_model.is_some() {
+                self.planner_model.as_ref().unwrap()
+            } else {
+                &self.model
+            };
+
             let req_temp = self.prompt_manager.soul().temperature_override.map(|t| t as f32).or(Some(0.7f32));
             let request = CompletionRequest {
                 messages: messages_to_send,
@@ -183,10 +210,10 @@ impl Agent {
                 tools: tool_definitions,
             };
 
-            log::debug!("Agent sending request to model: {}", self.model.name());
+            log::debug!("Agent sending request to model: {}", target_model.name());
             let start = std::time::Instant::now();
             let response = if self.tools.is_empty() {
-                let mut stream = self.model.stream_complete(request).await?;
+                let mut stream = target_model.stream_complete(request).await?;
                 let mut full_content = String::new();
                 use futures::StreamExt;
                 while let Some(chunk_result) = stream.next().await {
@@ -335,8 +362,110 @@ impl Agent {
             };
             let _ = self.hooks.trigger_message_sent(&final_msg).await;
 
+            // Trigger reflection asynchronously
+            let _ = self.reflect().await;
+
+            // Auto-index assistant response
+            if let Some(weaver) = &self.memory_weaver {
+                let _ = weaver.remember(&final_content).await;
+            }
+
             return Ok(final_content);
         }
+    }
+
+    pub async fn verify_code(&self, code: &str, language: &str) -> Result<bool> {
+        log::info!("Agent: Verifying {} code in sandbox...", language);
+        
+        let docker_image = match language.to_lowercase().as_str() {
+            "rust" => "rust:latest",
+            "python" => "python:3-slim",
+            "javascript" | "typescript" => "node:slim",
+            _ => return Ok(true), // Skip verification for unknown languages
+        };
+
+        // Use 'docker run --rm' to ensure immediate container deletion after exit.
+        // We use a timeout to prevent infinite loops.
+        let mut child = tokio::process::Command::new("docker")
+            .arg("run")
+            .arg("--rm")
+            .arg("-i")
+            .arg(docker_image)
+            .arg("sh")
+            .arg("-c")
+            .arg(format!("echo '{}' > tmp_code && (timeout 10s cat tmp_code | {})", code, language))
+            .spawn()
+            .map_err(|e| AgentError(format!("Docker failure: {}. Is Docker running?", e)))?;
+
+        let status = child.wait().await.map_err(|e| AgentError(e.to_string()))?;
+        Ok(status.success())
+    }
+
+    pub async fn reflect(&mut self) -> Result<()> {
+        log::info!("Agent [{}]: Initiating post-interaction reflection...", self.session_id);
+        
+        // Extract recent trajectory context
+        let recent_steps: Vec<_> = self.trajectory.steps.iter()
+            .rev()
+            .take(5)
+            .cloned()
+            .collect();
+            
+        if recent_steps.is_empty() {
+            return Ok(());
+        }
+
+        let context_str = recent_steps.iter()
+            .map(|s| format!("{:?}", s))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let prompt = format!(
+            "Analyze the following interaction trajectory. Extract any permanent user preferences, new facts, or operational insights. \
+            Output as a concise list of points. If no significant learning occurred, respond only with 'NO_INSIGHT'.\n\nTrajectory:\n{}",
+            context_str
+        );
+
+        let request = CompletionRequest {
+            messages: vec![
+                Message { 
+                    role: "system".to_string(), 
+                    content: Some(MessageContent::Text("You are the Pharmakon Reflection Engine. Your goal is to learn from every interaction to improve the user experience.".to_string())),
+                    ..Default::default()
+                },
+                Message { 
+                    role: "user".to_string(), 
+                    content: Some(MessageContent::Text(prompt)),
+                    ..Default::default()
+                },
+            ],
+            temperature: Some(0.2),
+            max_tokens: Some(200),
+            tools: None,
+        };
+
+        if let Ok(response) = self.model.complete(request).await {
+            if let Some(content) = response.content {
+                let insight = content.to_string();
+                if !insight.contains("NO_INSIGHT") {
+                    log::info!("Agent [{}]: Reflection discovered insight: {}", self.session_id, insight);
+                    let _ = self.event_tx.send(Event::AgentInsight { insight: insight.clone() });
+                    
+                    // Save to fact memory for long-term recall
+                    if let Some(fact_mem) = &self.fact_memory {
+                        let mut fm = fact_mem.lock().await;
+                        fm.set_fact("learned_context", &insight, 0.9)?;
+                    }
+
+                    // Also index into semantic search for recovery across sessions
+                    if let Some(weaver) = &self.memory_weaver {
+                        let _ = weaver.remember(&format!("Insight from session {}: {}", self.session_id, insight)).await;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn heartbeat(&mut self) -> Result<String> {

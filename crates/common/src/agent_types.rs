@@ -150,12 +150,24 @@ pub trait AgentModel: Send + Sync {
     fn name(&self) -> &str;
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum ToolCategory {
+    FileSystem,
+    Network,
+    Media,
+    Autonomous,
+    System,
+    Custom(String),
+}
+
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters(&self) -> serde_json::Value;
     async fn call(&self, args: serde_json::Value) -> AgentResult<String>;
+    fn category(&self) -> ToolCategory { ToolCategory::Custom("generic".to_string()) }
+    fn metadata(&self) -> std::collections::HashMap<String, String> { std::collections::HashMap::new() }
     fn requires_approval(&self, _args: &serde_json::Value) -> bool { false }
     fn approval_description(&self, _args: &serde_json::Value) -> String { String::new() }
 }

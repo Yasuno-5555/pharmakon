@@ -46,7 +46,7 @@ async fn setup_test_agent_with_model(model: Arc<dyn AgentModel>) -> tokio::sync:
     let store = Arc::new(DbSessionStore::new("sqlite::memory:").await.expect("Failed to create in-memory store"));
     
     // Use model, store, and config directly
-    let router = Box::leak(Box::new(tokio::sync::Mutex::new(pharmakon_core::agent_router::AgentRouter::new(model, store, config))));
+    let router = Box::leak(Box::new(tokio::sync::Mutex::new(pharmakon_core::agent_router::AgentRouter::new(model, store, config, None))));
     
     let agent_handle = router.lock().await.get_agent("test-agent-logic").await.unwrap();
     
@@ -63,8 +63,9 @@ async fn test_chat_calls_stream_when_no_tools() {
 
     let _ = agent.chat("test message").await;
 
-    assert!(!model.was_complete_called.load(Ordering::SeqCst), "complete() should NOT have been called");
-    assert!(model.was_stream_complete_called.load(Ordering::SeqCst), "stream_complete() SHOULD have been called");
+    // With the new reflection engine, complete() is called once after chat.
+    // We check that stream_complete was used for the main response.
+    assert!(model.was_stream_complete_called.load(Ordering::SeqCst), "stream_complete() SHOULD have been called for the main chat response");
 }
 
 #[tokio::test]
