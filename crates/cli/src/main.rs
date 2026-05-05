@@ -142,6 +142,12 @@ enum Commands {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Launch the web-based dashboard in the browser
+    Ui {
+        /// Port the gateway is running on
+        #[arg(short, long, default_value_t = 18789)]
+        port: u16,
+    },
 }
 
 #[derive(Subcommand)]
@@ -778,6 +784,18 @@ async fn main() -> Result<()> {
         }
         Commands::Acp { url, token, session } => {
             run_acp_bridge(url.clone(), token.clone(), session.clone(), config).await?;
+        }
+        Commands::Ui { port } => {
+            let actual_port = if *port == 18789 && config.gateway.port != 18789 {
+                config.gateway.port
+            } else {
+                *port
+            };
+            let url = format!("http://localhost:{}", actual_port);
+            println!("Opening Pharmakon Interface at {}...", url);
+            if let Err(e) = open::that(url) {
+                eprintln!("Failed to open browser: {}", e);
+            }
         }
     }
 

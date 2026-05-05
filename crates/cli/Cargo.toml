@@ -32,3 +32,4 @@ serde_json.workspace = true
 rust-i18n.workspace = true
 reqwest = { version = "0.12.28", features = ["json"] }
 tracing.workspace = true
+open = "5.3.4"

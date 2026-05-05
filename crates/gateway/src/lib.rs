@@ -54,13 +54,28 @@ impl Gateway {
     }
 
     pub async fn run(self) -> Result<()> {
-        let app = Router::new()
+        let cors = tower_http::cors::CorsLayer::new()
+            .allow_origin(tower_http::cors::Any)
+            .allow_methods(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any);
+
+        let home = dirs::home_dir().expect("Could not find home directory");
+        let ui_dir = home.join(".pharmakon").join("ui");
+        
+        let mut app = Router::new()
             .route("/", get(Self::root))
             .route("/status", get(Self::status))
             .route("/health", get(Self::health))
             .route("/ws", get(ws_handler))
             .route("/acp", get(acp_handler))
-            .route("/webhooks/{id}", axum::routing::post(webhooks::webhook_handler))
+            .route("/webhooks/{id}", axum::routing::post(webhooks::webhook_handler));
+
+        if ui_dir.exists() {
+            log::info!("Serving UI from {:?}", ui_dir);
+            app = app.fallback_service(tower_http::services::ServeDir::new(ui_dir));
+        }
+
+        let app = app.layer(cors)
             .with_state((self.agent.clone(), self.canvas_host.clone(), self.cron_manager.clone(), Arc::new(self.config.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
@@ -194,6 +209,50 @@ async fn handle_socket(
                             let agent_lock = agent_clone.lock().await;
                             let _ = agent_lock.event_tx.send(event);
                         }
+                    }
+                    Request::GetSessions => {
+                        let agent_lock = agent_clone.lock().await;
+                        let sessions: Vec<String> = if let Some(store) = &agent_lock.session_store {
+                            store.list_sessions().await.unwrap_or_default()
+                        } else {
+                            vec!["default".to_string()]
+                        };
+                        let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
+                    }
+                    Request::SwitchSession { id } => {
+                        let mut agent_lock = agent_clone.lock().await;
+                        agent_lock.session_id = id;
+                        let _ = agent_lock.event_tx.send(Event::Action("Session switched".to_string()));
+                    }
+                    Request::GetOrchestration => {
+                        let agent_lock = agent_clone.lock().await;
+                        let event = Event::OrchestrationState {
+                            supervisor_active: true,
+                            sub_agents: vec![
+                                pharmakon_common::SubAgentInfo {
+                                    name: "Researcher".to_string(),
+                                    role: "Information Retrieval".to_string(),
+                                    last_task: Some("Market analysis".to_string()),
+                                    status: "Idle".to_string(),
+                                },
+                                pharmakon_common::SubAgentInfo {
+                                    name: "Coder".to_string(),
+                                    role: "Software Engineering".to_string(),
+                                    last_task: None,
+                                    status: "Active".to_string(),
+                                }
+                            ]
+                        };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetGatewayStatus => {
+                        let agent_lock = agent_clone.lock().await;
+                        let event = Event::GatewayStatus {
+                            uptime: 3600, // Dummy
+                            connected_clients: 1, // Dummy
+                            memory_usage: 128 * 1024 * 1024, // Dummy
+                        };
+                        let _ = agent_lock.event_tx.send(event);
                     }
                 }
             }
