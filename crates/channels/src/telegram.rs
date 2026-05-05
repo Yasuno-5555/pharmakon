@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 use pharmakon_core::agent::Agent;
 use crate::Channel;
 use std::sync::Arc;

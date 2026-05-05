@@ -19,85 +19,71 @@ impl GeminiModel {
     }
 
     fn map_to_gemini_contents(&self, messages: Vec<Message>) -> Vec<Value> {
-        messages.into_iter()
-            .filter(|m| m.role != "system")
-            .map(|m| {
-                let role = match m.role.as_str() {
-                    "user" => "user",
-                    "assistant" => "model",
-                    "tool" => "function",
-                    _ => "user",
-                };
+        let filtered: Vec<_> = messages.into_iter().filter(|m| m.role != "system").collect();
+        let mut grouped: Vec<Value> = Vec::new();
 
-                let mut parts = Vec::new();
-                
-                if let Some(content) = &m.content {
-                    match content {
-                        MessageContent::Text(t) => {
-                            parts.push(json!({ "text": t }));
-                        }
-                        MessageContent::Multimodal(content_parts) => {
-                            for part in content_parts {
-                                match part {
-                                    ContentPart::Text { text } => {
-                                        parts.push(json!({ "text": text }));
+        for m in filtered {
+            let role = match m.role.as_str() {
+                "assistant" => "model",
+                "tool" => "function",
+                _ => "user",
+            };
+
+            let mut parts = Vec::new();
+            if let Some(content) = &m.content {
+                match content {
+                    MessageContent::Text(t) => parts.push(json!({ "text": t })),
+                    MessageContent::Multimodal(content_parts) => {
+                        for part in content_parts {
+                            match part {
+                                ContentPart::Text { text } => parts.push(json!({ "text": text })),
+                                ContentPart::Image { image_url } => {
+                                    if let Some((mime, data)) = parse_data_url(&image_url.url) {
+                                        parts.push(json!({ "inline_data": { "mime_type": mime, "data": data } }));
                                     }
-                                    ContentPart::Image { image_url } => {
-                                        if image_url.url.starts_with("data:") {
-                                            if let Some((mime, data)) = parse_data_url(&image_url.url) {
-                                                parts.push(json!({
-                                                    "inline_data": {
-                                                        "mime_type": mime,
-                                                        "data": data
-                                                    }
-                                                }));
-                                            }
-                                        } else {
-                                            parts.push(json!({ "text": format!("[Image: {}]", image_url.url) }));
-                                        }
-                                    }
-                                    ContentPart::Audio { input_audio } => {
-                                        parts.push(json!({
-                                            "inline_data": {
-                                                "mime_type": format!("audio/{}", input_audio.format),
-                                                "data": input_audio.data
-                                            }
-                                        }));
-                                    }
+                                }
+                                ContentPart::Audio { input_audio } => {
+                                    parts.push(json!({ "inline_data": { "mime_type": format!("audio/{}", input_audio.format), "data": input_audio.data } }));
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                if let Some(tool_calls) = &m.tool_calls {
-                    for tc in tool_calls {
-                        parts.push(json!({
-                            "functionCall": {
-                                "name": tc.function.name,
-                                "args": serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or_default()
-                            }
-                        }));
-                    }
-                }
-
-                if m.role == "tool" {
+            if let Some(tool_calls) = &m.tool_calls {
+                for tc in tool_calls {
                     parts.push(json!({
-                        "functionResponse": {
-                            "name": m.tool_call_id.clone().unwrap_or_default(),
-                            "response": {
-                                "name": m.tool_call_id.clone().unwrap_or_default(),
-                                "content": { "result": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default() }
-                            }
+                        "functionCall": {
+                            "name": tc.function.name,
+                            "args": serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or_default()
                         }
                     }));
                 }
+            }
 
-                json!({
-                    "role": role,
-                    "parts": parts
-                })
-            }).collect()
+            if m.role == "tool" {
+                parts.push(json!({
+                    "functionResponse": {
+                        "name": m.tool_call_id.clone().unwrap_or_default(),
+                        "response": { "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default() }
+                    }
+                }));
+            }
+
+            if let Some(last) = grouped.last_mut() {
+                if last["role"] == role {
+                    last["parts"].as_array_mut().unwrap().extend(parts);
+                    continue;
+                }
+            }
+
+            grouped.push(json!({
+                "role": role,
+                "parts": parts
+            }));
+        }
+        grouped
     }
 }
 
@@ -145,8 +131,9 @@ impl AgentModel for GeminiModel {
             .map_err(|e| AgentError(e.to_string()))?;
 
         if !res.status().is_success() {
-            let err = res.text().await.map_err(|e| AgentError(e.to_string()))?;
-            return Err(AgentError(format!("Gemini API error: {}", err)));
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_else(|_| "Could not read error response body".to_string());
+            return Err(AgentError(format!("Gemini API error (Status {}): {}", status, err_text)));
         }
 
         let json: Value = res.json().await.map_err(|e| AgentError(e.to_string()))?;

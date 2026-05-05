@@ -63,14 +63,12 @@ impl InitiativeEngineWorker {
             pharmakon_common::Message {
                 role: "system".to_string(),
                 content: Some(pharmakon_common::MessageContent::Text(system_prompt.to_string())),
-                tool_calls: None,
-                tool_call_id: None,
+                ..Default::default()
             },
             pharmakon_common::Message {
                 role: "user".to_string(),
                 content: Some(pharmakon_common::MessageContent::Text(user_prompt)),
-                tool_calls: None,
-                tool_call_id: None,
+                ..Default::default()
             }
         ];
 

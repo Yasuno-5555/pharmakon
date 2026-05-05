@@ -10,7 +10,7 @@ use pharmakon_core::persistence::DbSessionStore;
 use pharmakon_core::automation::cron::CronManager;
 use tray::TrayHandler;
 
-use xilem::{EventLoop, Xilem, AppState};
+use xilem::{EventLoop, Xilem};
 use masonry_winit::app::MasonryUserEvent;
 use tray_icon::menu::MenuEvent;
 use std::sync::atomic::Ordering;

@@ -2,7 +2,7 @@ use anyhow::Result;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
 use crossterm::{
@@ -10,13 +10,42 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use reqwest;
 use std::io;
+use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 use futures_util::{StreamExt, SinkExt};
 use pharmakon_common::{Event, Request};
 use tokio::sync::mpsc;
 
+async fn wait_for_gateway() -> Result<()> {
+    let health_url = "http://127.0.0.1:18789/health";
+    let mut attempts = 0;
+    println!("Waiting for gateway to be ready...");
+    loop {
+        match reqwest::get(health_url).await {
+            Ok(response) if response.status().is_success() => {
+                println!("Gateway is ready.");
+                return Ok(());
+            }
+            _ => {
+                if attempts >= 20 {
+                    return Err(anyhow::anyhow!("Gateway not ready after {} attempts.", attempts));
+                }
+                attempts += 1;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
 pub async fn run_tui() -> Result<()> {
+    // Wait for gateway to be available
+    if let Err(e) = wait_for_gateway().await {
+        eprintln!("{}", e);
+        return Ok(());
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -24,9 +53,14 @@ pub async fn run_tui() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let url = "ws://127.0.0.1:18789/ws";
+    tracing::debug!("Connecting to WebSocket at {}", url);
     let (ws_stream, _) = match connect_async(url).await {
-        Ok(v) => v,
+        Ok(v) => {
+            tracing::debug!("WebSocket handshake successful.");
+            v
+        },
         Err(e) => {
+            tracing::error!("WebSocket handshake failed: {}", e);
             disable_raw_mode()?;
             execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
             return Err(anyhow::anyhow!("Could not connect to Gateway at {}: {}. Is it running?", url, e));
@@ -39,14 +73,19 @@ pub async fn run_tui() -> Result<()> {
     // Background task to read from WS
     tokio::spawn(async move {
         while let Some(Ok(WsMessage::Text(text))) = ws_read.next().await {
+            tracing::debug!(target: "tui", "Received event: {}", text);
             if let Ok(event) = serde_json::from_str::<Event>(&text) {
-                let _ = tx.send(event).await;
+                if tx.send(event).await.is_err() {
+                    tracing::error!("Failed to send event to TUI main loop.");
+                    break;
+                }
             }
         }
     });
 
     let mut messages: Vec<String> = Vec::new();
     let mut thoughts: Vec<String> = Vec::new();
+    let mut input_buffer = String::new();
 
     loop {
         // Drain events
@@ -64,7 +103,8 @@ pub async fn run_tui() -> Result<()> {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Percentage(70),
+                    Constraint::Min(0),
+                    Constraint::Length(3), // Input box
                     Constraint::Percentage(30),
                 ].as_ref())
                 .split(f.area());
@@ -74,22 +114,46 @@ pub async fn run_tui() -> Result<()> {
                 .block(Block::default().title("Conversation History").borders(Borders::ALL));
             f.render_widget(msg_block, chunks[0]);
 
+            let input = Paragraph::new(input_buffer.as_str())
+                .block(Block::default().borders(Borders::ALL).title("Your Message (Enter to send, Ctrl-C to quit)"));
+            f.render_widget(input, chunks[1]);
+            
             let thought_list: Vec<ListItem> = thoughts.iter().rev().take(10).map(|m| ListItem::new(m.as_str())).collect();
             let thought_block = List::new(thought_list)
                 .block(Block::default().title("Agent Thoughts (Log)").borders(Borders::ALL));
-            f.render_widget(thought_block, chunks[1]);
+            f.render_widget(thought_block, chunks[2]);
         })?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let CEvent::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') => break,
+                    KeyCode::Char('c') if key.modifiers == event::KeyModifiers::CONTROL => break,
                     KeyCode::Char('r') => {
                         let req = Request::ResetHistory;
                         let msg = serde_json::to_string(&req)?;
                         ws_write.send(WsMessage::Text(msg.into())).await?;
                         messages.clear();
                         thoughts.push("History Reset".to_string());
+                    }
+                    KeyCode::Char(c) => {
+                        input_buffer.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        input_buffer.pop();
+                    }
+                    KeyCode::Enter => {
+                        if !input_buffer.is_empty() {
+                            let user_message = format!("You: {}", input_buffer);
+                            messages.push(user_message);
+
+                            let req = Request::SendMessage { message: input_buffer.clone() };
+                            let msg = serde_json::to_string(&req)?;
+                            tracing::debug!(target: "tui", "Sending request: {}", msg);
+                            if let Err(e) = ws_write.send(WsMessage::Text(msg.into())).await {
+                                tracing::error!("Failed to send message: {}", e);
+                            }
+                            input_buffer.clear();
+                        }
                     }
                     _ => {}
                 }

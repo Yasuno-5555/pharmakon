@@ -1,14 +1,10 @@
 use tray_icon::{
     menu::{Menu, MenuItem, MenuEvent},
-    TrayIcon, TrayIconBuilder, TrayIconEvent,
+    TrayIcon, TrayIconBuilder,
 };
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use pharmakon_core::agent::Agent;
 
 pub struct TrayHandler {
     _tray_icon: TrayIcon,
-    menu: Menu,
 }
 
 impl TrayHandler {
@@ -22,22 +18,34 @@ impl TrayHandler {
             &quit_item,
         ]).unwrap();
 
+        let icon = Self::create_icon();
+
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
             .with_tooltip("Pharmakon Assistant")
-            // .with_icon(icon) // TODO: Add icon
+            .with_icon(icon)
             .build()
             .unwrap();
 
         Self {
             _tray_icon: tray_icon,
-            menu,
         }
+    }
+
+    fn create_icon() -> tray_icon::Icon {
+        let (width, height) = (32, 32);
+        // Purple square as placeholder
+        let rgba = vec![128, 0, 128, 255]
+            .into_iter()
+            .cycle()
+            .take(width * height * 4)
+            .collect();
+        tray_icon::Icon::from_rgba(rgba, width as u32, height as u32).unwrap()
     }
 
     pub fn handle_events(&self) -> Option<TrayAction> {
         // This should be called in the event loop or a dedicated task
-        if let Ok(event) = MenuEvent::receiver().try_recv() {
+        if let Ok(_event) = MenuEvent::receiver().try_recv() {
             // Match by ID or something
             // For now just check first/second items
             // Actually muda lets us set IDs

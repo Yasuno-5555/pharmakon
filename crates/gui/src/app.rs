@@ -5,8 +5,7 @@ use pharmakon_core::agent::Agent;
 use pharmakon_core::persistence::DbSessionStore;
 use pharmakon_core::automation::cron::CronManager;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use xilem::AppState;
+use std::sync::atomic::AtomicBool;
 
 /// The core state of the Pharmakon Premium Dashboard
 pub struct AppData {

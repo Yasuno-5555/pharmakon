@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod agent_types;
 pub use crate::agent_types::MessageContent;
 pub use agent_types::*;
@@ -12,35 +13,41 @@ use std::path::PathBuf;
 use anyhow::Context;
 use std::fs;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 pub mod secrets;
 pub use secrets::SecretStore;
 
+use crate::agent::AgentConfig;
+use std::collections::HashMap;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
-    pub agent: AgentConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    
+    /// This field is being deprecated in favor of a separate agents.toml file.
+    /// It is kept for backward compatibility for now.
     #[serde(default)]
-    pub agents: std::collections::HashMap<String, AgentConfig>,
+    pub agents: HashMap<String, AgentConfig>,
+
+    #[serde(default, alias = "agent")]
+    pub default_agent: DefaultAgentConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct AgentConfig {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DefaultAgentConfig {
     #[serde(default = "default_provider")]
     pub provider: String,
     #[serde(default = "default_model")]
     pub model: String,
-    #[serde(default = "default_thinking")]
-    pub thinking: String,
 }
 
-fn default_provider() -> String {
-    "gemini".to_string()
-}
-
-fn default_model() -> String {
-    "gemini-1.5-pro".to_string()
+impl Default for DefaultAgentConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_provider(),
+            model: default_model(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -52,57 +59,71 @@ pub struct GatewayConfig {
     pub webhook_secret: Option<String>,
 }
 
-fn default_dm_policy() -> String {
-    "pairing".to_string()
+fn default_provider() -> String {
+    "gemini".to_string()
 }
 
-fn default_thinking() -> String {
-    "medium".to_string()
+fn default_model() -> String {
+    "gemini-2.5-flash".to_string()
 }
 
 fn default_port() -> u16 {
     18789
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            agent: AgentConfig {
-                provider: "gemini".to_string(),
-                model: "gemini-1.5-pro".to_string(),
-                thinking: default_thinking(),
-            },
-            gateway: GatewayConfig {
-                port: default_port(),
-                dm_policy: default_dm_policy(),
-                webhook_secret: None,
-            },
-            agents: std::collections::HashMap::new(),
-        }
-    }
+fn default_dm_policy() -> String {
+    "pairing".to_string()
 }
+
+// ... (rest of the file)
 
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
         let config_path = Self::get_path()?;
         if !config_path.exists() {
-            log::info!("Config file not found at {:?}, using defaults.", config_path);
-            return Ok(Config::default());
+            log::info!("Config file not found at {:?}, creating default.", config_path);
+            let config = Config::default();
+            config.save()?;
+            return Ok(config);
         }
 
         let content = fs::read_to_string(&config_path)
             .context(format!("Failed to read config file at {:?}", config_path))?;
         
-        let config: Config = serde_json::from_str(&content)
+        let mut config: Config = serde_json::from_str(&content)
             .context("Failed to parse config JSON")?;
+        
+        // Now, try to load agents from agents.toml
+        let agents_path = Self::get_agents_path()?;
+        if agents_path.exists() {
+            let agents_content = fs::read_to_string(&agents_path)
+                .context(format!("Failed to read agents config at {:?}", agents_path))?;
+            
+            #[derive(Deserialize)]
+            struct AgentsFile {
+                agent: HashMap<String, AgentConfig>,
+            }
+
+            let parsed_agents: AgentsFile = toml::from_str(&agents_content)
+                .context("Failed to parse agents.toml")?;
+            
+            // Merge the loaded agents into the main config
+            config.agents.extend(parsed_agents.agent);
+
+            log::debug!("Loaded {} agents from agents.toml: {:?}", config.agents.len(), config.agents.keys());
+        }
         
         Ok(config)
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
         let config_path = Self::get_path()?;
+        let parent_dir = config_path.parent().context("Invalid config path")?;
+        fs::create_dir_all(parent_dir)?;
+
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(config_path, content)?;
+        fs::write(&config_path, content)
+            .context(format!("Failed to write config to {:?}", config_path))?;
         Ok(())
     }
 
@@ -110,7 +131,26 @@ impl Config {
         let home = dirs::home_dir().context("Could not find home directory")?;
         Ok(home.join(".pharmakon").join("config.json"))
     }
+
+    fn get_agents_path() -> anyhow::Result<PathBuf> {
+        let home = dirs::home_dir().context("Could not find home directory")?;
+        Ok(home.join(".pharmakon").join("agents.toml"))
+    }
 }
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            gateway: GatewayConfig::default(),
+            agents: HashMap::<String, AgentConfig>::new(),
+            default_agent: DefaultAgentConfig {
+                provider: "gemini".to_string(),
+                model: "gemini-1.5-pro".to_string(),
+            },
+        }
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data")]

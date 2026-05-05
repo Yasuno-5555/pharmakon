@@ -43,8 +43,7 @@ impl ContextCompactor {
             messages: vec![Message {
                 role: "user".to_string(),
                 content: Option::Some(MessageContent::Text(summary_prompt)),
-                tool_calls: None,
-                tool_call_id: None,
+                ..Default::default()
             }],
             temperature: Option::Some(0.3f32),
             max_tokens: None,
@@ -59,8 +58,7 @@ impl ContextCompactor {
         new_history.push(Message {
             role: "system".to_string(),
             content: Option::Some(MessageContent::Text(format!("[Previous conversation summary: {}]", summary))),
-            tool_calls: None,
-            tool_call_id: None,
+            ..Default::default()
         });
 
         new_history.extend(history[len-5..].to_vec());

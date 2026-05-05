@@ -57,6 +57,7 @@ impl Gateway {
         let app = Router::new()
             .route("/", get(Self::root))
             .route("/status", get(Self::status))
+            .route("/health", get(Self::health))
             .route("/ws", get(ws_handler))
             .route("/acp", get(acp_handler))
             .route("/webhooks/{id}", axum::routing::post(webhooks::webhook_handler))
@@ -94,6 +95,10 @@ impl Gateway {
             name: "Pharmakon".to_string(),
         })
     }
+
+    async fn health() -> impl IntoResponse {
+        axum::http::StatusCode::OK
+    }
 }
 
 async fn ws_handler(
@@ -116,6 +121,7 @@ async fn handle_socket(
     canvas_host: Arc<canvas::CanvasHost>,
     cron_manager: Arc<pharmakon_core::automation::cron::CronManager>
 ) {
+    tracing::debug!("WebSocket connection established.");
     let mut rx = {
         let agent_lock = agent.lock().await;
         agent_lock.event_tx.subscribe()
@@ -138,8 +144,9 @@ async fn handle_socket(
             canvas_host_clone.handle_event(&event);
             
             let msg = serde_json::to_string(&event).unwrap();
+            tracing::debug!(target: "gateway", "Sending event: {}", msg);
             if let Err(e) = sender.send(WsMessage::Text(msg.into())).await {
-                log::error!("WebSocket send error: {}", e);
+                tracing::error!("WebSocket send error: {}", e);
                 break;
             }
         }
@@ -149,6 +156,7 @@ async fn handle_socket(
     let agent_clone = agent.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
+            tracing::debug!(target: "gateway", "Received request: {}", text);
             if let Ok(req) = serde_json::from_str::<Request>(&text) {
                 match req {
                     Request::SendMessage { message } => {
@@ -159,7 +167,7 @@ async fn handle_socket(
                     }
                     Request::ProvideApproval { id, approved } => {
                         let agent_lock = agent_clone.lock().await;
-                        let _ = agent_lock.approval_tx.send((id, approved)).await;
+                        let _ = agent_lock.approval_tx.send((id, approved));
                     }
                     Request::GetStatus => {
                         // Status handled via HTTP but could add WS status here
@@ -197,4 +205,5 @@ async fn handle_socket(
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
     };
+    tracing::debug!("WebSocket connection closed.");
 }

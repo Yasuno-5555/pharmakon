@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use pharmakon_common::{Tool, AgentResult, AgentError};
+use pharmakon_common::{Tool, AgentResult};
 use serde_json::{Value, json};
 
 pub struct EnvironmentProbeTool;

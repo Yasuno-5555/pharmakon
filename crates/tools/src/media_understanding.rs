@@ -47,8 +47,7 @@ impl Tool for MediaUnderstandingTool {
                         ContentPart::Text { text: query.to_string() },
                         ContentPart::Image { image_url: ImageUrl { url: data_url, detail: None } }
                     ])),
-                    tool_calls: None,
-                    tool_call_id: None,
+                    ..Default::default()
                 }
             ],
             temperature: Some(0.0),

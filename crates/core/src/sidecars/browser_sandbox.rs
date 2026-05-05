@@ -3,7 +3,7 @@ use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
 use bollard::service::HostConfig;
 use bollard::image::CreateImageOptions;
 use futures::StreamExt;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::collections::HashMap;
 
 pub struct BrowserSandbox {

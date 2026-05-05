@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crate::model::{AgentModel, Message, CompletionRequest, CompletionResponse, MessageContent, AgentResult, AgentError};
+use crate::model::{AgentModel, CompletionRequest, CompletionResponse, MessageContent, AgentResult, AgentError};
 use reqwest::Client;
 use serde_json::json;
 

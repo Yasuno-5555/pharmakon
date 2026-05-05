@@ -1,14 +1,14 @@
 use pharmakon_core::agent::Agent;
-use pharmakon_core::model::{Model, CompletionRequest, CompletionResponse, Message};
-use anyhow::Result;
+use pharmakon_core::model::{AgentModel, CompletionRequest, CompletionResponse, AgentResult};
+
 use std::sync::Arc;
 use async_trait::async_trait;
 
 struct MockModel;
 
 #[async_trait]
-impl Model for MockModel {
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
+impl AgentModel for MockModel {
+    async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
         let last_msg = request.messages.last().unwrap();
         let content_str = last_msg.content.as_ref().map(|c| c.to_string()).unwrap_or_default();
         let content = if content_str.contains("hello") {
@@ -26,8 +26,8 @@ impl Model for MockModel {
 
     fn name(&self) -> &str { "mock-model" }
 
-    async fn stream_complete(&self, _request: CompletionRequest) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<String>> + Send>>> {
-        let stream = futures::stream::iter(vec![Ok("Hello ".to_string()), Ok("world".to_string())]);
+    async fn stream_complete(&self, _request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>> {
+        let stream = futures::stream::iter(vec![Ok("Hi there! I am ".to_string()), Ok("your AI assistant.".to_string())]);
         Ok(Box::pin(stream))
     }
 }

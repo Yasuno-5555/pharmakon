@@ -62,7 +62,7 @@ impl AgentSpawner for SwarmManager {
             "You are an autonomous sub-agent specialized as a {}. You strictly focus on the given task and report back concise, actionable results. Do not ask the user for confirmation. Execute your task fully autonomously.",
             role_str
         );
-        sub_agent.with_soul(soul);
+        sub_agent = sub_agent.with_soul(soul);
 
         let sub_agent_arc = Arc::new(Mutex::new(sub_agent));
         let task_clone = task.to_string();

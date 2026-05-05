@@ -1,7 +1,7 @@
 use pharmakon_core::persistence::DbSessionStore;
 use pharmakon_core::model::Message;
 use pharmakon_core::trajectory::{Trajectory, TrajectoryStep};
-use std::sync::Arc;
+
 
 #[tokio::test]
 async fn test_db_persistence_history() {
@@ -13,6 +13,7 @@ async fn test_db_persistence_history() {
         content: Some(pharmakon_common::MessageContent::Text("hello".to_string())),
         tool_calls: None,
         tool_call_id: None,
+        ..Default::default()
     };
     
     store.save_message(session_id, &msg).await.unwrap();

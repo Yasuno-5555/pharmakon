@@ -13,7 +13,7 @@ impl Tool for ConfigTool {
             "type": "object",
             "properties": {
                 "action": { "type": "string", "enum": ["get", "set", "set_secret"] },
-                "key": { "type": "string", "description": "Config key (e.g., 'agent.model') or secret name" },
+                "key": { "type": "string", "description": "Config key (e.g., 'default_agent.model') or secret name" },
                 "value": { "type": "string", "description": "Value to set" }
             },
             "required": ["action", "key"]
@@ -31,8 +31,8 @@ impl Tool for ConfigTool {
             "get" => {
                 // Simplified getter for specific keys
                 match key {
-                    "agent.provider" => Ok(config.agent.provider),
-                    "agent.model" => Ok(config.agent.model),
+                    "default_agent.provider" => Ok(config.default_agent.provider),
+                    "default_agent.model" => Ok(config.default_agent.model),
                     "gateway.port" => Ok(config.gateway.port.to_string()),
                     _ => Err(AgentError("Unsupported config key for reading".to_string())),
                 }
@@ -40,8 +40,8 @@ impl Tool for ConfigTool {
             "set" => {
                 let value = args["value"].as_str().ok_or_else(|| AgentError("Missing value for set action".to_string()))?;
                 match key {
-                    "agent.provider" => config.agent.provider = value.to_string(),
-                    "agent.model" => config.agent.model = value.to_string(),
+                    "default_agent.provider" => config.default_agent.provider = value.to_string(),
+                    "default_agent.model" => config.default_agent.model = value.to_string(),
                     "gateway.port" => config.gateway.port = value.parse().map_err(|e: std::num::ParseIntError| AgentError(e.to_string()))?,
                     _ => return Err(AgentError("Unsupported config key for writing".to_string())),
                 }
@@ -50,8 +50,13 @@ impl Tool for ConfigTool {
             }
             "set_secret" => {
                 let value = args["value"].as_str().ok_or_else(|| AgentError("Missing value for set_secret action".to_string()))?;
-                secret_store.set_secret(key, value).map_err(|e| AgentError(e.to_string()))?;
-                Ok(format!("Successfully saved secret '{}' to keyring.", key))
+                let mut secret_key = key.to_string();
+                // Automatically uppercase keys that look like API keys or tokens for consistency
+                if secret_key.to_lowercase().contains("api_key") || secret_key.to_lowercase().contains("token") {
+                    secret_key = secret_key.to_uppercase();
+                }
+                secret_store.set_secret(&secret_key, value).map_err(|e| AgentError(e.to_string()))?;
+                Ok(format!("Successfully saved secret '{}' to security layer.", secret_key))
             }
             _ => Err(AgentError("Unknown action".to_string())),
         }

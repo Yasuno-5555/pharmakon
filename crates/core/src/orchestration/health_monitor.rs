@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use anyhow::Result;
+use std::time::Duration;
+
 
 #[derive(Default)]
 struct HealthStats {

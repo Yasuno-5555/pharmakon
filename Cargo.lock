@@ -8026,11 +8026,13 @@ dependencies = [
  "pharmakon-memory",
  "pharmakon-tools",
  "ratatui",
+ "reqwest",
  "rust-i18n",
  "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "tracing",
 ]
 
 [[package]]
@@ -8048,6 +8050,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -8103,6 +8106,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-cron-scheduler",
+ "tracing",
 ]
 
 [[package]]

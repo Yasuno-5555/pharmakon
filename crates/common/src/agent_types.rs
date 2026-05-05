@@ -17,7 +17,7 @@ impl std::error::Error for AgentError {}
 pub type AgentResult<T> = std::result::Result<T, AgentError>;
 pub type Result<T> = AgentResult<T>;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Message {
     pub role: String,
     pub content: Option<MessageContent>,
@@ -25,6 +25,10 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -50,7 +50,7 @@ Output Example:
 ```text
 [INFO] Registering Telegram channel...
 [INFO] Registering Discord channel...
-[INFO] Starting Pharmakon Gateway on port 18789
+[INFO] Starting Pharmakon Gateway on port 18790
 ```
 
 ## Building Custom Channels

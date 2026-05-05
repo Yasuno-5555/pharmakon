@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::time::Duration;
 use crate::agent::Agent;
-use anyhow::Result;
+
 
 pub struct HeartbeatManager {
     agent: Arc<Mutex<Agent>>,

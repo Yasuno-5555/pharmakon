@@ -3,7 +3,7 @@ use pharmakon_common::{Tool, AgentResult, AgentError};
 use serde_json::{Value, json};
 use screenshots::Screen;
 use std::fs;
-use std::path::PathBuf;
+
 use chrono::Local;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};

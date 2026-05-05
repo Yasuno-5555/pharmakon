@@ -41,8 +41,8 @@ impl SoulEvolutionWorker {
 
         let request = CompletionRequest {
             messages: vec![
-                Message { role: "system".to_string(), content: Some(MessageContent::Text(system_prompt.to_string())), tool_calls: None, tool_call_id: None },
-                Message { role: "user".to_string(), content: Some(MessageContent::Text(user_prompt)), tool_calls: None, tool_call_id: None },
+                Message { role: "system".to_string(), content: Some(MessageContent::Text(system_prompt.to_string())), ..Default::default() },
+                Message { role: "user".to_string(), content: Some(MessageContent::Text(user_prompt)), ..Default::default() },
             ],
             temperature: Some(0.3),
             max_tokens: Some(500),

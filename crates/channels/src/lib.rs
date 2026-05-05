@@ -4,7 +4,7 @@ pub mod discord;
 pub mod whatsapp;
 // pub mod matrix;
 use async_trait::async_trait;
-use anyhow::Result;
+
 use pharmakon_core::agent::Agent;
 use std::sync::Arc;
 use tokio::sync::Mutex;

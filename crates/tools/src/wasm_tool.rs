@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use pharmakon_common::{Tool, AgentResult, AgentError};
 use serde_json::{Value, json};
 use wasmtime::*;
-use std::sync::Arc;
+
 
 pub struct WasmTool {
     name: String,

@@ -63,7 +63,7 @@ impl Hook for AutoIndexHook {
                 if let Ok(analysis) = tool.call(serde_json::json!({ "url": url })).await {
                     let fact = format!("Context from link {}: {}", url, analysis);
                     let agent = agent_clone.lock().await;
-                    if let Err(e) = agent.add_fact(fact).await {
+                    if let Err(e) = agent.add_fact(&fact).await {
                         log::error!("Failed to add autonomous fact: {}", e);
                     } else {
                         log::info!("Successfully auto-indexed {}", url);

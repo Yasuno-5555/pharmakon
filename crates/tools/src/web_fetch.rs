@@ -17,7 +17,7 @@ impl WebFetchTool {
 
 #[async_trait]
 impl Tool for WebFetchTool {
-    fn name(&self) -> &str { "fetch_url" }
+    fn name(&self) -> &str { "web_fetch" }
     fn description(&self) -> &str { "Fetch the raw content of a URL (HTML, JSON, etc.)" }
     fn parameters(&self) -> Value {
         json!({

@@ -9,6 +9,7 @@ pub mod perplexity;
 pub mod media;
 pub mod dalle;
 pub mod ollama;
+pub mod registry;
 
 pub use openai::OpenAIModel;
 pub use gemini::GeminiModel;

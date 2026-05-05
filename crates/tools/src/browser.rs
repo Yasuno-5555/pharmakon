@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use anyhow::anyhow;
+
 use serde_json::Value;
 use headless_chrome::{Browser, LaunchOptions};
 use pharmakon_common::{Tool, AgentResult, AgentError};

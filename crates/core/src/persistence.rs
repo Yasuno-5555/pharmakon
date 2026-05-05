@@ -161,6 +161,7 @@ impl DbSessionStore {
                 content,
                 tool_calls: row.tool_calls.and_then(|tc| serde_json::from_str(&tc).ok()),
                 tool_call_id: row.tool_call_id,
+                ..Default::default()
             }
         }).collect();
 

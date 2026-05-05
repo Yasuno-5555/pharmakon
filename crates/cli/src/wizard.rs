@@ -103,8 +103,8 @@ pub fn run_wizard() -> Result<()> {
     println!("\n{}", t!("configuring_agent", name = &name, provider = &provider));
     
     let mut config = Config::load().unwrap_or_default();
-    config.agent.provider = provider.clone();
-    config.agent.model = match provider.as_str() {
+    config.default_agent.provider = provider.clone();
+    config.default_agent.model = match provider.as_str() {
         "openai" => "gpt-4o".to_string(),
         "anthropic" => "claude-3-5-sonnet-20240620".to_string(),
         "gemini" => "gemini-1.5-pro".to_string(),

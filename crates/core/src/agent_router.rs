@@ -4,21 +4,25 @@ use tokio::sync::Mutex;
 use crate::agent::Agent;
 use crate::model::AgentModel;
 use crate::persistence::DbSessionStore;
+use crate::soul::Soul;
 use pharmakon_common::Config;
 use anyhow::Result;
+use std::path::Path;
 
 pub struct AgentRouter {
     agents: HashMap<String, Arc<Mutex<Agent>>>,
     model: Arc<dyn AgentModel>,
     store: Arc<DbSessionStore>,
+    config: Config,
 }
 
 impl AgentRouter {
-    pub fn new(model: Arc<dyn AgentModel>, store: Arc<DbSessionStore>) -> Self {
+    pub fn new(model: Arc<dyn AgentModel>, store: Arc<DbSessionStore>, config: Config) -> Self {
         Self {
             agents: HashMap::new(),
             model,
             store,
+            config,
         }
     }
 
@@ -27,16 +31,84 @@ impl AgentRouter {
             return Ok(agent.clone());
         }
 
-        // Create a new agent based on config if it exists, otherwise use defaults
-        let config = Config::load().unwrap_or_default();
-        let _agent_config = config.agents.get(name).cloned().unwrap_or_default();
+        let agent_config = self.config.agents.get(name).cloned();
+
+        let mut agent = Agent::new(self.model.clone(), format!("agent-{}", name))
+            .with_store(self.store.clone());
+
+        // Dynamically load model based on agent_config.model_id
+        if let Some(config) = &agent_config {
+            if let Some(model_id) = &config.model_id {
+                if let Some(dynamic_model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
+                    agent = Agent::new(dynamic_model, format!("agent-{}", name))
+                        .with_store(self.store.clone());
+                }
+            }
+        }
+
+        let soul = if let Some(config) = &agent_config {
+            if let Some(soul_path_str) = &config.soul_path {
+                let soul_path = Path::new(soul_path_str);
+                Soul::load_from_file(soul_path).unwrap_or_else(|e| {
+                    log::warn!("Failed to load soul from {}: {:?}. Using default soul.", soul_path_str, e);
+                    Soul::default_soul()
+                })
+            } else {
+                Soul::default_soul()
+            }
+        } else {
+            Soul::default_soul()
+        };
+
+        agent = agent.with_soul(soul);
+
+        // Load and add tools based on agent_config.allowed_tools
+        if let Some(config) = &agent_config {
+            if let Some(allowed_tools) = &config.allowed_tools {
+                let deps = pharmakon_tools::registry::ToolDependencies {
+                    model: Some(self.model.clone()),
+                    store: Some(self.store.clone() as Arc<dyn pharmakon_common::CommitmentPersistence>),
+                    soul_manager: None, // TODO: Initialize SoulManager if needed
+                    event_tx: None,      // TODO: Initialize Event broadcaster if needed
+                };
+
+                for tool_name in allowed_tools {
+                    if let Some(tool) = pharmakon_tools::registry::ToolRegistry::get_tool(tool_name, &deps) {
+                        agent.add_tool(tool);
+                    }
+                }
+            }
+        }
+
+        let agent_arc = Arc::new(Mutex::new(agent));
+        self.agents.insert(name.to_string(), agent_arc.clone());
+        Ok(agent_arc)
+    }
+
+    pub async fn create_team(&mut self, goal: &str) -> Result<crate::orchestration::Supervisor> {
+        log::info!("Creating team for goal: {}", goal);
         
-        let agent = Arc::new(Mutex::new(
-            Agent::new(self.model.clone(), format!("agent-{}", name))
-                .with_store(self.store.clone())
-        ));
+        // For now, we'll use a static team of Manager and Researcher.
+        // In a future version, an LLM will analyze the goal and select agents dynamically.
         
-        self.agents.insert(name.to_string(), agent.clone());
-        Ok(agent)
+        let manager = self.get_agent("Manager").await?;
+        let researcher = self.get_agent("Researcher").await?;
+        
+        // Add supervisor tools to agents
+        {
+            let mut m = manager.lock().await;
+            m.add_tool(Arc::new(crate::orchestration::TeamMessageTool { from: "Manager".to_string() }));
+            m.add_tool(Arc::new(crate::orchestration::FinalAnswerTool));
+        }
+        {
+            let mut r = researcher.lock().await;
+            r.add_tool(Arc::new(crate::orchestration::TeamMessageTool { from: "Researcher".to_string() }));
+        }
+
+        let mut supervisor = crate::orchestration::Supervisor::new(goal.to_string(), "Manager".to_string());
+        supervisor.add_agent("Manager".to_string(), manager);
+        supervisor.add_agent("Researcher".to_string(), researcher);
+        
+        Ok(supervisor)
     }
 }

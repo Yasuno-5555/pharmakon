@@ -53,7 +53,7 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                 match acp_msg {
                     AcpMessage::ApprovalResponse { id, approved } => {
                         let agent_lock = agent_clone.lock().await;
-                        let _ = agent_lock.approval_tx.send((id, approved)).await;
+                        let _ = agent_lock.approval_tx.send((id, approved));
                     }
                     AcpMessage::Initialize { .. } => {
                         let _ = tx_clone.send(AcpMessage::Initialized { 
@@ -66,7 +66,7 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         let mut soul = agent_lock.prompt_manager.soul().clone();
                         if let Some(t) = traits { soul.traits = t; }
                         if let Some(p) = system_prompt { soul.system_prompt = p; }
-                        agent_lock.with_soul(soul);
+                        agent_lock.set_soul(soul);
                     }
                     AcpMessage::Prompt { session_id: _, message } => {
                         let agent_inner = agent_clone.clone();

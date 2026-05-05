@@ -22,8 +22,7 @@ impl Crestodian {
         let rescue_msg = Message {
             role: "system".to_string(),
             content: Some(::pharmakon_common::MessageContent::Text(rescue_prompt)),
-            tool_calls: None,
-            tool_call_id: None,
+            ..Default::default()
         };
         
         agent_lock.history.push(rescue_msg);

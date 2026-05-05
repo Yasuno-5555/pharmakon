@@ -52,10 +52,6 @@ enum Commands {
         #[arg(short, long)]
         message: String,
 
-        /// Thinking level (low, medium, high)
-        #[arg(short, long, default_value = "medium")]
-        thinking: String,
-
         /// Session ID for history
         #[arg(long, default_value = "cli-default")]
         session: String,
@@ -181,46 +177,35 @@ enum SecretAction {
     Delete { name: String },
 }
 
-async fn run_gateway_service(port: u16, soul_path: Option<String>, session_store: Arc<DbSessionStore>, config: Config) -> Result<()> {
-    // Load Soul if provided
-    let soul = if let Some(path) = soul_path {
-        Soul::load_from_file(path)?
-    } else {
-        Soul::default_soul()
-    };
-
-    // Shared model and agent
-    let model: Arc<dyn AgentModel> = match config.agent.provider.as_str() {
+async fn run_gateway_service(port: u16, session_store: Arc<DbSessionStore>, config: Config) -> Result<()> {
+    // Shared model provider, determined by the default agent config
+    let model: Arc<dyn AgentModel> = match config.default_agent.provider.as_str() {
         "gemini" => {
             let api_key = get_api_key("gemini")
                 .ok_or_else(|| anyhow!("GEMINI_API_KEY not found. Please run 'pharmakon onboard' or set GEMINI_API_KEY env var."))?;
-            Arc::new(GeminiModel::new(api_key, config.agent.model.clone()))
+            Arc::new(GeminiModel::new(api_key, config.default_agent.model.clone()))
         }
         "openai" => {
             let api_key = get_api_key("openai")
                 .ok_or_else(|| anyhow!("OPENAI_API_KEY not found. Please run 'pharmakon onboard' or set OPENAI_API_KEY env var."))?;
-            Arc::new(OpenAIModel::new(api_key, config.agent.model.clone()))
+            Arc::new(OpenAIModel::new(api_key, config.default_agent.model.clone()))
         }
         "anthropic" => {
             let api_key = get_api_key("anthropic").expect("ANTHROPIC_API_KEY not found in keyring or environment");
-            Arc::new(AnthropicModel::new(api_key, config.agent.model.clone()))
+            Arc::new(AnthropicModel::new(api_key, config.default_agent.model.clone()))
         }
         "ollama" => {
-            Arc::new(OllamaModel::new(None, config.agent.model.clone()))
+            Arc::new(OllamaModel::new(None, config.default_agent.model.clone()))
         }
         _ => Arc::new(MockModel)
     };
     
-    let home = dirs::home_dir().expect("Could not find home directory");
-    let weaver_db_path = home.join(".pharmakon").join("memory_weaver.db");
-    let weaver = Arc::new(pharmakon_memory::weaver::MemoryWeaver::new(weaver_db_path.to_str().unwrap()).await?);
-
-    let mut agent_inner = Agent::new(model, "gateway-shared".to_string())
-            .with_store(session_store.clone())
-            .with_memory_weaver(weaver.clone());
-    agent_inner.with_soul(soul);
+    // Instantiate the router
+    let mut agent_router = pharmakon_core::agent_router::AgentRouter::new(model.clone(), session_store.clone(), config.clone());
     
-    let agent = Arc::new(Mutex::new(agent_inner));
+    // For now, the gateway operates with a single "default" agent.
+    // The Gateway will be updated later to use the router directly.
+    let agent = agent_router.get_agent("default").await?;
 
     // Register Hooks
     {
@@ -260,7 +245,7 @@ async fn run_gateway_service(port: u16, soul_path: Option<String>, session_store
         }
 
         let fact_mem = agent_lock.fact_memory.clone();
-        agent_lock.add_tool(Arc::new(FactTool::new(fact_mem)));
+        agent_lock.add_tool(Arc::new(FactTool::new(fact_mem.expect("Fact memory not initialized"))));
         agent_lock.add_tool(Arc::new(CanvasTool::new(event_tx)));
         agent_lock.add_tool(Arc::new(LinkUnderstandingTool::new()));
         agent_lock.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model)));
@@ -306,13 +291,6 @@ async fn run_gateway_service(port: u16, soul_path: Option<String>, session_store
         log::info!("Registering Discord channel...");
         gateway.add_channel(Arc::new(DiscordChannel::new(discord_token)));
     }
-
-    /*
-    if let Ok(slack_token) = std::env::var("SLACK_BOT_TOKEN") {
-        log::info!("Registering Slack channel...");
-        gateway.add_channel(Arc::new(SlackChannel::new(slack_token)));
-    }
-    */
     
     log::info!("Starting Pharmakon Gateway on port {}", port);
     
@@ -413,22 +391,16 @@ async fn main() -> Result<()> {
     let cmd = cli.command.unwrap_or(Commands::Desktop { soul: None, provider: None, model: None });
 
     match &cmd {
-        Commands::Gateway { port, verbose: _, soul: soul_path } => {
+        Commands::Gateway { port, verbose: _, soul: _ } => {
             let actual_port = if *port == 18789 && config.gateway.port != 18789 {
                 config.gateway.port
             } else {
                 *port
             };
             
-            run_gateway_service(actual_port, soul_path.clone(), session_store.clone(), config.clone()).await?;
+            run_gateway_service(actual_port, session_store.clone(), config).await?;
         }
-        Commands::Agent { message, thinking, session, soul: soul_path, provider, model, trajectory: export_trajectory } => {
-            let actual_thinking = if thinking == "medium" && config.agent.thinking != "medium" {
-                &config.agent.thinking
-            } else {
-                thinking
-            };
-            
+        Commands::Agent { message, session, soul: soul_path, provider, model, trajectory: export_trajectory } => {
             // Load Soul if provided
             let soul = if let Some(path) = soul_path {
                 Soul::load_from_file(path)?
@@ -436,8 +408,8 @@ async fn main() -> Result<()> {
                 Soul::default_soul()
             };
             
-            let actual_provider = provider.as_ref().unwrap_or(&config.agent.provider);
-            let actual_model = model.as_ref().unwrap_or(&config.agent.model);
+            let actual_provider = provider.as_ref().unwrap_or(&config.default_agent.provider);
+            let actual_model = model.as_ref().unwrap_or(&config.default_agent.model);
 
             // Model initialization based on provider
             let model_obj: Arc<dyn AgentModel> = match actual_provider.as_str() {
@@ -485,7 +457,7 @@ async fn main() -> Result<()> {
             let mut agent = Agent::new(model_obj, session.clone())
                 .with_store(session_store.clone())
                 .with_memory_weaver(weaver);
-            agent.with_soul(soul);
+            agent.set_soul(soul);
             
             // Register tools
             let agent_model = agent.model.clone();
@@ -497,7 +469,7 @@ async fn main() -> Result<()> {
             agent.add_tool(Arc::new(BrowserTool::new(None)));
             agent.add_tool(Arc::new(pharmakon_tools::media::capture::ScreenshotTool));
             let fact_mem = agent.fact_memory.clone();
-            agent.add_tool(Arc::new(FactTool::new(fact_mem)));
+            agent.add_tool(Arc::new(FactTool::new(fact_mem.expect("Fact memory not initialized"))));
             agent.add_tool(Arc::new(CanvasTool::new(agent.event_tx.clone())));
             agent.add_tool(Arc::new(LinkUnderstandingTool::new()));
             agent.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model)));
@@ -525,7 +497,7 @@ async fn main() -> Result<()> {
             let heartbeat_manager = pharmakon_core::automation::heartbeat::HeartbeatManager::new(agent_arc.clone(), 30);
             heartbeat_manager.start().await;
             
-            log::info!("Sending message to agent (thinking: {}, model: {}, session: {}): {}", actual_thinking, config.agent.model, session, message);
+            log::info!("Sending message to agent (model: {}, session: {}): {}", actual_model, session, message);
             
             // Handle approvals in CLI
             let agent_for_approval = agent_arc.clone();
@@ -545,7 +517,7 @@ async fn main() -> Result<()> {
                         let approved = input.trim().to_lowercase() == "y";
                         
                         let agent_lock = agent_for_approval.lock().await;
-                        let _ = agent_lock.approval_tx.send((id, approved)).await;
+                        let _ = agent_lock.approval_tx.send((id, approved));
                     }
                 }
             });
@@ -587,8 +559,8 @@ async fn main() -> Result<()> {
             println!("Discord Bot:    {}", if report.discord_ok { t!("ok") } else { t!("missing_api_key") });
             println!("Slack Bot:      {}", if report.slack_ok { t!("ok") } else { t!("missing_api_key") });
             println!("Docker:         {}", if report.docker_ok { t!("ok") } else { t!("not_running") });
-            println!("Config Dir:     {}", if report.config_dir_ok { t!("ok") } else { t!("missing_api_key") });
-            println!("SQLite DB:      {}", if report.sqlite_ok { t!("ok") } else { t!("missing_api_key") });
+            println!("Config Dir:     {}", if report.config_dir_ok { t!("ok") } else { t!("not_found") });
+            println!("SQLite DB:      {}", if report.sqlite_ok { t!("ok") } else { t!("not_found") });
             
             if !report.config_dir_ok || !report.sqlite_ok {
                 println!("\n{}", t!("tip_repair"));
@@ -631,13 +603,13 @@ async fn main() -> Result<()> {
                 Soul::default_soul()
             };
             
-            let actual_provider = provider.as_ref().unwrap_or(&config.agent.provider);
-            let actual_model = model.as_ref().unwrap_or(&config.agent.model);
+            let actual_provider = provider.as_ref().unwrap_or(&config.default_agent.provider);
+            let actual_model = model.as_ref().unwrap_or(&config.default_agent.model);
             let model_obj = get_model(actual_provider, actual_model);
             
             let mut agent = Agent::new(model_obj, "desktop-gui".to_string())
                 .with_store(session_store.clone());
-            agent.with_soul(soul);
+            agent.set_soul(soul);
             
             // Add core tools for GUI
             let agent_model = agent.model.clone();
@@ -649,7 +621,7 @@ async fn main() -> Result<()> {
             agent.add_tool(Arc::new(BrowserTool::new(None)));
             agent.add_tool(Arc::new(pharmakon_tools::media::capture::ScreenshotTool));
             let fact_mem = agent.fact_memory.clone();
-            agent.add_tool(Arc::new(FactTool::new(fact_mem)));
+            agent.add_tool(Arc::new(FactTool::new(fact_mem.expect("Fact memory not initialized"))));
             agent.add_tool(Arc::new(CanvasTool::new(agent.event_tx.clone())));
             agent.add_tool(Arc::new(LinkUnderstandingTool::new()));
             agent.add_tool(Arc::new(MediaUnderstandingTool::new(agent_model)));
@@ -721,7 +693,7 @@ async fn main() -> Result<()> {
                             let rt = tokio::runtime::Runtime::new()?;
                             rt.block_on(async {
                                 let _ = env_logger::try_init();
-                                if let Err(e) = run_gateway_service(*port, None, session_store, config).await {
+                                if let Err(e) = run_gateway_service(*port, session_store, config).await {
                                     log::error!("Daemon Gateway error: {}", e);
                                 }
                             });
@@ -812,7 +784,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_acp_bridge(url: Option<String>, token: Option<String>, _session: Option<String>, config: Config) -> Result<()> {
+async fn run_acp_bridge(url: Option<String>, _token: Option<String>, _session: Option<String>, config: Config) -> Result<()> {
     use futures_util::{StreamExt, SinkExt};
     let gateway_url = url.unwrap_or_else(|| {
         format!("ws://127.0.0.1:{}/acp", config.gateway.port)

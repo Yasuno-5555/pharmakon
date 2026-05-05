@@ -18,6 +18,7 @@ pub mod terminal;
 pub mod commitment_tool;
 pub mod media_understanding;
 pub mod soul_tool;
+pub mod registry;
 
 use async_trait::async_trait;
 use serde_json::Value;
