@@ -12,6 +12,7 @@ pub struct AppData {
     pub current_view: ViewType,
     pub input_text: String,
     pub messages: Vec<Message>,
+    pub tool_trace: Vec<ToolExecution>,
     pub active_swarms: Vec<SwarmStatus>,
     pub health_stats: HealthStats,
     pub event_log: VecDeque<String>,
@@ -21,6 +22,13 @@ pub struct AppData {
     pub is_window_open: bool,
     pub show_requested: Arc<AtomicBool>,
     pub main_window_id: xilem::WindowId,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ToolExecution {
+    pub name: String,
+    pub status: String,
+    pub duration: String,
 }
 
 #[derive(Clone, PartialEq)]
@@ -65,6 +73,7 @@ impl AppData {
             current_view: ViewType::Chat,
             input_text: String::new(),
             messages: Vec::new(),
+            tool_trace: Vec::new(),
             active_swarms: Vec::new(),
             health_stats: HealthStats::default(),
             event_log: VecDeque::new(),
@@ -170,6 +179,37 @@ pub fn main_dashboard_view(data: &mut AppData) -> impl xilem::WidgetView<AppData
         ))
     ).width(200.px()).padding(10.0);
 
+    // Tool Execution Trace Sidebar (Right)
+    let tool_trace_view = sized_box(
+        flex_col((
+            label("Tool Trace")
+                .text_size(14.0)
+                .weight(FontWeight::BOLD),
+            flex_col(
+                data.tool_trace.iter().map(|t| {
+                    flex_row((
+                        label(format!("⚒ {}", t.name)).text_size(11.0),
+                        label(t.status.clone()).text_size(10.0).color(xilem::palette::css::GREEN_YELLOW),
+                    )).padding(2.0)
+                }).collect::<Vec<_>>()
+            ).flex(1.0),
+        ))
+    ).width(180.px()).padding(10.0);
+
+    // Event Console (Bottom)
+    let console_view = sized_box(
+        flex_col((
+            label("System Console")
+                .text_size(12.0)
+                .weight(FontWeight::BOLD),
+            flex_col(
+                data.event_log.iter().rev().take(5).map(|log| {
+                    label(format!("> {}", log)).text_size(10.0).color(xilem::palette::css::LIGHT_GRAY)
+                }).collect::<Vec<_>>()
+            ).flex(1.0),
+        ))
+    ).height(100.px()).padding(10.0);
+
     // Health Status Bar
     let health_bar = flex_row((
         label(format!("CPU: {}%", data.health_stats.cpu_usage)).text_size(10.0),
@@ -181,9 +221,11 @@ pub fn main_dashboard_view(data: &mut AppData) -> impl xilem::WidgetView<AppData
 
     flex_col((
         flex_row((
-            flex_col((messages_view, input_area)).flex(1.0),
             swarm_sidebar,
+            flex_col((messages_view, input_area)).flex(1.0),
+            tool_trace_view,
         )).flex(1.0),
+        console_view,
         health_bar,
     ))
 }

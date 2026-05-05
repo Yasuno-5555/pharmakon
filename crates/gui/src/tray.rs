@@ -11,10 +11,15 @@ impl TrayHandler {
     pub fn new() -> Self {
         let menu = Menu::new();
         let show_item = MenuItem::new("Show Dashboard", true, None);
+        let reset_item = MenuItem::new("Reset Session", true, None);
+        let status_item = MenuItem::new("Status: Online", false, None);
         let quit_item = MenuItem::new("Quit", true, None);
         
         menu.append_items(&[
             &show_item,
+            &reset_item,
+            &MenuItem::new("---", false, None),
+            &status_item,
             &quit_item,
         ]).unwrap();
 

@@ -92,36 +92,86 @@ pub async fn run_tui() -> Result<()> {
         while let Ok(event) = rx.try_recv() {
             match event {
                 Event::AgentThought { content } => thoughts.push(format!("Thinking: {}", content)),
+                Event::AgentThoughtChunk { chunk, .. } => {
+                    if let Some(last) = thoughts.last_mut() {
+                        if last.starts_with("Thinking:") {
+                            last.push_str(&chunk);
+                        } else {
+                            thoughts.push(format!("Thinking: {}", chunk));
+                        }
+                    } else {
+                        thoughts.push(format!("Thinking: {}", chunk));
+                    }
+                }
                 Event::AgentResponse { content } => messages.push(format!("Agent: {}", content)),
-                Event::ToolCall { name, args } => thoughts.push(format!("Tool Call: {} ({})", name, args)),
-                Event::ToolResult { result } => thoughts.push(format!("Tool Result: {}", result)),
+                Event::ToolCall { name, args } => thoughts.push(format!("⚒ Tool Call: {} ({})", name, args)),
+                Event::ToolResult { result } => thoughts.push(format!("✓ Tool Result: {}", result)),
                 _ => {}
             }
         }
 
         terminal.draw(|f| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
+            let main_chunks = Layout::default()
+                .direction(Direction::Horizontal)
                 .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(3), // Input box
-                    Constraint::Percentage(30),
+                    Constraint::Percentage(75),
+                    Constraint::Percentage(25),
                 ].as_ref())
                 .split(f.area());
 
+            let left_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(0),
+                    Constraint::Length(3),
+                    Constraint::Percentage(30),
+                ].as_ref())
+                .split(main_chunks[0]);
+
             let msg_list: Vec<ListItem> = messages.iter().rev().map(|m| ListItem::new(m.as_str())).collect();
             let msg_block = List::new(msg_list)
-                .block(Block::default().title("Conversation History").borders(Borders::ALL));
-            f.render_widget(msg_block, chunks[0]);
+                .block(Block::default().title(" Conversation History ").borders(Borders::ALL));
+            f.render_widget(msg_block, left_chunks[0]);
 
             let input = Paragraph::new(input_buffer.as_str())
-                .block(Block::default().borders(Borders::ALL).title("Your Message (Enter to send, Ctrl-C to quit)"));
-            f.render_widget(input, chunks[1]);
+                .block(Block::default().borders(Borders::ALL).title(" Your Message (Enter to send) "));
+            f.render_widget(input, left_chunks[1]);
             
-            let thought_list: Vec<ListItem> = thoughts.iter().rev().take(10).map(|m| ListItem::new(m.as_str())).collect();
+            let thought_list: Vec<ListItem> = thoughts.iter().rev().take(20).map(|m| ListItem::new(m.as_str())).collect();
             let thought_block = List::new(thought_list)
-                .block(Block::default().title("Agent Thoughts (Log)").borders(Borders::ALL));
-            f.render_widget(thought_block, chunks[2]);
+                .block(Block::default().title(" Agent Reasoning & Tool Trace ").borders(Borders::ALL));
+            f.render_widget(thought_block, left_chunks[2]);
+
+            // Right Panel: Stats & Swarm
+            let right_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(10), // Stats
+                    Constraint::Min(0),     // Swarm
+                ].as_ref())
+                .split(main_chunks[1]);
+
+            let stats = vec![
+                ListItem::new("System Health: OK"),
+                ListItem::new("CPU: 12%"),
+                ListItem::new("MEM: 456MB"),
+                ListItem::new("Status: ONLINE"),
+                ListItem::new("----------------"),
+                ListItem::new("Gateway: 127.0.0.1:18789"),
+                ListItem::new("Latency: 45ms"),
+            ];
+            let stats_block = List::new(stats)
+                .block(Block::default().title(" Metrics ").borders(Borders::ALL));
+            f.render_widget(stats_block, right_chunks[0]);
+
+            let swarm = vec![
+                ListItem::new("● Supervisor (Active)"),
+                ListItem::new("○ Researcher (Idle)"),
+                ListItem::new("○ Coder (Idle)"),
+            ];
+            let swarm_block = List::new(swarm)
+                .block(Block::default().title(" Autonomy Matrix ").borders(Borders::ALL));
+            f.render_widget(swarm_block, right_chunks[1]);
         })?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
