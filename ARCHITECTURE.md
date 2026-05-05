@@ -13,21 +13,40 @@ Pharmakon is designed to be:
 
 ```mermaid
 graph TD
-    CLI[pharmakon-cli] --> Gateway[pharmakon-gateway]
-    CLI --> Agent[pharmakon-core::Agent]
+    CLI[pharmakon-cli] --> Router[pharmakon-core::AgentRouter]
+    Gateway[pharmakon-gateway] --> Router
     
-    Gateway --> Agent
-    Gateway --> Channels[pharmakon-channels]
+    Router --> Registry[pharmakon-core::ModelRegistry]
+    Router --> Agent[pharmakon-core::Agent]
     
     Agent --> Providers[LLM Providers]
     Agent --> Tools[pharmakon-tools]
     Agent --> DB[(SQLite)]
+    
+    Supervisor[pharmakon-core::Supervisor] --> Agent
+    
+    Gateway --> Channels[pharmakon-channels]
     
     Tools --> Docker[Docker Sandbox]
     Tools --> WASM[Wasmtime Engine]
     
     Channels --> Messaging[Telegram/Discord/Slack]
 ```
+
+## 🧩 Key abstractions
+
+### AgentRouter
+The central coordinator for loading and managing agents. It handles:
+- **Dynamic Model Loading**: Using the `ModelRegistry` to instantiate models by name (e.g., `openai:gpt-4o`).
+- **Fallback Logic**: If a requested model is unavailable (e.g., missing API key), the router automatically falls back to a pre-configured default model.
+- **Persistence Mapping**: Linking agents to their respective SQLite session stores.
+
+### Supervisor & Multi-Agent Teams
+The `Supervisor` enables complex task decomposition by orchestrating multiple specialized agents.
+- **Goal Decomposition**: A high-level goal is assigned to the supervisor.
+- **Delegation**: Agents use the `send_message` tool to hand off sub-tasks to other agents in the team.
+- **Resolution**: The `final_answer` tool is used to consolidate results and report back to the user.
+
 
 ## 🔄 Event-Driven Flow
 

@@ -7,11 +7,12 @@
 
 ## 🚀 Key Features
 
+- **Multi-Agent Teams**: Orchestrate specialized agents using the `Supervisor` for complex task decomposition.
+- **Dynamic Model Loading**: Load and switch LLM providers (OpenAI, Gemini, Anthropic, Ollama, etc.) on the fly with automatic fallback support.
 - **Blazing Fast Gateway**: Built with Axum and Tokio for high-concurrency event handling.
 - **Sandboxed Execution**: Shell tools run in isolated Docker containers to protect your host.
 - **WASM Skill System**: Extensible tool system using `wasmtime` to run skills in a safe sandbox.
 - **Multi-Channel Integration**: Discord, Slack, and Telegram support out of the box.
-- **Voice & Multimodal**: Native integration with Whisper (STT), OpenAI TTS, ElevenLabs, and Deepgram.
 - **Local Persistence**: SQLx-based SQLite storage for conversation history and usage analytics.
 - **Secure by Default**: Keyring-based secret management and strict tool approval flows.
 
@@ -46,8 +47,8 @@ API reference can be generated locally using `cargo doc --no-deps --workspace`.
 ### Installation
 
 ```bash
-git clone https://github.com/yasuno/Pharmakon.git
-cd Pharmakon/pharmakon
+git clone https://github.com/Yasuno-5555/Pharmakon.git
+cd Pharmakon
 cargo build --release
 ```
 

@@ -51,19 +51,23 @@ pharmakon daemon status
 pharmakon daemon stop
 ```
 
-### 7. Automation & Cron Jobs
-Pharmakon features a built-in `CronManager` (using `tokio_cron_scheduler`) capable of running scheduled tasks and background automation. 
-While currently managed programmatically via the `Gateway` or within custom code, it allows an Agent to:
-- Run scheduled queries (e.g., "Check the weather every morning at 7 AM")
-- Execute one-shot delayed tasks
+### 8. Multi-Agent Teams (Orchestration)
+Pharmakon allows you to define specialized agent teams managed by a `Supervisor`. The supervisor decomposes complex goals and delegates tasks to specific agents.
 
-*(Note: CLI and natural-language scheduling by the Agent itself is under active development. For now, developers can inject scheduled jobs directly into the `CronManager` via `pharmakon_core::automation::cron`.)*
+Agents in a team can communicate using the `send_message` tool.
+
+### 9. Dynamic Model Loading & Fallback
+You can request specific models using the `--provider` and `--model` flags (or via the configuration file). 
+Pharmakon's `AgentRouter` automatically handles fallback:
+- If you request `openai:gpt-4o` but haven't set an `OPENAI_API_KEY`, the agent will automatically fall back to your configured default model (e.g., `gemini-1.5-flash`).
+- This ensures that your autonomous workflows and scheduled tasks don't fail due to missing credentials or provider outages.
 
 ## System Diagnostics
 If you encounter issues, use the built-in diagnostic tool to identify and automatically fix problems:
 ```bash
 pharmakon doctor --repair
 ```
+
 
 ## Further Reading
 - For developers looking to create WASM tools, see the [Plugin Development Guide](./plugin_development.md).
