@@ -1,4 +1,4 @@
-use pharmakon_channels::{MockChannel, Channel};
+use pharmakon_channels::{Channel, MockChannel};
 
 #[tokio::test]
 async fn test_mock_channel_send() {

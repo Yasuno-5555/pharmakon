@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
-use serde_json::{json, Value};
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::io::{self};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::{McpRequest, McpResponse};
 
@@ -127,13 +127,17 @@ impl McpServer {
                 }
             }
             "tools/list" => {
-                let tools: Vec<Value> = self.tools.iter().map(|t| {
-                    json!({
-                        "name": t.name,
-                        "description": t.description,
-                        "inputSchema": t.input_schema,
+                let tools: Vec<Value> = self
+                    .tools
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "name": t.name,
+                            "description": t.description,
+                            "inputSchema": t.input_schema,
+                        })
                     })
-                }).collect();
+                    .collect();
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     result: Some(json!({ "tools": tools })),
@@ -169,19 +173,21 @@ impl McpServer {
                     McpResponse {
                         jsonrpc: "2.0".to_string(),
                         result: None,
-                        error: Some(json!({ "code": -32602, "message": format!("Unknown tool: {}", tool_name) })),
+                        error: Some(
+                            json!({ "code": -32602, "message": format!("Unknown tool: {}", tool_name) }),
+                        ),
                         id: request.id,
                     }
                 }
             }
-            _ => {
-                McpResponse {
-                    jsonrpc: "2.0".to_string(),
-                    result: None,
-                    error: Some(json!({ "code": -32601, "message": format!("Method not found: {}", request.method) })),
-                    id: request.id,
-                }
-            }
+            _ => McpResponse {
+                jsonrpc: "2.0".to_string(),
+                result: None,
+                error: Some(
+                    json!({ "code": -32601, "message": format!("Method not found: {}", request.method) }),
+                ),
+                id: request.id,
+            },
         }
     }
 }

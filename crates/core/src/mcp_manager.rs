@@ -1,10 +1,10 @@
 use anyhow::Result;
 use pharmakon_mcp::McpClient;
 use pharmakon_tools::mcp_tool::McpTool;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -24,7 +24,7 @@ pub struct McpManager;
 impl McpManager {
     pub async fn load_tools() -> Result<Vec<Arc<dyn pharmakon_tools::Tool>>> {
         let config_path = Self::get_config_path()?;
-        
+
         if !config_path.exists() {
             return Ok(Vec::new());
         }
@@ -36,13 +36,13 @@ impl McpManager {
             let mut tools: Vec<Arc<dyn pharmakon_tools::Tool>> = Vec::new();
             log::info!("Initializing MCP server: {}", server_cfg.name);
             let args: Vec<&str> = server_cfg.args.iter().map(|s| s.as_str()).collect();
-            
+
             let mut cmd = tokio::process::Command::new(&server_cfg.command);
             cmd.args(&args);
             if let Some(env) = &server_cfg.env {
                 cmd.envs(env);
             }
-            
+
             let client: Arc<McpClient> = match McpClient::spawn_with_command(cmd).await {
                 Ok(c) => Arc::new(c),
                 Err(e) => {
@@ -63,19 +63,18 @@ impl McpManager {
                             let name = tool_val["name"].as_str().unwrap_or("unknown").to_string();
                             let desc = tool_val["description"].as_str().unwrap_or("").to_string();
                             let params = tool_val["inputSchema"].clone();
-                            
+
                             log::info!("Registered MCP tool: {}/{}", server_cfg.name, name);
-                            tools.push(Arc::new(McpTool::new(
-                                client.clone(),
-                                name,
-                                desc,
-                                params
-                            )));
+                            tools.push(Arc::new(McpTool::new(client.clone(), name, desc, params)));
                         }
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to list tools for MCP server {}: {}", server_cfg.name, e);
+                    log::error!(
+                        "Failed to list tools for MCP server {}: {}",
+                        server_cfg.name,
+                        e
+                    );
                 }
             }
             tools

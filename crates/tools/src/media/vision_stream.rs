@@ -1,8 +1,8 @@
-use std::collections::VecDeque;
-use std::path::PathBuf;
-use std::fs;
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VisionFrame {
@@ -22,7 +22,7 @@ impl VisionRingBuffer {
         let home = dirs::home_dir().expect("Could not find home directory");
         let storage_dir = home.join(".pharmakon").join("vision_temp");
         fs::create_dir_all(&storage_dir).ok();
-        
+
         Self {
             max_frames,
             frames: VecDeque::new(),
@@ -35,7 +35,7 @@ impl VisionRingBuffer {
         let timestamp = Utc::now().timestamp_millis();
         let filename = format!("frame_{}.jpg", timestamp);
         let path = self.storage_dir.join(filename);
-        
+
         // Use screencapture -x (silent) -t jpg
         #[cfg(target_os = "macos")]
         {
@@ -60,7 +60,10 @@ impl VisionRingBuffer {
         if self.frames.len() > self.max_frames {
             if let Some(old_frame) = self.frames.pop_front() {
                 if old_frame.path.exists() {
-                    log::debug!("VisionStream: Deleting old frame to save space: {:?}", old_frame.path);
+                    log::debug!(
+                        "VisionStream: Deleting old frame to save space: {:?}",
+                        old_frame.path
+                    );
                     let _ = fs::remove_file(old_frame.path);
                 }
             }

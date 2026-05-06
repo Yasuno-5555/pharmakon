@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use serde_json::{Value, json};
-use pharmakon_common::{Tool, AgentResult, AgentError, Event};
 use pharmakon_common::visual_primitives::CanvasPrimitive;
+use pharmakon_common::{AgentError, AgentResult, Event, Tool};
+use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 pub struct CanvasTool {
@@ -16,8 +16,12 @@ impl CanvasTool {
 
 #[async_trait]
 impl Tool for CanvasTool {
-    fn name(&self) -> &str { "canvas" }
-    fn description(&self) -> &str { "Draw on a shared canvas. Use this to visualize data or draw diagrams." }
+    fn name(&self) -> &str {
+        "canvas"
+    }
+    fn description(&self) -> &str {
+        "Draw on a shared canvas. Use this to visualize data or draw diagrams."
+    }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
@@ -47,13 +51,16 @@ impl Tool for CanvasTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let action = args["action"].as_str().ok_or_else(|| AgentError("Missing action".to_string()))?;
-        
+        let action = args["action"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing action".to_string()))?;
+
         match action {
             "draw" => {
                 let primitive_val = args["primitive"].clone();
-                let primitive: CanvasPrimitive = serde_json::from_value(primitive_val).map_err(|e| AgentError(e.to_string()))?;
-                
+                let primitive: CanvasPrimitive =
+                    serde_json::from_value(primitive_val).map_err(|e| AgentError(e.to_string()))?;
+
                 let _ = self.event_tx.send(Event::CanvasUpdate { primitive });
                 Ok("Drawing primitive...".to_string())
             }

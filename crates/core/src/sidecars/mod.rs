@@ -1,8 +1,8 @@
 pub mod browser_sandbox;
 pub mod telemetry_capture;
-use std::process::{Child, Command};
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
+use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 
 pub struct SidecarManager {
@@ -17,10 +17,8 @@ impl SidecarManager {
     }
 
     pub fn start_sidecar(&self, name: String, command: String, args: Vec<String>) -> Result<()> {
-        let child = Command::new(command)
-            .args(args)
-            .spawn()?;
-        
+        let child = Command::new(command).args(args).spawn()?;
+
         let mut processes = self.processes.lock().map_err(|_| anyhow!("Mutex error"))?;
         processes.insert(name, child);
         Ok(())

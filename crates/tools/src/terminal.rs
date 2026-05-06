@@ -1,11 +1,11 @@
 use async_trait::async_trait;
+use pharmakon_common::{AgentError, AgentResult, Tool};
 use serde_json::{Value, json};
-use pharmakon_common::{Tool, AgentResult, AgentError};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::process::{Command, Child};
 use std::process::Stdio;
-use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
+use tokio::sync::Mutex;
 
 pub struct TerminalTool {
     session: Arc<Mutex<Option<TerminalSession>>>,
@@ -37,10 +37,19 @@ impl TerminalTool {
                 .spawn()
                 .map_err(|e| AgentError(e.to_string()))?;
 
-            let stdin = child.stdin.take().ok_or_else(|| AgentError("Failed to open stdin".to_string()))?;
-            let stdout = child.stdout.take().ok_or_else(|| AgentError("Failed to open stdout".to_string()))?;
-            let stderr = child.stderr.take().ok_or_else(|| AgentError("Failed to open stderr".to_string()))?;
-            
+            let stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| AgentError("Failed to open stdin".to_string()))?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| AgentError("Failed to open stdout".to_string()))?;
+            let stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| AgentError("Failed to open stderr".to_string()))?;
+
             *session_lock = Some(TerminalSession {
                 child,
                 stdin,
@@ -54,20 +63,30 @@ impl TerminalTool {
 
 #[async_trait]
 impl Tool for TerminalTool {
-    fn name(&self) -> &str { "terminal" }
-    fn description(&self) -> &str { "Execute a command in a persistent terminal session. Allows maintaining state between calls." }
+    fn name(&self) -> &str {
+        "terminal"
+    }
+    fn description(&self) -> &str {
+        "Execute a command in a persistent terminal session. Allows maintaining state between calls."
+    }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "command": { "type": "string", "description": "Command to execute" }
+                "command": { "type": "string", "description": "Command to execute" },
+                "requires_manual_approval": {
+                    "type": "boolean",
+                    "description": "Set to true if you judge this command is high-risk and requires user confirmation."
+                }
             },
             "required": ["command"]
         })
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let command = args["command"].as_str().ok_or_else(|| AgentError("Missing command".to_string()))?;
+        let command = args["command"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing command".to_string()))?;
         let session_arc = self.ensure_session().await?;
         let mut session_lock = session_arc.lock().await;
         let session = session_lock.as_mut().unwrap();
@@ -75,19 +94,27 @@ impl Tool for TerminalTool {
         // Send command with a unique marker to know when it finishes
         let marker = format!("MARKER_{}", uuid::Uuid::new_v4());
         let full_command = format!("{}; echo {}\n", command, marker);
-        
-        session.stdin.write_all(full_command.as_bytes()).await.map_err(|e| AgentError(e.to_string()))?;
-        session.stdin.flush().await.map_err(|e| AgentError(e.to_string()))?;
+
+        session
+            .stdin
+            .write_all(full_command.as_bytes())
+            .await
+            .map_err(|e| AgentError(e.to_string()))?;
+        session
+            .stdin
+            .flush()
+            .await
+            .map_err(|e| AgentError(e.to_string()))?;
 
         let mut output = String::new();
         let mut error_output = String::new();
-        
+
         let timeout_duration = std::time::Duration::from_secs(30);
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
                 let mut stdout_line = String::new();
                 let mut stderr_line = String::new();
-                
+
                 tokio::select! {
                     res = session.stdout_reader.read_line(&mut stdout_line) => {
                         if res.unwrap_or(0) > 0 {
@@ -102,7 +129,8 @@ impl Tool for TerminalTool {
                     }
                 }
             }
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(_) => {
@@ -116,8 +144,54 @@ impl Tool for TerminalTool {
         }
     }
 
-    fn requires_approval(&self, _args: &Value) -> bool { true }
+    fn requires_approval(&self, args: &Value) -> bool {
+        args["requires_manual_approval"].as_bool().unwrap_or(false)
+    }
     fn approval_description(&self, args: &Value) -> String {
-        format!("Run terminal command: {}", args["command"].as_str().unwrap_or("unknown"))
+        format!(
+            "Run terminal command (Agent Flagged Risk): {}",
+            args["command"].as_str().unwrap_or("unknown")
+        )
+    }
+}
+
+pub struct ShellTool;
+
+#[async_trait]
+impl Tool for ShellTool {
+    fn name(&self) -> &str {
+        "shell"
+    }
+    fn description(&self) -> &str {
+        "Execute a single shell command and return the output. Use for one-off tasks like listing files or checking status."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": { "type": "string", "description": "Command to execute" }
+            },
+            "required": ["command"]
+        })
+    }
+
+    async fn call(&self, args: Value) -> AgentResult<String> {
+        let command = args["command"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing command".to_string()))?;
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .map_err(|e| AgentError(format!("Shell execution failed: {}", e)))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if output.status.success() {
+            Ok(stdout)
+        } else {
+            Ok(format!("Error: {}\nStdout: {}", stderr, stdout))
+        }
     }
 }

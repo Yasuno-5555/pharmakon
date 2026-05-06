@@ -1,6 +1,6 @@
-use async_trait::async_trait;
-use anyhow::{Result, anyhow};
 use crate::providers::media::MediaProvider;
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;
 
@@ -22,10 +22,14 @@ impl DalleProvider {
 
 #[async_trait]
 impl MediaProvider for DalleProvider {
-    fn name(&self) -> &str { "openai-dalle" }
+    fn name(&self) -> &str {
+        "openai-dalle"
+    }
 
     async fn generate_image(&self, prompt: &str, size: &str) -> Result<String> {
-        let response = self.client.post("https://api.openai.com/v1/images/generations")
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/images/generations")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model,
@@ -42,7 +46,8 @@ impl MediaProvider for DalleProvider {
         }
 
         let data: serde_json::Value = response.json().await?;
-        let url = data["data"][0]["url"].as_str()
+        let url = data["data"][0]["url"]
+            .as_str()
             .ok_or_else(|| anyhow!("Failed to parse image URL from response"))?;
 
         Ok(url.to_string())

@@ -1,9 +1,9 @@
+use anyhow::Result;
 use bollard::Docker;
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
-use bollard::service::HostConfig;
 use bollard::image::CreateImageOptions;
+use bollard::service::HostConfig;
 use futures::StreamExt;
-use anyhow::Result;
 use std::collections::HashMap;
 
 pub struct BrowserSandbox {
@@ -41,7 +41,12 @@ impl BrowserSandbox {
 
         // 2. Check if container exists and is running
         let containers = self.docker.list_containers::<String>(None).await?;
-        if let Some(c) = containers.iter().find(|c| c.names.as_ref().map(|n| n.iter().any(|name| name.contains(&self.container_name))).unwrap_or(false)) {
+        if let Some(c) = containers.iter().find(|c| {
+            c.names
+                .as_ref()
+                .map(|n| n.iter().any(|name| name.contains(&self.container_name)))
+                .unwrap_or(false)
+        }) {
             if c.state.as_deref() == Some("running") {
                 return Ok(3030); // Use new port
             }
@@ -66,15 +71,19 @@ impl BrowserSandbox {
             ..Default::default()
         };
 
-        self.docker.create_container(
-            Some(CreateContainerOptions {
-                name: self.container_name.clone(),
-                ..Default::default()
-            }),
-            config,
-        ).await?;
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: self.container_name.clone(),
+                    ..Default::default()
+                }),
+                config,
+            )
+            .await?;
 
-        self.docker.start_container(&self.container_name, None::<StartContainerOptions<String>>).await?;
+        self.docker
+            .start_container(&self.container_name, None::<StartContainerOptions<String>>)
+            .await?;
 
         log::info!("Browser sandbox container started on port 3030");
         Ok(3030)
@@ -82,7 +91,10 @@ impl BrowserSandbox {
 
     pub async fn stop(&self) -> Result<()> {
         let _ = self.docker.stop_container(&self.container_name, None).await;
-        let _ = self.docker.remove_container(&self.container_name, None).await;
+        let _ = self
+            .docker
+            .remove_container(&self.container_name, None)
+            .await;
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::system_prompt::SystemPromptContribution;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MarkdownSkillMetadata {
@@ -17,15 +17,15 @@ impl MarkdownSkill {
         if !text.starts_with("---") {
             return Err(anyhow::anyhow!("Missing frontmatter in markdown skill"));
         }
-        
+
         let parts: Vec<&str> = text.splitn(3, "---").collect();
         if parts.len() < 3 {
             return Err(anyhow::anyhow!("Invalid markdown skill format"));
         }
-        
+
         let metadata: MarkdownSkillMetadata = serde_yaml::from_str(parts[1])?;
         let content = parts[2].trim().to_string();
-        
+
         Ok(Self { metadata, content })
     }
 }

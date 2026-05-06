@@ -3,18 +3,18 @@ pub mod agent_types;
 pub use crate::agent_types::MessageContent;
 pub use agent_types::*;
 
-pub mod voice;
-pub mod visual_primitives;
 pub mod providers;
+pub mod visual_primitives;
+pub mod voice;
 
 rust_i18n::i18n!("locales");
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use anyhow::Context;
-use std::fs;
 use async_trait::async_trait;
-pub mod secrets;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 pub mod plugin_context;
+pub mod secrets;
 pub mod telemetry;
 pub use secrets::SecretStore;
 
@@ -25,7 +25,7 @@ use std::collections::HashMap;
 pub struct Config {
     #[serde(default)]
     pub gateway: GatewayConfig,
-    
+
     /// This field is being deprecated in favor of a separate agents.toml file.
     /// It is kept for backward compatibility for now.
     #[serde(default)]
@@ -57,8 +57,8 @@ impl Default for DefaultAgentConfig {
 
 fn default_fallback_models() -> Vec<String> {
     vec![
+        "gemini/gemini-2.5-flash".to_string(),
         "groq/llama-3.3-70b-versatile".to_string(),
-        "ollama/llama3".to_string()
     ]
 }
 
@@ -76,7 +76,7 @@ fn default_provider() -> String {
 }
 
 fn default_model() -> String {
-    "gemini-2.0-flash".to_string()
+    "gemini-2.5-flash".to_string()
 }
 
 fn default_port() -> u16 {
@@ -93,7 +93,10 @@ impl Config {
     pub fn load() -> anyhow::Result<Self> {
         let config_path = Self::get_path()?;
         if !config_path.exists() {
-            log::info!("Config file not found at {:?}, creating default.", config_path);
+            log::info!(
+                "Config file not found at {:?}, creating default.",
+                config_path
+            );
             let config = Config::default();
             config.save()?;
             return Ok(config);
@@ -101,30 +104,34 @@ impl Config {
 
         let content = fs::read_to_string(&config_path)
             .context(format!("Failed to read config file at {:?}", config_path))?;
-        
-        let mut config: Config = serde_json::from_str(&content)
-            .context("Failed to parse config JSON")?;
-        
+
+        let mut config: Config =
+            serde_json::from_str(&content).context("Failed to parse config JSON")?;
+
         // Now, try to load agents from agents.toml
         let agents_path = Self::get_agents_path()?;
         if agents_path.exists() {
             let agents_content = fs::read_to_string(&agents_path)
                 .context(format!("Failed to read agents config at {:?}", agents_path))?;
-            
+
             #[derive(Deserialize)]
             struct AgentsFile {
                 agent: HashMap<String, AgentConfig>,
             }
 
-            let parsed_agents: AgentsFile = toml::from_str(&agents_content)
-                .context("Failed to parse agents.toml")?;
-            
+            let parsed_agents: AgentsFile =
+                toml::from_str(&agents_content).context("Failed to parse agents.toml")?;
+
             // Merge the loaded agents into the main config
             config.agents.extend(parsed_agents.agent);
 
-            log::debug!("Loaded {} agents from agents.toml: {:?}", config.agents.len(), config.agents.keys());
+            log::debug!(
+                "Loaded {} agents from agents.toml: {:?}",
+                config.agents.len(),
+                config.agents.keys()
+            );
         }
-        
+
         Ok(config)
     }
 
@@ -157,40 +164,87 @@ impl Default for Config {
             agents: HashMap::<String, AgentConfig>::new(),
             default_agent: DefaultAgentConfig {
                 provider: "gemini".to_string(),
-                model: "gemini-2.0-flash".to_string(),
+                model: "gemini-2.5-flash".to_string(),
                 fallback_models: default_fallback_models(),
             },
         }
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data")]
 pub enum Event {
     Message(Message),
     Action(String),
-    CanvasUpdate { primitive: crate::visual_primitives::CanvasPrimitive },
+    CanvasUpdate {
+        primitive: crate::visual_primitives::CanvasPrimitive,
+    },
     CanvasClear,
-    ToolResult { result: String },
-    AgentResponse { content: MessageContent },
-    AgentThought { content: MessageContent },
-    AgentResponseChunk { session_id: String, chunk: String },
-    AgentThoughtChunk { session_id: String, chunk: String },
-    ToolCall { name: String, args: serde_json::Value },
-    ApprovalRequest { id: String, tool: String, args: serde_json::Value },
-    Error { message: String },
-    CronJobList { jobs: Vec<CronJobInfo> },
-    SessionList { sessions: Vec<String> },
-    OrchestrationState { supervisor_active: bool, sub_agents: Vec<SubAgentInfo> },
-    GatewayStatus { uptime: u64, connected_clients: usize, memory_usage: u64 },
-    AgentInsight { insight: String },
-    McpStats { stats: Vec<McpToolStat> },
-    VisionUpdate { frames: Vec<VisionFrameInfo> },
-    GraphUpdate { relations: Vec<String> },
-    ModelList { models: Vec<String> },
-    ModelSwitched { model_id: String },
-    HistoryList { messages: Vec<Message> },
+    ToolResult {
+        result: String,
+    },
+    AgentResponse {
+        content: MessageContent,
+    },
+    AgentThought {
+        content: MessageContent,
+    },
+    AgentResponseChunk {
+        session_id: String,
+        chunk: String,
+    },
+    AgentThoughtChunk {
+        session_id: String,
+        chunk: String,
+    },
+    ToolCall {
+        name: String,
+        args: serde_json::Value,
+    },
+    ApprovalRequest {
+        id: String,
+        tool: String,
+        args: serde_json::Value,
+    },
+    Error {
+        message: String,
+    },
+    CronJobList {
+        jobs: Vec<CronJobInfo>,
+    },
+    SessionList {
+        sessions: Vec<String>,
+    },
+    OrchestrationState {
+        supervisor_active: bool,
+        sub_agents: Vec<SubAgentInfo>,
+    },
+    GatewayStatus {
+        uptime: u64,
+        connected_clients: usize,
+        memory_usage: u64,
+    },
+    AgentInsight {
+        insight: String,
+    },
+    McpStats {
+        stats: Vec<McpToolStat>,
+    },
+    VisionUpdate {
+        frames: Vec<VisionFrameInfo>,
+    },
+    GraphUpdate {
+        relations: Vec<String>,
+    },
+    ModelList {
+        models: Vec<String>,
+    },
+    ModelSwitched {
+        model_id: String,
+    },
+    HistoryList {
+        messages: Vec<Message>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -218,24 +272,45 @@ pub struct SubAgentInfo {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data")]
 pub enum Request {
-    SendMessage { message: String },
-    ProvideApproval { id: String, approved: bool },
+    SendMessage {
+        message: String,
+    },
+    ProvideApproval {
+        id: String,
+        approved: bool,
+    },
     GetStatus,
     ResetHistory,
-    InteractiveResponse { element_id: String, action: String, value: serde_json::Value },
+    InteractiveResponse {
+        element_id: String,
+        action: String,
+        value: serde_json::Value,
+    },
     GetCronJobs,
-    CancelCronJob { id: String },
+    CancelCronJob {
+        id: String,
+    },
     GetSessions,
-    SwitchSession { id: String },
+    SwitchSession {
+        id: String,
+    },
     GetOrchestration,
     GetGatewayStatus,
     GetMcpStats,
     GetVisionFrames,
-    GetGraphMemory { query: String },
+    GetGraphMemory {
+        query: String,
+    },
     GetModels,
-    SwitchModel { model_id: String },
-    GetHistory { session_id: String },
-    SearchSessions { query: String },
+    SwitchModel {
+        model_id: String,
+    },
+    GetHistory {
+        session_id: String,
+    },
+    SearchSessions {
+        query: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -259,5 +334,10 @@ pub trait KnowledgeConnector: Send + Sync {
 
 #[async_trait]
 pub trait SoulManager: Send + Sync {
-    async fn update_soul(&self, traits: Option<Vec<String>>, prompt: Option<String>, style: Option<String>) -> anyhow::Result<()>;
+    async fn update_soul(
+        &self,
+        traits: Option<Vec<String>>,
+        prompt: Option<String>,
+        style: Option<String>,
+    ) -> anyhow::Result<()>;
 }

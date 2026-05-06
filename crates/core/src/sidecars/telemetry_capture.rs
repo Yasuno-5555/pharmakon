@@ -1,8 +1,8 @@
-use xcap::Monitor;
+use chrono::Utc;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
-use std::path::PathBuf;
-use chrono::Utc;
+use xcap::Monitor;
 
 pub struct TelemetryCaptureWorker {
     interval: Duration,
@@ -11,9 +11,10 @@ pub struct TelemetryCaptureWorker {
 
 impl TelemetryCaptureWorker {
     pub fn new(interval_secs: u64) -> anyhow::Result<Self> {
-        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        let home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let output_dir = home.join(".pharmakon").join("trajectory").join("visuals");
-        
+
         if !output_dir.exists() {
             std::fs::create_dir_all(&output_dir)?;
         }
@@ -26,10 +27,11 @@ impl TelemetryCaptureWorker {
 
     pub async fn start(&self) -> anyhow::Result<()> {
         log::info!("Starting Telemetry Capture Worker (Photographic Trajectory)...");
-        
+
         // Initial monitor detection
-        let monitors = Monitor::all().map_err(|e| anyhow::anyhow!("Failed to detect monitors: {}", e))?;
-        
+        let monitors =
+            Monitor::all().map_err(|e| anyhow::anyhow!("Failed to detect monitors: {}", e))?;
+
         if monitors.is_empty() {
             log::warn!("No monitors detected. Telemetry capture will be inactive.");
             return Ok(());
@@ -42,7 +44,7 @@ impl TelemetryCaptureWorker {
                         let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
                         let filename = format!("capture_{}_m{}.png", timestamp, i);
                         let path = self.output_dir.join(filename);
-                        
+
                         // In a real implementation, we would compress to WebP here
                         if let Err(e) = image.save(&path) {
                             log::error!("Failed to save telemetry capture: {}", e);

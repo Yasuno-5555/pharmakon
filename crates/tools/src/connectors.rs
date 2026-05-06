@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use pharmakon_common::{Tool, AgentResult, AgentError, KnowledgeConnector};
-use serde_json::{json, Value};
+use pharmakon_common::{AgentError, AgentResult, KnowledgeConnector, Tool};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub struct ContextConnectorTool {
@@ -9,7 +9,9 @@ pub struct ContextConnectorTool {
 
 impl ContextConnectorTool {
     pub fn new() -> Self {
-        Self { connectors: Vec::new() }
+        Self {
+            connectors: Vec::new(),
+        }
     }
 
     pub fn add_connector(&mut self, connector: Arc<dyn KnowledgeConnector>) {
@@ -19,8 +21,12 @@ impl ContextConnectorTool {
 
 #[async_trait]
 impl Tool for ContextConnectorTool {
-    fn name(&self) -> &str { "search_knowledge" }
-    fn description(&self) -> &str { "Search for information in connected external sources (Notion, Slack, etc.)" }
+    fn name(&self) -> &str {
+        "search_knowledge"
+    }
+    fn description(&self) -> &str {
+        "Search for information in connected external sources (Notion, Slack, etc.)"
+    }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
@@ -33,16 +39,20 @@ impl Tool for ContextConnectorTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let query = args["query"].as_str().ok_or_else(|| AgentError("Missing query".to_string()))?;
+        let query = args["query"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing query".to_string()))?;
         let specific_source = args["source"].as_str();
-        
+
         let mut all_context = Vec::new();
-        
+
         for connector in &self.connectors {
             if let Some(s) = specific_source {
-                if connector.name() != s { continue; }
+                if connector.name() != s {
+                    continue;
+                }
             }
-            
+
             match connector.fetch_context(query).await {
                 Ok(context) => {
                     for item in context {
@@ -54,7 +64,7 @@ impl Tool for ContextConnectorTool {
                 }
             }
         }
-        
+
         if all_context.is_empty() {
             Ok("No relevant information found in external knowledge bases.".to_string())
         } else {
@@ -69,10 +79,14 @@ pub struct SlackConnector {
 
 #[async_trait]
 impl KnowledgeConnector for SlackConnector {
-    fn name(&self) -> &str { "slack" }
+    fn name(&self) -> &str {
+        "slack"
+    }
     async fn fetch_context(&self, _query: &str) -> anyhow::Result<Vec<String>> {
         // Placeholder for real Slack API call
-        Ok(vec!["Recent Slack message: Project Pharmakon stabilization is in progress.".to_string()])
+        Ok(vec![
+            "Recent Slack message: Project Pharmakon stabilization is in progress.".to_string(),
+        ])
     }
 }
 
@@ -82,9 +96,13 @@ pub struct NotionConnector {
 
 #[async_trait]
 impl KnowledgeConnector for NotionConnector {
-    fn name(&self) -> &str { "notion" }
+    fn name(&self) -> &str {
+        "notion"
+    }
     async fn fetch_context(&self, _query: &str) -> anyhow::Result<Vec<String>> {
         // Placeholder for real Notion API call
-        Ok(vec!["Notion Page: Pharmakon Architecture Overview (v1.0)".to_string()])
+        Ok(vec![
+            "Notion Page: Pharmakon Architecture Overview (v1.0)".to_string(),
+        ])
     }
 }

@@ -1,12 +1,12 @@
 pub mod server;
 
-use serde::{Serialize, Deserialize};
-use anyhow::{Result, anyhow};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::process::Stdio;
-use tokio::process::Command;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpRequest {
@@ -43,8 +43,14 @@ impl McpClient {
             .stdout(Stdio::piped())
             .spawn()?;
 
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("Stdin not captured"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("Stdout not captured"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Stdin not captured"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Stdout not captured"))?;
 
         Ok(Self {
             stdin: Arc::new(Mutex::new(stdin)),
@@ -64,7 +70,7 @@ impl McpClient {
         });
 
         let result = self.call("initialize", params).await?;
-        
+
         // Send notifications/initialized as per spec
         let id = {
             let mut id_lock = self.next_id.lock().await;
@@ -93,11 +99,19 @@ impl McpClient {
         self.call("tools/list", serde_json::json!({})).await
     }
 
-    pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<serde_json::Value> {
-        self.call("tools/call", serde_json::json!({
-            "name": name,
-            "arguments": arguments
-        })).await
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        self.call(
+            "tools/call",
+            serde_json::json!({
+                "name": name,
+                "arguments": arguments
+            }),
+        )
+        .await
     }
 
     pub async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
@@ -117,7 +131,7 @@ impl McpClient {
 
         let mut req_str = serde_json::to_string(&request)?;
         req_str.push('\n');
-        
+
         {
             let mut stdin = self.stdin.lock().await;
             stdin.write_all(req_str.as_bytes()).await?;
@@ -129,9 +143,9 @@ impl McpClient {
             let mut stdout = self.stdout.lock().await;
             stdout.read_line(&mut line).await?;
         }
-        
+
         let response: McpResponse = serde_json::from_str(&line)?;
-        
+
         if let Some(error) = response.error {
             return Err(anyhow!("MCP error: {}", error));
         }

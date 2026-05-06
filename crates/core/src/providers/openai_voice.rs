@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use pharmakon_common::voice::{SpeechToText, TextToSpeech};
 use reqwest::Client;
 use serde_json::json;
@@ -24,10 +24,15 @@ impl SpeechToText for OpenAiVoice {
         // Whisper API implementation
         // For brevity, we'll implement the request structure
         let form = reqwest::multipart::Form::new()
-            .part("file", reqwest::multipart::Part::bytes(audio_data).file_name("audio.webm"))
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(audio_data).file_name("audio.webm"),
+            )
             .text("model", "whisper-1");
 
-        let response: reqwest::Response = self.client.post("https://api.openai.com/v1/audio/transcriptions")
+        let response: reqwest::Response = self
+            .client
+            .post("https://api.openai.com/v1/audio/transcriptions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .multipart(form)
             .send()
@@ -41,7 +46,9 @@ impl SpeechToText for OpenAiVoice {
 #[async_trait]
 impl TextToSpeech for OpenAiVoice {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>> {
-        let response = self.client.post("https://api.openai.com/v1/audio/speech")
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/audio/speech")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": "tts-1",

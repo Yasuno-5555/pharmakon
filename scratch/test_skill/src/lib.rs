@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[no_mangle]
 pub extern "C" fn alloc(size: usize) -> *mut u8 {

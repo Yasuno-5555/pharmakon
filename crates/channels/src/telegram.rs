@@ -1,35 +1,87 @@
-use async_trait::async_trait;
-use anyhow::anyhow;
-use pharmakon_core::agent::Agent;
 use crate::Channel;
+use anyhow::anyhow;
+use async_trait::async_trait;
+use pharmakon_common::Event;
+use pharmakon_core::agent::Agent;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use teloxide::prelude::*;
+use tokio::sync::Mutex;
 
 pub struct TelegramChannel {
     pub token: String,
     pub bot: Bot,
+    pub last_chat_id: Arc<Mutex<Option<ChatId>>>,
 }
 
 impl TelegramChannel {
     pub fn new(token: String) -> Self {
         let bot = Bot::new(token.clone());
-        Self { token, bot }
+        Self {
+            token,
+            bot,
+            last_chat_id: Arc::new(Mutex::new(None)),
+        }
     }
 }
 
 #[async_trait]
 impl Channel for TelegramChannel {
-    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("TelegramChannel starting...");
-        
+
         let bot = self.bot.clone();
-        
-        teloxide::repl(bot, move |bot: Bot, msg: Message| {
-            let agent = agent.clone();
-            async move {
+
+        // Wait for connection to be available (simple retry)
+        let mut retry_count = 0;
+        while retry_count < 3 {
+            match bot.get_me().await {
+                Ok(me) => {
+                    log::info!(
+                        "Telegram bot {} is online!",
+                        me.user.username.unwrap_or_default()
+                    );
+                    break;
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Telegram connection failed (retry {}/3): {}",
+                        retry_count + 1,
+                        e
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    retry_count += 1;
+                }
+            }
+        }
+
+        if retry_count == 3 {
+            log::error!("Telegram failed to connect. Channel will remain inactive.");
+            return Ok(()); // Don't crash the whole server
+        }
+
+        let handler = dptree::entry()
+            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Agent>, last_chat_id: Arc<Mutex<Option<ChatId>>>| async move {
+                {
+                    let mut last_id = last_chat_id.lock().await;
+                    *last_id = Some(msg.chat.id);
+                }
+                
                 if let Some(text) = msg.text() {
                     log::info!("Telegram received message from {}: {}", msg.chat.id, text);
+
+                    if text.starts_with("/approve ") {
+                        let id = text.trim_start_matches("/approve ").to_string();
+                        agent.approve(id.clone(), true);
+                        let _ = bot.send_message(msg.chat.id, format!("✅ Tool call approved: {}", id)).await;
+                        return Ok(());
+                    }
+                    
+                    if text.starts_with("/deny ") {
+                        let id = text.trim_start_matches("/deny ").to_string();
+                        agent.approve(id.clone(), false);
+                        let _ = bot.send_message(msg.chat.id, format!("❌ Tool call denied: {}", id)).await;
+                        return Ok(());
+                    }
                     
                     let pairing_mgr = pharmakon_core::security::pairing::PairingManager::global();
                     let sender_id = msg.chat.id.to_string();
@@ -44,23 +96,60 @@ impl Channel for TelegramChannel {
                         }
                     }
 
-                    let mut agent_lock = agent.lock().await;
-                    match agent_lock.chat(text).await {
-                        Ok(response) => {
-                            bot.send_message(msg.chat.id, response).await?;
+                    let agent_spawn = agent.clone();
+                    let chat_id = msg.chat.id;
+                    let text_owned = text.to_string();
+                    tokio::spawn(async move {
+                        match agent_spawn.chat(&text_owned).await {
+                            Ok(response) => {
+                                log::info!("Telegram sending response to {}: {}", chat_id, response);
+                                match bot.send_message(chat_id, response).await {
+                                    Ok(_) => log::info!("Telegram message sent successfully."),
+                                    Err(e) => log::error!("Telegram failed to send message: {}", e),
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Agent error in Telegram: {}", e);
+                                let _ = bot.send_message(chat_id, format!("Error: {}", e)).await;
+                            }
                         }
-                        Err(e) => {
-                            log::error!("Agent error in Telegram: {}", e);
-                            bot.send_message(msg.chat.id, format!("Error: {}", e)).await?;
-                        }
+                    });
+                }
+                anyhow::Result::<()>::Ok(())
+            }));
+
+        let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+            .dependencies(dptree::deps![agent.clone(), self.last_chat_id.clone()])
+            .enable_ctrlc_handler()
+            .build();
+
+        // Spawn event listener
+        let bot_for_events = bot.clone();
+        let agent_for_events = agent.clone();
+        let last_chat_id = self.last_chat_id.clone();
+        tokio::spawn(async move {
+            let event_tx = agent_for_events.event_tx();
+            let mut event_rx = event_tx.subscribe();
+            log::info!("Telegram event listener started.");
+
+            while let Ok(event) = event_rx.recv().await {
+                if let Event::ApprovalRequest { id, tool, args } = event {
+                    log::info!("Telegram received ApprovalRequest: {}", id);
+                    let chat_id_opt = {
+                        let last_id = last_chat_id.lock().await;
+                        *last_id
+                    };
+
+                    if let Some(chat_id) = chat_id_opt {
+                        let _ = bot_for_events.send_message(chat_id, format!("🛡️ **Tool Approval Required**\n\n**Tool:** `{}`\n**Args:** `{}`\n\nTo approve, send:\n`/approve {}`\n\nTo deny, send:\n`/deny {}`", tool, args, id, id)).await;
                     }
                 }
-                Ok(())
             }
-        }).await;
+        });
 
-        // teloxide::repl runs forever, so we won't actually reach here unless it fails.
-        Err(anyhow!("Telegram REPL exited unexpectedly"))
+        dispatcher.dispatch().await;
+
+        Ok(())
     }
 
     async fn send(&self, target: &str, content: &str) -> anyhow::Result<()> {

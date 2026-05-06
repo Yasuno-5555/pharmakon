@@ -1,14 +1,18 @@
+use pharmakon_common::Config;
+use pharmakon_common::agent::AgentConfig;
 use pharmakon_core::agent_router::AgentRouter;
 use pharmakon_core::model::MockModel;
 use pharmakon_core::persistence::DbSessionStore;
-use pharmakon_common::Config;
-use pharmakon_common::agent::AgentConfig;
 use std::sync::Arc;
 
 async fn setup_test_router(config: Config) -> AgentRouter {
-    let store = Arc::new(DbSessionStore::new("sqlite::memory:").await.expect("Failed to create in-memory store"));
+    let store = Arc::new(
+        DbSessionStore::new("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory store"),
+    );
     let default_model = Arc::new(MockModel);
-    
+
     AgentRouter::new(default_model, store, config, None)
 }
 
@@ -29,7 +33,11 @@ async fn test_router_fallback_to_default_model() {
     let agent = agent_handle.lock().await;
 
     // The agent's model should be the default MockModel, not the non-existent one.
-    assert_eq!(agent.model.name(), "mock-model", "Model should fall back to default");
+    assert_eq!(
+        agent.model.name(),
+        "mock-model",
+        "Model should fall back to default"
+    );
 }
 
 #[tokio::test]
@@ -53,5 +61,8 @@ async fn test_router_tool_instantiation_failure() {
     let agent = agent_handle.lock().await;
 
     // No tools should have been added because they all failed to instantiate.
-    assert!(agent.tools.is_empty(), "No tools should be added if instantiation fails");
+    assert!(
+        agent.tools.is_empty(),
+        "No tools should be added if instantiation fails"
+    );
 }

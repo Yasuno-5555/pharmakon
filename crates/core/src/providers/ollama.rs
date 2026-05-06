@@ -1,5 +1,7 @@
+use crate::model::{
+    AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse, MessageContent,
+};
 use async_trait::async_trait;
-use crate::model::{AgentModel, CompletionRequest, CompletionResponse, MessageContent, AgentResult, AgentError};
 use reqwest::Client;
 use serde_json::json;
 
@@ -21,17 +23,25 @@ impl OllamaModel {
 
 #[async_trait]
 impl AgentModel for OllamaModel {
-    fn name(&self) -> &str { &self.model_name }
+    fn name(&self) -> &str {
+        &self.model_name
+    }
 
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
-        let ollama_messages: Vec<serde_json::Value> = request.messages.iter().map(|m| {
-            json!({
-                "role": m.role,
-                "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
+        let ollama_messages: Vec<serde_json::Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                json!({
+                    "role": m.role,
+                    "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
+                })
             })
-        }).collect();
+            .collect();
 
-        let response = self.client.post(format!("{}/api/chat", self.host))
+        let response = self
+            .client
+            .post(format!("{}/api/chat", self.host))
             .json(&json!({
                 "model": self.model_name,
                 "messages": ollama_messages,
@@ -42,13 +52,20 @@ impl AgentModel for OllamaModel {
             .map_err(|e| AgentError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let err = response.text().await.map_err(|e| AgentError(e.to_string()))?;
+            let err = response
+                .text()
+                .await
+                .map_err(|e| AgentError(e.to_string()))?;
             return Err(AgentError(format!("Ollama error: {}", err)));
         }
 
-        let body: serde_json::Value = response.json().await.map_err(|e| AgentError(e.to_string()))?;
-        let content = body["message"]["content"].as_str()
-            .ok_or_else(|| AgentError("Failed to parse content from Ollama response".to_string()))?;
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AgentError(e.to_string()))?;
+        let content = body["message"]["content"].as_str().ok_or_else(|| {
+            AgentError("Failed to parse content from Ollama response".to_string())
+        })?;
 
         Ok(CompletionResponse {
             content: Some(MessageContent::Text(content.to_string())),
@@ -57,15 +74,26 @@ impl AgentModel for OllamaModel {
         })
     }
 
-    async fn stream_complete(&self, request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>> {
-        let ollama_messages: Vec<serde_json::Value> = request.messages.iter().map(|m| {
-            json!({
-                "role": m.role,
-                "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
+    async fn stream_complete(
+        &self,
+        request: CompletionRequest,
+    ) -> AgentResult<
+        std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
+    > {
+        let ollama_messages: Vec<serde_json::Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                json!({
+                    "role": m.role,
+                    "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
+                })
             })
-        }).collect();
+            .collect();
 
-        let response = self.client.post(format!("{}/api/chat", self.host))
+        let response = self
+            .client
+            .post(format!("{}/api/chat", self.host))
             .json(&json!({
                 "model": self.model_name,
                 "messages": ollama_messages,
@@ -76,8 +104,14 @@ impl AgentModel for OllamaModel {
             .map_err(|e| AgentError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.map_err(|e| AgentError(e.to_string()))?;
-            return Err(AgentError(format!("Ollama streaming error: {}", error_text)));
+            let error_text = response
+                .text()
+                .await
+                .map_err(|e| AgentError(e.to_string()))?;
+            return Err(AgentError(format!(
+                "Ollama streaming error: {}",
+                error_text
+            )));
         }
 
         let byte_stream = response.bytes_stream();
@@ -90,7 +124,9 @@ impl AgentModel for OllamaModel {
                         let line = buffer[..newline_pos].trim().to_string();
                         buffer = buffer[newline_pos + 1..].to_string();
 
-                        if line.is_empty() { continue; }
+                        if line.is_empty() {
+                            continue;
+                        }
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                             if let Some(content) = json["message"]["content"].as_str() {
                                 if !content.is_empty() {
@@ -107,7 +143,12 @@ impl AgentModel for OllamaModel {
                     match byte_stream.try_next().await {
                         Ok(Some(chunk)) => buffer.push_str(&String::from_utf8_lossy(&chunk)),
                         Ok(None) => return None,
-                        Err(e) => return Some((Err(AgentError(format!("Ollama stream error: {}", e))), (byte_stream, buffer))),
+                        Err(e) => {
+                            return Some((
+                                Err(AgentError(format!("Ollama stream error: {}", e))),
+                                (byte_stream, buffer),
+                            ));
+                        }
                     }
                 }
             },

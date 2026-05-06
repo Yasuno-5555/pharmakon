@@ -2,7 +2,7 @@ pub mod swarm_visualizer;
 
 use swarm_visualizer::SwarmVisualizerWidget;
 use xilem::{Pod, ViewCtx};
-use xilem_core::{View, MessageResult, ViewMarker, MessageContext, Mut};
+use xilem_core::{MessageContext, MessageResult, Mut, View, ViewMarker};
 
 pub struct SwarmVisualizer {
     swarms: Vec<crate::app::SwarmStatus>,
@@ -36,7 +36,13 @@ impl<State, Action> View<State, Action, ViewCtx> for SwarmVisualizer {
         }
     }
 
-    fn teardown(&self, _view_state: &mut Self::ViewState, _ctx: &mut ViewCtx, _element: Mut<'_, Self::Element>) {}
+    fn teardown(
+        &self,
+        _view_state: &mut Self::ViewState,
+        _ctx: &mut ViewCtx,
+        _element: Mut<'_, Self::Element>,
+    ) {
+    }
 
     fn message(
         &self,

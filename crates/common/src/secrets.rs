@@ -1,5 +1,5 @@
-use keyring::Entry;
 use anyhow::{Result, anyhow};
+use keyring::Entry;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -45,7 +45,10 @@ impl SecretStore {
         }
         let content = fs::read_to_string(&path)?;
         let secrets: HashMap<String, String> = serde_json::from_str(&content)?;
-        secrets.get(name).cloned().ok_or_else(|| anyhow!("Secret '{}' not found in storage", name))
+        secrets
+            .get(name)
+            .cloned()
+            .ok_or_else(|| anyhow!("Secret '{}' not found in storage", name))
     }
 
     pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
@@ -57,7 +60,11 @@ impl SecretStore {
         // 2. Also try keyring for an additional layer of security
         if let Ok(entry) = Entry::new(&self.service, name) {
             if let Err(e) = entry.set_password(value) {
-                log::warn!("Keyring set failed for '{}': {}. Fallback file will be used.", name, e);
+                log::warn!(
+                    "Keyring set failed for '{}': {}. Fallback file will be used.",
+                    name,
+                    e
+                );
             }
         }
         Ok(())
@@ -70,7 +77,7 @@ impl SecretStore {
                 return Ok(password);
             }
         }
-        
+
         // 2. Fallback to file storage
         self.get_from_fallback(name)
     }
@@ -79,11 +86,12 @@ impl SecretStore {
         if let Ok(entry) = Entry::new(&self.service, name) {
             let _ = entry.delete_credential();
         }
-        
+
         let path = self.get_fallback_path()?;
         if path.exists() {
             let content = fs::read_to_string(&path)?;
-            let mut secrets: HashMap<String, String> = serde_json::from_str(&content).unwrap_or_default();
+            let mut secrets: HashMap<String, String> =
+                serde_json::from_str(&content).unwrap_or_default();
             secrets.remove(name);
             let content = serde_json::to_string_pretty(&secrets)?;
             fs::write(path, content)?;

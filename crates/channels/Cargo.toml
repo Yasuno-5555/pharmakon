@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 pharmakon-core.workspace = true
+pharmakon-common.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

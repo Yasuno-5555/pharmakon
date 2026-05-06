@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use tokio::sync::broadcast;
 use crate::Event;
 use crate::agent_types::CommitmentPersistence;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct PluginContext {

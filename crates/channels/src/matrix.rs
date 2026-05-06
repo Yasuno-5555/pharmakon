@@ -17,7 +17,7 @@ impl MatrixChannel {
 
 #[async_trait]
 impl Channel for MatrixChannel {
-    async fn run(&self, _agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, _agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("Matrix channel started for {} (Stub)", self.home_server);
         // Real implementation would use matrix-sdk
         loop {

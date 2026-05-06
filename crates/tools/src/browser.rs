@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
-use serde_json::Value;
 use headless_chrome::{Browser, LaunchOptions};
-use pharmakon_common::{Tool, AgentResult, AgentError};
+use pharmakon_common::{AgentError, AgentResult, Tool};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -22,8 +22,12 @@ impl BrowserTool {
 
 #[async_trait]
 impl Tool for BrowserTool {
-    fn name(&self) -> &str { "browser" }
-    fn description(&self) -> &str { "Navigate to a URL, click elements, or take screenshots. Uses an isolated browser instance." }
+    fn name(&self) -> &str {
+        "browser"
+    }
+    fn description(&self) -> &str {
+        "Navigate to a URL, click elements, or take screenshots. Uses an isolated browser instance."
+    }
     fn parameters(&self) -> Value {
         serde_json::json!({
             "type": "object",
@@ -39,8 +43,10 @@ impl Tool for BrowserTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let action = args["action"].as_str().ok_or_else(|| AgentError("Missing action".to_string()))?;
-        
+        let action = args["action"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing action".to_string()))?;
+
         let mut browser_lock = self.browser.lock().await;
         if browser_lock.is_none() {
             log::info!("Initializing browser instance (CDP: {:?})...", self.cdp_url);
@@ -50,32 +56,47 @@ impl Tool for BrowserTool {
                 Browser::new(LaunchOptions {
                     headless: true,
                     ..Default::default()
-                }).map_err(|e| AgentError(e.to_string()))?
+                })
+                .map_err(|e| AgentError(e.to_string()))?
             };
             *browser_lock = Some(browser);
         }
-        
+
         let browser = browser_lock.as_ref().unwrap();
         let tab = browser.new_tab().map_err(|e| AgentError(e.to_string()))?;
 
         match action {
             "navigate" => {
-                let url = args["url"].as_str().ok_or_else(|| AgentError("Missing URL".to_string()))?;
-                tab.navigate_to(url).map_err(|e| AgentError(e.to_string()))?;
-                tab.wait_until_navigated().map_err(|e| AgentError(e.to_string()))?;
+                let url = args["url"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing URL".to_string()))?;
+                tab.navigate_to(url)
+                    .map_err(|e| AgentError(e.to_string()))?;
+                tab.wait_until_navigated()
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(format!("Successfully navigated to {}", url))
             }
             "click" => {
-                let selector = args["selector"].as_str().ok_or_else(|| AgentError("Missing selector".to_string()))?;
-                tab.find_element(selector).map_err(|e| AgentError(e.to_string()))?
-                    .click().map_err(|e| AgentError(e.to_string()))?;
+                let selector = args["selector"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing selector".to_string()))?;
+                tab.find_element(selector)
+                    .map_err(|e| AgentError(e.to_string()))?
+                    .click()
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(format!("Clicked element: {}", selector))
             }
             "type" => {
-                let selector = args["selector"].as_str().ok_or_else(|| AgentError("Missing selector".to_string()))?;
-                let text = args["text"].as_str().ok_or_else(|| AgentError("Missing text".to_string()))?;
-                tab.find_element(selector).map_err(|e| AgentError(e.to_string()))?
-                    .type_into(text).map_err(|e| AgentError(e.to_string()))?;
+                let selector = args["selector"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing selector".to_string()))?;
+                let text = args["text"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing text".to_string()))?;
+                tab.find_element(selector)
+                    .map_err(|e| AgentError(e.to_string()))?
+                    .type_into(text)
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(format!("Typed into {}: {}", selector, text))
             }
             "wait" => {
@@ -84,12 +105,14 @@ impl Tool for BrowserTool {
                 Ok(format!("Waited for {} seconds", seconds))
             }
             "screenshot" => {
-                let png_data = tab.capture_screenshot(
-                    headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption::Png,
-                    None,
-                    None,
-                    true
-                ).map_err(|e| AgentError(e.to_string()))?;
+                let png_data = tab
+                    .capture_screenshot(
+                        headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption::Png,
+                        None,
+                        None,
+                        true,
+                    )
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(format!("Captured screenshot ({} bytes)", png_data.len()))
             }
             "extract" => {

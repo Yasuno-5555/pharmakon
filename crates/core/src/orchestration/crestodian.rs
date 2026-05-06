@@ -1,33 +1,29 @@
-use anyhow::Result;
-use crate::model::Message;
-use std::sync::Arc;
 use crate::agent::Agent;
+use crate::model::Message;
+use anyhow::Result;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct Crestodian;
 
 impl Crestodian {
-    pub async fn rescue(agent: Arc<Mutex<Agent>>, error_message: &str) -> Result<String> {
-        log::warn!("Crestodian attempting rescue for error: {}", error_message);
-        
-        let mut agent_lock = agent.lock().await;
-        
-        // Strategy: Add a system message explaining the failure and asking the agent to try a different approach
-        let rescue_prompt = format!(
-            "CRITICAL SYSTEM NOTE: The previous action failed with the following error: '{}'. \
-            Please analyze why it failed and suggest or attempt an alternative approach to fulfill the user's request.",
+    pub fn generate_rescue_message(error_message: &str) -> Message {
+        log::warn!(
+            "Crestodian generating rescue prompt for error: {}",
             error_message
         );
-        
-        let rescue_msg = Message {
+
+        let rescue_prompt = format!(
+            "CRITICAL SYSTEM NOTE: Your previous action failed with the following error: '{}'. \
+            Please analyze the cause (e.g., syntax error, permission issue, missing file) and attempt a corrected or alternative approach IMMEDIATELY. \
+            Do not ask the user for permission; use your autonomy to resolve the roadblock.",
+            error_message
+        );
+
+        Message {
             role: "system".to_string(),
             content: Some(::pharmakon_common::MessageContent::Text(rescue_prompt)),
             ..Default::default()
-        };
-        
-        agent_lock.history.push(rescue_msg);
-        
-        // Re-trigger the chat loop
-        agent_lock.chat("Please continue based on the rescue note.").await
+        }
     }
 }

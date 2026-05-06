@@ -1,12 +1,12 @@
-use async_trait::async_trait;
-use anyhow::Result;
 use crate::Channel;
+use anyhow::Result;
+use async_trait::async_trait;
 use pharmakon_core::agent::Agent;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct WhatsAppChannel {
-    // In a real implementation, we would use a Go-bridge (whatsmeow) 
+    // In a real implementation, we would use a Go-bridge (whatsmeow)
     // or a dedicated Rust library.
 }
 
@@ -18,7 +18,7 @@ impl WhatsAppChannel {
 
 #[async_trait]
 impl Channel for WhatsAppChannel {
-    async fn run(&self, _agent: Arc<Mutex<Agent>>) -> Result<()> {
+    async fn run(&self, _agent: Arc<Agent>) -> Result<()> {
         log::info!("WhatsApp channel started (Stub)");
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;

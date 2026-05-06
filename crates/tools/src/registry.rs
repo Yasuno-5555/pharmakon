@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use pharmakon_common::{Tool, AgentModel, CommitmentPersistence, SoulManager, Event};
-use tokio::sync::broadcast;
 use crate::*;
+use pharmakon_common::{AgentModel, CommitmentPersistence, Event, SoulManager, Tool};
+use std::sync::Arc;
+use tokio::sync::broadcast;
 
 pub struct ToolRegistry;
 
@@ -16,31 +16,38 @@ pub struct ToolDependencies {
 impl ToolRegistry {
     pub fn get_tool(name: &str, deps: &ToolDependencies) -> Option<Arc<dyn Tool>> {
         match name {
-            "browser" => Some(Arc::new(BrowserTool::new(None))),
+            "browser" => Some(Arc::new(browser::BrowserTool::new(None))),
             "brave_search" => {
                 let api_key = std::env::var("BRAVE_API_KEY").ok()?;
-                Some(Arc::new(BraveSearchTool::new(api_key)))
+                Some(Arc::new(web_search::BraveSearchTool::new(api_key)))
             }
-            "shell" => Some(Arc::new(ShellTool)),
-            "read_file" => Some(Arc::new(FileReadTool)),
-            "terminal" => Some(Arc::new(TerminalTool::new())),
-            "screenshot" => Some(Arc::new(ScreenshotTool)),
-            "camera" => Some(Arc::new(CameraTool)),
-            "web_fetch" => Some(Arc::new(WebFetchTool::new())),
-            "link_understanding" => Some(Arc::new(LinkUnderstandingTool::new())),
-            "media_understanding" => {
-                deps.model.as_ref().map(|m| Arc::new(MediaUnderstandingTool::new(m.clone(), deps.weaver.clone())) as Arc<dyn Tool>)
+            "shell" => Some(Arc::new(terminal::ShellTool)),
+            "read_file" => Some(Arc::new(files::FileReadTool)),
+            "terminal" => Some(Arc::new(terminal::TerminalTool::new())),
+            "screenshot" => Some(Arc::new(media::capture::ScreenshotTool)),
+            "camera" => Some(Arc::new(media::capture::CameraTool)),
+            "web_fetch" => Some(Arc::new(web_fetch::WebFetchTool::new())),
+            "link_understanding" => {
+                Some(Arc::new(link_understanding::LinkUnderstandingTool::new()))
             }
-            "canvas" => {
-                deps.event_tx.as_ref().map(|tx| Arc::new(CanvasTool::new(tx.clone())) as Arc<dyn Tool>)
-            }
-            "commitment" => {
-                deps.store.as_ref().map(|s| Arc::new(CommitmentTool::new(s.clone())) as Arc<dyn Tool>)
-            }
-            "context_connector" => Some(Arc::new(ContextConnectorTool::new())),
-            "soul_manager" => {
-                deps.soul_manager.as_ref().map(|m| Arc::new(SoulTool::new(m.clone())) as Arc<dyn Tool>)
-            }
+            "media_understanding" => deps.model.as_ref().map(|m| {
+                Arc::new(media_understanding::MediaUnderstandingTool::new(
+                    m.clone(),
+                    deps.weaver.clone(),
+                )) as Arc<dyn Tool>
+            }),
+            "canvas" => deps
+                .event_tx
+                .as_ref()
+                .map(|tx| Arc::new(canvas::CanvasTool::new(tx.clone())) as Arc<dyn Tool>),
+            "commitment" => deps.store.as_ref().map(|s| {
+                Arc::new(commitment_tool::CommitmentTool::new(s.clone())) as Arc<dyn Tool>
+            }),
+            "context_connector" => Some(Arc::new(connectors::ContextConnectorTool::new())),
+            "soul_manager" => deps
+                .soul_manager
+                .as_ref()
+                .map(|m| Arc::new(soul_tool::SoulTool::new(m.clone())) as Arc<dyn Tool>),
             _ => None,
         }
     }

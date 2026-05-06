@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
 use anyhow::Result;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Commitment {

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use pharmakon_common::{CompletionRequest, CompletionResponse, AgentModel, AgentResult};
+use pharmakon_common::{AgentModel, AgentResult, CompletionRequest, CompletionResponse};
 
 pub struct TestModel;
 
@@ -13,7 +13,12 @@ impl AgentModel for TestModel {
         })
     }
 
-    async fn stream_complete(&self, _request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>> {
+    async fn stream_complete(
+        &self,
+        _request: CompletionRequest,
+    ) -> AgentResult<
+        std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
+    > {
         let stream = futures::stream::iter(vec![]);
         Ok(Box::pin(stream))
     }

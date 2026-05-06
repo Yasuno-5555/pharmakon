@@ -1,2 +1,2 @@
-pub mod registry;
 pub mod detached;
+pub mod registry;

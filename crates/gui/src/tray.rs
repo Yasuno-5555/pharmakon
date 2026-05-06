@@ -1,6 +1,6 @@
 use tray_icon::{
-    menu::{Menu, MenuItem, MenuEvent},
     TrayIcon, TrayIconBuilder,
+    menu::{Menu, MenuEvent, MenuItem},
 };
 
 pub struct TrayHandler {
@@ -14,14 +14,15 @@ impl TrayHandler {
         let reset_item = MenuItem::new("Reset Session", true, None);
         let status_item = MenuItem::new("Status: Online", false, None);
         let quit_item = MenuItem::new("Quit", true, None);
-        
+
         menu.append_items(&[
             &show_item,
             &reset_item,
             &MenuItem::new("---", false, None),
             &status_item,
             &quit_item,
-        ]).unwrap();
+        ])
+        .unwrap();
 
         let icon = Self::create_icon();
 

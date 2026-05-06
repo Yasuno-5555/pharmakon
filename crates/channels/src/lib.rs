@@ -1,5 +1,5 @@
-pub mod telegram;
 pub mod discord;
+pub mod telegram;
 // pub mod slack;
 pub mod whatsapp;
 // pub mod matrix;
@@ -19,11 +19,11 @@ pub struct InboundMessage {
 #[async_trait]
 pub trait Channel: Send + Sync {
     /// Start listening for messages on this channel
-    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()>;
-    
+    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()>;
+
     /// Send a message out through this channel
     async fn send(&self, target: &str, content: &str) -> anyhow::Result<()>;
-    
+
     /// Unique identifier for this channel instance
     fn id(&self) -> &str;
 }
@@ -40,9 +40,9 @@ impl MockChannel {
 
 #[async_trait]
 impl Channel for MockChannel {
-    async fn run(&self, _agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, _agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("MockChannel {} started.", self.id);
-        
+
         // Simulating some periodic activity or just staying alive
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;

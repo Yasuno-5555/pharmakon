@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SessionMetadata {
@@ -29,7 +29,8 @@ impl SessionManager {
 
     pub async fn get_lock(&self, session_id: &str) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().await;
-        locks.entry(session_id.to_string())
+        locks
+            .entry(session_id.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
@@ -44,17 +45,20 @@ impl SessionManager {
         if let Some(meta) = cache.get_mut(session_id) {
             meta.last_active_at = Utc::now();
         } else {
-            cache.insert(session_id.to_string(), SessionMetadata {
-                session_id: session_id.to_string(),
-                name: None,
-                created_at: Utc::now(),
-                last_active_at: Utc::now(),
-                model_override: None,
-                extra: HashMap::new(),
-            });
+            cache.insert(
+                session_id.to_string(),
+                SessionMetadata {
+                    session_id: session_id.to_string(),
+                    name: None,
+                    created_at: Utc::now(),
+                    last_active_at: Utc::now(),
+                    model_override: None,
+                    extra: HashMap::new(),
+                },
+            );
         }
     }
-    
+
     pub fn generate_slug(&self, goal: &str) -> String {
         // Simple slug generation: lowercase, remove non-alphanumeric, replace spaces with hyphens
         goal.to_lowercase()

@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use pharmakon_common::voice::TextToSpeech;
 use reqwest::Client;
 use serde_json::json;
@@ -23,8 +23,13 @@ impl ElevenLabsProvider {
 #[async_trait]
 impl TextToSpeech for ElevenLabsProvider {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>> {
-        let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{}", self.voice_id);
-        let res = self.client.post(&url)
+        let url = format!(
+            "https://api.elevenlabs.io/v1/text-to-speech/{}",
+            self.voice_id
+        );
+        let res = self
+            .client
+            .post(&url)
             .header("xi-api-key", &self.api_key)
             .json(&json!({
                 "text": text,

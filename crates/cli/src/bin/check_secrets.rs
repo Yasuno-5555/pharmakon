@@ -3,7 +3,7 @@ use pharmakon_common::SecretStore;
 fn main() {
     let store = SecretStore::new();
     let providers = vec!["GEMINI", "OPENAI", "ANTHROPIC", "GROQ", "PERPLEXITY"];
-    
+
     println!("=== Pharmakon Secret Check ===");
     for p in providers {
         let name = format!("{}_API_KEY", p);

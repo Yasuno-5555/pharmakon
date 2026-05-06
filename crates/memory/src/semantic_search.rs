@@ -1,6 +1,6 @@
 use crate::vector_store::VectorStore;
-use pharmakon_common::EmbeddingModel;
 use anyhow::Result;
+use pharmakon_common::EmbeddingModel;
 
 /// SemanticSearch provides long-term memory via embedding-based vector search.
 pub struct SemanticSearch {
@@ -9,13 +9,23 @@ pub struct SemanticSearch {
 }
 
 impl SemanticSearch {
-    pub fn new(vector_store: Box<dyn VectorStore>, embedding_model: Box<dyn EmbeddingModel>) -> Self {
-        Self { vector_store, embedding_model }
+    pub fn new(
+        vector_store: Box<dyn VectorStore>,
+        embedding_model: Box<dyn EmbeddingModel>,
+    ) -> Self {
+        Self {
+            vector_store,
+            embedding_model,
+        }
     }
 
     /// Remember a piece of text by generating its embedding and storing it.
     pub async fn remember(&self, text: &str) -> Result<()> {
-        let vector = self.embedding_model.generate_embedding(text).await.map_err(|e| anyhow::Error::new(e))?;
+        let vector = self
+            .embedding_model
+            .generate_embedding(text)
+            .await
+            .map_err(|e| anyhow::Error::new(e))?;
         let id = rand::random::<u64>();
         self.vector_store.add_memory(id, vector, text).await
     }
@@ -27,7 +37,11 @@ impl SemanticSearch {
 
     /// Search for similar memories with a specific limit.
     pub async fn search_with_limit(&self, query: &str, limit: u64) -> Result<Vec<String>> {
-        let vector = self.embedding_model.generate_embedding(query).await.map_err(|e| anyhow::Error::new(e))?;
+        let vector = self
+            .embedding_model
+            .generate_embedding(query)
+            .await
+            .map_err(|e| anyhow::Error::new(e))?;
         self.vector_store.search_memory(vector, limit).await
     }
 

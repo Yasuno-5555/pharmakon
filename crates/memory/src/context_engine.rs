@@ -1,5 +1,5 @@
-use pharmakon_common::Message;
 use anyhow::Result;
+use pharmakon_common::Message;
 use tiktoken_rs::cl100k_base;
 
 /// ContextEngine manages the agent's conversation history to stay within token limits.
@@ -29,20 +29,28 @@ impl ContextEngine {
     /// 3. Most recent messages (last 5)
     pub async fn prune_history(&self, history: &mut Vec<Message>) -> Result<()> {
         let bpe = cl100k_base()?;
-        
+
         let current_tokens = self.count_tokens(history, &bpe);
         if current_tokens <= self.max_tokens {
             return Ok(());
         }
 
-        log::info!("Context Engine: Pruning history ({} tokens > {} limit)", current_tokens, self.max_tokens);
+        log::info!(
+            "Context Engine: Pruning history ({} tokens > {} limit)",
+            current_tokens,
+            self.max_tokens
+        );
 
         let total = history.len();
         // Indices we definitely want to keep
         let mut keep_indices: Vec<usize> = Vec::new();
-        if total > 0 { keep_indices.push(0); } // System/First
+        if total > 0 {
+            keep_indices.push(0);
+        } // System/First
         for &idx in &self.pinned_indices {
-            if idx < total { keep_indices.push(idx); }
+            if idx < total {
+                keep_indices.push(idx);
+            }
         }
         // Last 5
         let start_recent = total.saturating_sub(5);
@@ -54,24 +62,21 @@ impl ContextEngine {
         keep_indices.sort();
 
         // Candidates for removal (everything else)
-        let _removal_candidates: Vec<usize> = (0..total)
-            .filter(|i| !keep_indices.contains(i))
-            .collect();
-        
+        let _removal_candidates: Vec<usize> =
+            (0..total).filter(|i| !keep_indices.contains(i)).collect();
+
         // Refined removal logic:
         let mut to_keep = vec![false; total];
         for &idx in &keep_indices {
             to_keep[idx] = true;
         }
-        
+
         // If we still have room, add back most recent non-must-keeps from candidates
-        let mut additional_candidates: Vec<usize> = (0..total)
-            .filter(|i| !to_keep[*i])
-            .collect();
-        
+        let mut additional_candidates: Vec<usize> = (0..total).filter(|i| !to_keep[*i]).collect();
+
         // Reverse to get most recent first
         additional_candidates.reverse();
-        
+
         for idx in additional_candidates {
             let msg_tokens = self.count_message_tokens(&history[idx], &bpe);
             if self.count_tokens_from_map(history, &to_keep, &bpe) + msg_tokens <= self.max_tokens {
@@ -93,11 +98,21 @@ impl ContextEngine {
     }
 
     fn count_tokens(&self, history: &[Message], bpe: &tiktoken_rs::CoreBPE) -> usize {
-        history.iter().map(|m| self.count_message_tokens(m, bpe)).sum()
+        history
+            .iter()
+            .map(|m| self.count_message_tokens(m, bpe))
+            .sum()
     }
 
-    fn count_tokens_from_map(&self, history: &[Message], to_keep: &[bool], bpe: &tiktoken_rs::CoreBPE) -> usize {
-        history.iter().enumerate()
+    fn count_tokens_from_map(
+        &self,
+        history: &[Message],
+        to_keep: &[bool],
+        bpe: &tiktoken_rs::CoreBPE,
+    ) -> usize {
+        history
+            .iter()
+            .enumerate()
             .filter(|(i, _)| to_keep[*i])
             .map(|(_, m)| self.count_message_tokens(m, bpe))
             .sum()
@@ -112,6 +127,7 @@ impl ContextEngine {
             Some(tc) => serde_json::to_string(tc).unwrap_or_default(),
             None => String::new(),
         };
-        bpe.encode_with_special_tokens(&format!("{} {} {}", msg.role, content_str, tool_calls)).len()
+        bpe.encode_with_special_tokens(&format!("{} {} {}", msg.role, content_str, tool_calls))
+            .len()
     }
 }

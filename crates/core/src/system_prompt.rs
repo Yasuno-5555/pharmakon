@@ -20,8 +20,12 @@ impl StaticContribution {
 }
 
 impl SystemPromptContribution for StaticContribution {
-    fn name(&self) -> &str { &self.name }
-    fn get_content(&self) -> String { self.content.clone() }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn get_content(&self) -> String {
+        self.content.clone()
+    }
 }
 
 pub struct SystemPromptManager {
@@ -51,14 +55,18 @@ impl SystemPromptManager {
 
     pub fn build(&self) -> String {
         let mut prompt = self.base_soul.system_prompt.clone();
-        
+
         if !self.contributions.is_empty() {
             prompt.push_str("\n\n### ADDITIONAL CONTEXT & GUIDELINES\n");
             for contrib in &self.contributions {
-                prompt.push_str(&format!("\n[{}]\n{}\n", contrib.name(), contrib.get_content()));
+                prompt.push_str(&format!(
+                    "\n[{}]\n{}\n",
+                    contrib.name(),
+                    contrib.get_content()
+                ));
             }
         }
-        
+
         prompt
     }
 }

@@ -18,7 +18,7 @@ impl SlackChannel {
 
 #[async_trait]
 impl Channel for SlackChannel {
-    async fn run(&self, _agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, _agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("SlackChannel starting (Socket Mode implementation pending)...");
         // Socket Mode requires an App Token in addition to the Bot Token.
         // For now, we keep it as a placeholder to avoid breaking the build if tokens are missing.

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -16,7 +16,9 @@ pub struct ModelCatalog {
 
 impl ModelCatalog {
     pub fn new() -> Self {
-        let mut catalog = Self { models: HashMap::new() };
+        let mut catalog = Self {
+            models: HashMap::new(),
+        };
         catalog.register_defaults();
         catalog
     }
@@ -34,7 +36,11 @@ impl ModelCatalog {
             name: "Gemini 1.5 Pro".to_string(),
             provider: "google".to_string(),
             context_window: 2000000,
-            capabilities: vec!["vision".to_string(), "audio".to_string(), "tools".to_string()],
+            capabilities: vec![
+                "vision".to_string(),
+                "audio".to_string(),
+                "tools".to_string(),
+            ],
         });
         self.register(ModelInfo {
             id: "claude-3-5-sonnet".to_string(),

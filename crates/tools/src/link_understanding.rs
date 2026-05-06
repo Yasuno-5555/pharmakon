@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use serde_json::{json, Value};
-use pharmakon_common::{Tool, AgentResult, AgentError};
+use pharmakon_common::{AgentError, AgentResult, Tool};
 use reqwest::Client;
 use scraper::{Html, Selector};
+use serde_json::{Value, json};
 
 pub struct LinkUnderstandingTool {
     client: Client,
@@ -18,8 +18,12 @@ impl LinkUnderstandingTool {
 
 #[async_trait]
 impl Tool for LinkUnderstandingTool {
-    fn name(&self) -> &str { "understand_link" }
-    fn description(&self) -> &str { "Extract rich metadata, title, and a summary from a URL to understand its content" }
+    fn name(&self) -> &str {
+        "understand_link"
+    }
+    fn description(&self) -> &str {
+        "Extract rich metadata, title, and a summary from a URL to understand its content"
+    }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
@@ -31,26 +35,34 @@ impl Tool for LinkUnderstandingTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let url = args["url"].as_str().ok_or_else(|| AgentError("Missing url".to_string()))?;
-        
+        let url = args["url"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing url".to_string()))?;
+
         log::info!("Analyzing link: {}", url);
-        
-        let res = self.client.get(url)
+
+        let res = self
+            .client
+            .get(url)
             .header("User-Agent", "Pharmakon/0.1.0")
             .send()
             .await
             .map_err(|e| AgentError(e.to_string()))?;
-        
+
         let html_content = res.text().await.map_err(|e| AgentError(e.to_string()))?;
         let document = Html::parse_document(&html_content);
-        
+
         let title_selector = Selector::parse("title").unwrap();
-        let title = document.select(&title_selector).next()
+        let title = document
+            .select(&title_selector)
+            .next()
             .map(|e| e.inner_html())
             .unwrap_or_else(|| "No title found".to_string());
-            
+
         let meta_desc_selector = Selector::parse("meta[name='description']").unwrap();
-        let description = document.select(&meta_desc_selector).next()
+        let description = document
+            .select(&meta_desc_selector)
+            .next()
             .and_then(|e| e.value().attr("content"))
             .unwrap_or("No description found");
 
@@ -58,7 +70,10 @@ impl Tool for LinkUnderstandingTool {
         let mut og_data = std::collections::HashMap::new();
         let og_selector = Selector::parse("meta[property^='og:']").unwrap();
         for element in document.select(&og_selector) {
-            if let (Some(property), Some(content)) = (element.value().attr("property"), element.value().attr("content")) {
+            if let (Some(property), Some(content)) = (
+                element.value().attr("property"),
+                element.value().attr("content"),
+            ) {
                 og_data.insert(property.to_string(), content.to_string());
             }
         }
@@ -72,10 +87,11 @@ impl Tool for LinkUnderstandingTool {
                 structured_data.push(json_val);
             }
         }
-            
+
         // Basic summary: first few paragraphs
         let p_selector = Selector::parse("p").unwrap();
-        let summary: String = document.select(&p_selector)
+        let summary: String = document
+            .select(&p_selector)
             .take(5)
             .map(|e| e.text().collect::<String>())
             .collect::<Vec<_>>()

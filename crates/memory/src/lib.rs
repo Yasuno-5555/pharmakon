@@ -1,14 +1,14 @@
-pub mod vector_store;
+pub mod commitment;
 pub mod compactor;
 pub mod context_engine;
-pub mod semantic_search;
 pub mod fact_memory;
-pub mod commitment;
-pub mod weaver;
 pub mod graph;
+pub mod semantic_search;
+pub mod vector_store;
+pub mod weaver;
 
-pub use fact_memory::{Fact, FactMemory};
 pub use commitment::Commitment;
+pub use fact_memory::{Fact, FactMemory};
 
 use serde::{Deserialize, Serialize};
 

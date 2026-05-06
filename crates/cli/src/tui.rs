@@ -1,22 +1,22 @@
 use anyhow::Result;
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Terminal,
-};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use futures_util::{SinkExt, StreamExt};
+use pharmakon_common::{Event, Request};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 use reqwest;
 use std::io;
 use std::time::Duration;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
-use futures_util::{StreamExt, SinkExt};
-use pharmakon_common::{Event, Request};
 use tokio::sync::mpsc;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 async fn wait_for_gateway() -> Result<()> {
     let health_url = "http://127.0.0.1:18789/health";
@@ -30,7 +30,10 @@ async fn wait_for_gateway() -> Result<()> {
             }
             _ => {
                 if attempts >= 20 {
-                    return Err(anyhow::anyhow!("Gateway not ready after {} attempts.", attempts));
+                    return Err(anyhow::anyhow!(
+                        "Gateway not ready after {} attempts.",
+                        attempts
+                    ));
                 }
                 attempts += 1;
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -58,12 +61,20 @@ pub async fn run_tui() -> Result<()> {
         Ok(v) => {
             tracing::debug!("WebSocket handshake successful.");
             v
-        },
+        }
         Err(e) => {
             tracing::error!("WebSocket handshake failed: {}", e);
             disable_raw_mode()?;
-            execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-            return Err(anyhow::anyhow!("Could not connect to Gateway at {}: {}. Is it running?", url, e));
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
+            return Err(anyhow::anyhow!(
+                "Could not connect to Gateway at {}: {}. Is it running?",
+                url,
+                e
+            ));
         }
     };
 
@@ -104,7 +115,9 @@ pub async fn run_tui() -> Result<()> {
                     }
                 }
                 Event::AgentResponse { content } => messages.push(format!("Agent: {}", content)),
-                Event::ToolCall { name, args } => thoughts.push(format!("⚒ Tool Call: {} ({})", name, args)),
+                Event::ToolCall { name, args } => {
+                    thoughts.push(format!("⚒ Tool Call: {} ({})", name, args))
+                }
                 Event::ToolResult { result } => thoughts.push(format!("✓ Tool Result: {}", result)),
                 _ => {}
             }
@@ -113,42 +126,63 @@ pub async fn run_tui() -> Result<()> {
         terminal.draw(|f| {
             let main_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(75),
-                    Constraint::Percentage(25),
-                ].as_ref())
+                .constraints([Constraint::Percentage(75), Constraint::Percentage(25)].as_ref())
                 .split(f.area());
 
             let left_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(3),
-                    Constraint::Percentage(30),
-                ].as_ref())
+                .constraints(
+                    [
+                        Constraint::Min(0),
+                        Constraint::Length(3),
+                        Constraint::Percentage(30),
+                    ]
+                    .as_ref(),
+                )
                 .split(main_chunks[0]);
 
-            let msg_list: Vec<ListItem> = messages.iter().rev().map(|m| ListItem::new(m.as_str())).collect();
-            let msg_block = List::new(msg_list)
-                .block(Block::default().title(" Conversation History ").borders(Borders::ALL));
+            let msg_list: Vec<ListItem> = messages
+                .iter()
+                .rev()
+                .map(|m| ListItem::new(m.as_str()))
+                .collect();
+            let msg_block = List::new(msg_list).block(
+                Block::default()
+                    .title(" Conversation History ")
+                    .borders(Borders::ALL),
+            );
             f.render_widget(msg_block, left_chunks[0]);
 
-            let input = Paragraph::new(input_buffer.as_str())
-                .block(Block::default().borders(Borders::ALL).title(" Your Message (Enter to send) "));
+            let input = Paragraph::new(input_buffer.as_str()).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Your Message (Enter to send) "),
+            );
             f.render_widget(input, left_chunks[1]);
-            
-            let thought_list: Vec<ListItem> = thoughts.iter().rev().take(20).map(|m| ListItem::new(m.as_str())).collect();
-            let thought_block = List::new(thought_list)
-                .block(Block::default().title(" Agent Reasoning & Tool Trace ").borders(Borders::ALL));
+
+            let thought_list: Vec<ListItem> = thoughts
+                .iter()
+                .rev()
+                .take(20)
+                .map(|m| ListItem::new(m.as_str()))
+                .collect();
+            let thought_block = List::new(thought_list).block(
+                Block::default()
+                    .title(" Agent Reasoning & Tool Trace ")
+                    .borders(Borders::ALL),
+            );
             f.render_widget(thought_block, left_chunks[2]);
 
             // Right Panel: Stats & Swarm
             let right_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(10), // Stats
-                    Constraint::Min(0),     // Swarm
-                ].as_ref())
+                .constraints(
+                    [
+                        Constraint::Length(10), // Stats
+                        Constraint::Min(0),     // Swarm
+                    ]
+                    .as_ref(),
+                )
                 .split(main_chunks[1]);
 
             let stats = vec![
@@ -160,8 +194,8 @@ pub async fn run_tui() -> Result<()> {
                 ListItem::new("Gateway: 127.0.0.1:18789"),
                 ListItem::new("Latency: 45ms"),
             ];
-            let stats_block = List::new(stats)
-                .block(Block::default().title(" Metrics ").borders(Borders::ALL));
+            let stats_block =
+                List::new(stats).block(Block::default().title(" Metrics ").borders(Borders::ALL));
             f.render_widget(stats_block, right_chunks[0]);
 
             let swarm = vec![
@@ -169,8 +203,11 @@ pub async fn run_tui() -> Result<()> {
                 ListItem::new("○ Researcher (Idle)"),
                 ListItem::new("○ Coder (Idle)"),
             ];
-            let swarm_block = List::new(swarm)
-                .block(Block::default().title(" Autonomy Matrix ").borders(Borders::ALL));
+            let swarm_block = List::new(swarm).block(
+                Block::default()
+                    .title(" Autonomy Matrix ")
+                    .borders(Borders::ALL),
+            );
             f.render_widget(swarm_block, right_chunks[1]);
         })?;
 
@@ -196,7 +233,9 @@ pub async fn run_tui() -> Result<()> {
                             let user_message = format!("You: {}", input_buffer);
                             messages.push(user_message);
 
-                            let req = Request::SendMessage { message: input_buffer.clone() };
+                            let req = Request::SendMessage {
+                                message: input_buffer.clone(),
+                            };
                             let msg = serde_json::to_string(&req)?;
                             tracing::debug!(target: "tui", "Sending request: {}", msg);
                             if let Err(e) = ws_write.send(WsMessage::Text(msg.into())).await {

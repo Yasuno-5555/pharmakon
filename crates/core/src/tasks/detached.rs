@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use crate::agent::Agent;
 use anyhow::Result;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 pub struct DetachedTask {

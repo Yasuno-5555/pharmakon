@@ -1,9 +1,13 @@
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
-    static ref RE_API_KEY: Regex = Regex::new(r"(?i)(api[-_]?key|secret|token|password|auth|credential)[:\s=]+[a-zA-Z0-9\-_]{8,}").unwrap();
-    static ref RE_EMAIL: Regex = Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
+    static ref RE_API_KEY: Regex = Regex::new(
+        r"(?i)(api[-_]?key|secret|token|password|auth|credential)[:\s=]+[a-zA-Z0-9\-_]{8,}"
+    )
+    .unwrap();
+    static ref RE_EMAIL: Regex =
+        Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
     static ref RE_CREDIT_CARD: Regex = Regex::new(r"\b(?:\d[ -]*?){13,16}\b").unwrap();
 }
 

@@ -1,10 +1,15 @@
-use pharmakon_core::agent::Agent;
-use pharmakon_core::model::{AgentModel, CompletionRequest, CompletionResponse, MessageContent, AgentResult};
-use pharmakon_core::persistence::DbSessionStore;
-use pharmakon_common::Config;
-use pharmakon_tools::ShellTool;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use async_trait::async_trait;
+use pharmakon_common::Config;
+use pharmakon_core::agent::Agent;
+use pharmakon_core::model::{
+    AgentModel, AgentResult, CompletionRequest, CompletionResponse, MessageContent,
+};
+use pharmakon_core::persistence::DbSessionStore;
+use pharmakon_tools::ShellTool;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 // A more advanced MockModel for detailed testing
 struct InspectableMockModel {
@@ -32,24 +37,44 @@ impl AgentModel for InspectableMockModel {
         })
     }
 
-    fn name(&self) -> &str { "inspectable-mock-model" }
+    fn name(&self) -> &str {
+        "inspectable-mock-model"
+    }
 
-    async fn stream_complete(&self, _request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send>>> {
-        self.was_stream_complete_called.store(true, Ordering::SeqCst);
+    async fn stream_complete(
+        &self,
+        _request: CompletionRequest,
+    ) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send>>>
+    {
+        self.was_stream_complete_called
+            .store(true, Ordering::SeqCst);
         let stream = futures::stream::iter(vec![Ok("stream complete called".to_string())]);
         Ok(Box::pin(stream))
     }
 }
 
-async fn setup_test_agent_with_model(model: Arc<dyn AgentModel>) -> tokio::sync::MutexGuard<'static, Agent> {
+async fn setup_test_agent_with_model(
+    model: Arc<dyn AgentModel>,
+) -> tokio::sync::MutexGuard<'static, Agent> {
     let config = Config::default();
-    let store = Arc::new(DbSessionStore::new("sqlite::memory:").await.expect("Failed to create in-memory store"));
-    
+    let store = Arc::new(
+        DbSessionStore::new("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory store"),
+    );
+
     // Use model, store, and config directly
-    let router = Box::leak(Box::new(tokio::sync::Mutex::new(pharmakon_core::agent_router::AgentRouter::new(model, store, config, None))));
-    
-    let agent_handle = router.lock().await.get_agent("test-agent-logic").await.unwrap();
-    
+    let router = Box::leak(Box::new(tokio::sync::Mutex::new(
+        pharmakon_core::agent_router::AgentRouter::new(model, store, config, None),
+    )));
+
+    let agent_handle = router
+        .lock()
+        .await
+        .get_agent("test-agent-logic")
+        .await
+        .unwrap();
+
     // We also need to leak the handle to get a 'static MutexGuard
     let agent_handle_leaked = Box::leak(Box::new(agent_handle));
 
@@ -65,7 +90,10 @@ async fn test_chat_calls_stream_when_no_tools() {
 
     // With the new reflection engine, complete() is called once after chat.
     // We check that stream_complete was used for the main response.
-    assert!(model.was_stream_complete_called.load(Ordering::SeqCst), "stream_complete() SHOULD have been called for the main chat response");
+    assert!(
+        model.was_stream_complete_called.load(Ordering::SeqCst),
+        "stream_complete() SHOULD have been called for the main chat response"
+    );
 }
 
 #[tokio::test]
@@ -77,6 +105,12 @@ async fn test_chat_calls_complete_when_tools_are_present() {
 
     let _ = agent.chat("test message").await;
 
-    assert!(model.was_complete_called.load(Ordering::SeqCst), "complete() SHOULD have been called");
-    assert!(!model.was_stream_complete_called.load(Ordering::SeqCst), "stream_complete() should NOT have been called");
+    assert!(
+        model.was_complete_called.load(Ordering::SeqCst),
+        "complete() SHOULD have been called"
+    );
+    assert!(
+        !model.was_stream_complete_called.load(Ordering::SeqCst),
+        "stream_complete() should NOT have been called"
+    );
 }

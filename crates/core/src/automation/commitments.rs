@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,7 +24,9 @@ pub struct CommitmentManager {
 
 impl CommitmentManager {
     pub fn new() -> Self {
-        Self { commitments: Vec::new() }
+        Self {
+            commitments: Vec::new(),
+        }
     }
 
     pub fn add_commitment(&mut self, task: String, deadline: Option<DateTime<Utc>>) -> Uuid {

@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::fs;
 use crate::soul::Soul;
+use anyhow::{Context, Result};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
 pub struct SoulRegistry {
     souls: HashMap<String, Soul>,
@@ -13,7 +13,7 @@ impl SoulRegistry {
     pub fn new() -> Result<Self> {
         let home = dirs::home_dir().context("Could not find home directory")?;
         let souls_dir = home.join(".pharmakon").join("souls");
-        
+
         if !souls_dir.exists() {
             fs::create_dir_all(&souls_dir)?;
             // Create a default soul file
@@ -26,7 +26,7 @@ impl SoulRegistry {
             souls: HashMap::new(),
             souls_dir,
         };
-        
+
         registry.reload()?;
         Ok(registry)
     }

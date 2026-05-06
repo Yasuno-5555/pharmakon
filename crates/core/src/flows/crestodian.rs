@@ -20,10 +20,10 @@ impl Crestodian {
 
         let mut agent = Agent::new(model, "onboarding-session".to_string());
         agent = agent.with_soul(soul);
-        
+
         agent.add_tool(Arc::new(ConfigTool));
         agent.add_tool(Arc::new(pharmakon_tools::ShellTool));
-        
+
         agent
     }
 }

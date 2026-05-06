@@ -1,7 +1,8 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentError(pub String);
@@ -17,7 +18,10 @@ impl std::error::Error for AgentError {}
 impl AgentError {
     pub fn is_rate_limit(&self) -> bool {
         let msg = self.0.to_lowercase();
-        msg.contains("429") || msg.contains("too many requests") || msg.contains("quota") || msg.contains("rate limit")
+        msg.contains("429")
+            || msg.contains("too many requests")
+            || msg.contains("quota")
+            || msg.contains("rate limit")
     }
 }
 
@@ -155,7 +159,12 @@ pub struct Usage {
 #[async_trait]
 pub trait AgentModel: Send + Sync {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse>;
-    async fn stream_complete(&self, request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>>;
+    async fn stream_complete(
+        &self,
+        request: CompletionRequest,
+    ) -> AgentResult<
+        std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
+    >;
     fn name(&self) -> &str;
 }
 
@@ -175,10 +184,22 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn parameters(&self) -> serde_json::Value;
     async fn call(&self, args: serde_json::Value) -> AgentResult<String>;
-    fn category(&self) -> ToolCategory { ToolCategory::Custom("generic".to_string()) }
-    fn metadata(&self) -> std::collections::HashMap<String, String> { std::collections::HashMap::new() }
-    fn requires_approval(&self, _args: &serde_json::Value) -> bool { false }
-    fn approval_description(&self, _args: &serde_json::Value) -> String { String::new() }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Custom("generic".to_string())
+    }
+    fn metadata(&self) -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::new()
+    }
+    fn requires_approval(&self, _args: &serde_json::Value) -> bool {
+        false
+    }
+    fn approval_description(&self, _args: &serde_json::Value) -> String {
+        String::new()
+    }
+}
+
+pub trait ToolRegistry: Send + Sync {
+    fn add_tool(&self, tool: Arc<dyn Tool>);
 }
 
 #[async_trait]
@@ -188,7 +209,14 @@ pub trait EmbeddingModel: Send + Sync {
 
 #[async_trait]
 pub trait CommitmentPersistence: Send + Sync {
-    async fn save_commitment(&self, id: &str, description: &str, deadline: Option<DateTime<Utc>>, status: &str, metadata: &Value) -> anyhow::Result<()>;
+    async fn save_commitment(
+        &self,
+        id: &str,
+        description: &str,
+        deadline: Option<DateTime<Utc>>,
+        status: &str,
+        metadata: &Value,
+    ) -> anyhow::Result<()>;
     async fn load_commitments(&self) -> anyhow::Result<Vec<Value>>;
     async fn update_commitment_status(&self, id: &str, status: &str) -> anyhow::Result<()>;
 }

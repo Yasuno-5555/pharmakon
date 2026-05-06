@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use serde_json::Value;
-use pharmakon_common::{Tool, AgentResult, AgentError};
+use pharmakon_common::{AgentError, AgentResult, Tool};
 use pharmakon_mcp::McpClient;
+use serde_json::Value;
 use std::sync::Arc;
 
 pub struct McpTool {
@@ -12,16 +12,32 @@ pub struct McpTool {
 }
 
 impl McpTool {
-    pub fn new(client: Arc<McpClient>, name: String, description: String, parameters: Value) -> Self {
-        Self { client, name, description, parameters }
+    pub fn new(
+        client: Arc<McpClient>,
+        name: String,
+        description: String,
+        parameters: Value,
+    ) -> Self {
+        Self {
+            client,
+            name,
+            description,
+            parameters,
+        }
     }
 }
 
 #[async_trait]
 impl Tool for McpTool {
-    fn name(&self) -> &str { &self.name }
-    fn description(&self) -> &str { &self.description }
-    fn parameters(&self) -> Value { self.parameters.clone() }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters(&self) -> Value {
+        self.parameters.clone()
+    }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
         let start = std::time::Instant::now();
@@ -30,19 +46,29 @@ impl Tool for McpTool {
         let mut final_args = args.clone();
         if let Some(obj) = final_args.as_object_mut() {
             if !obj.contains_key("_pharmakon_context") {
-                obj.insert("_pharmakon_context".to_string(), serde_json::json!({
-                    "tool_name": &self.name,
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                }));
+                obj.insert(
+                    "_pharmakon_context".to_string(),
+                    serde_json::json!({
+                        "tool_name": &self.name,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }),
+                );
             }
         }
 
-        let result: Value = self.client.call_tool(&self.name, final_args).await
+        let result: Value = self
+            .client
+            .call_tool(&self.name, final_args)
+            .await
             .map_err(|e| AgentError(e.to_string()))?;
-        
+
         let elapsed = start.elapsed();
-        log::info!("MCP Tool {} finished in {}ms", self.name, elapsed.as_millis());
-        
+        log::info!(
+            "MCP Tool {} finished in {}ms",
+            self.name,
+            elapsed.as_millis()
+        );
+
         // MCP results often have a 'content' field with a list of parts
         if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
             let mut output = String::new();

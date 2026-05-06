@@ -9,7 +9,9 @@ pub trait AudioCodec: Send + Sync {
 pub struct PcmCodec;
 
 impl AudioCodec for PcmCodec {
-    fn name(&self) -> &str { "pcm" }
+    fn name(&self) -> &str {
+        "pcm"
+    }
     fn encode(&self, input: &[f32]) -> Result<Vec<u8>> {
         let mut output = Vec::with_capacity(input.len() * 4);
         for &sample in input {

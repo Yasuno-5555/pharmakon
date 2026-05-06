@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use anyhow::Result;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Fact {
@@ -21,7 +21,7 @@ impl FactMemory {
     pub fn new() -> Result<Self> {
         let home = dirs::home_dir().expect("Could not find home directory");
         let path = home.join(".pharmakon").join("facts.json");
-        
+
         let facts = if path.exists() {
             let content = fs::read_to_string(&path)?;
             serde_json::from_str(&content).unwrap_or_default()

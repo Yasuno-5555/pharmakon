@@ -1,7 +1,7 @@
 use crate::persistence::DbSessionStore;
-use std::sync::Arc;
 use anyhow::Result;
-use tokio::time::{sleep, Duration};
+use std::sync::Arc;
+use tokio::time::{Duration, sleep};
 
 pub struct DeliveryQueue {
     store: Arc<DbSessionStore>,

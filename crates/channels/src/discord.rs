@@ -1,12 +1,12 @@
-use async_trait::async_trait;
-use anyhow::anyhow;
-use pharmakon_core::agent::Agent;
 use crate::Channel;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use serenity::prelude::*;
+use anyhow::anyhow;
+use async_trait::async_trait;
+use pharmakon_core::agent::Agent;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
+use serenity::prelude::*;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct DiscordChannel {
     pub token: String,
@@ -17,7 +17,7 @@ pub struct DiscordChannel {
 impl DiscordChannel {
     pub fn new(token: String) -> Self {
         let http = Arc::new(serenity::http::Http::new(&token));
-        Self { 
+        Self {
             token,
             id: "discord".to_string(),
             http,
@@ -26,7 +26,7 @@ impl DiscordChannel {
 }
 
 struct Handler {
-    agent: Arc<Mutex<Agent>>,
+    agent: Arc<Agent>,
 }
 
 #[async_trait]
@@ -37,19 +37,22 @@ impl EventHandler for Handler {
         }
 
         log::info!("Discord received message: {}", msg.content);
-        
-        let mut agent_lock = self.agent.lock().await;
-        match agent_lock.chat(&msg.content).await {
-            Ok(response) => {
-                if let Err(e) = msg.channel_id.say(&ctx.http, response).await {
-                    log::error!("Discord send error: {}", e);
+
+        let agent_clone = self.agent.clone();
+        let content = msg.content.clone();
+        tokio::spawn(async move {
+            match agent_clone.chat(&content).await {
+                Ok(response) => {
+                    if let Err(e) = msg.channel_id.say(&ctx.http, response).await {
+                        log::error!("Discord send error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Agent error in Discord: {}", e);
+                    let _ = msg.channel_id.say(&ctx.http, format!("Error: {}", e)).await;
                 }
             }
-            Err(e) => {
-                log::error!("Agent error in Discord: {}", e);
-                let _ = msg.channel_id.say(&ctx.http, format!("Error: {}", e)).await;
-            }
-        }
+        });
     }
 
     async fn ready(&self, _: Context, ready: Ready) {
@@ -59,11 +62,11 @@ impl EventHandler for Handler {
 
 #[async_trait]
 impl Channel for DiscordChannel {
-    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("DiscordChannel starting...");
-        
-        let intents = GatewayIntents::GUILD_MESSAGES 
-            | GatewayIntents::DIRECT_MESSAGES 
+
+        let intents = GatewayIntents::GUILD_MESSAGES
+            | GatewayIntents::DIRECT_MESSAGES
             | GatewayIntents::MESSAGE_CONTENT;
 
         let mut client = Client::builder(&self.token, intents)
@@ -81,7 +84,9 @@ impl Channel for DiscordChannel {
 
     async fn send(&self, target: &str, content: &str) -> anyhow::Result<()> {
         let channel_id: u64 = target.parse()?;
-        serenity::model::id::ChannelId::new(channel_id).say(&self.http, content).await
+        serenity::model::id::ChannelId::new(channel_id)
+            .say(&self.http, content)
+            .await
             .map_err(|e| anyhow!("Discord send error: {}", e))?;
         Ok(())
     }

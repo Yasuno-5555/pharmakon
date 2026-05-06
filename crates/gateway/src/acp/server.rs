@@ -1,10 +1,10 @@
+use crate::acp::AcpMessage;
 use axum::extract::ws::{Message as WsMessage, WebSocket};
-use futures::{StreamExt, SinkExt};
+use futures::{SinkExt, StreamExt};
+use pharmakon_common::Event;
+use pharmakon_core::agent::Agent;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::acp::AcpMessage;
-use pharmakon_core::agent::Agent;
-use pharmakon_common::Event;
 
 pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
     let (mut sender, mut receiver) = socket.split();
@@ -26,9 +26,9 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         }
                         _ => {
                             let agent_lock = agent_clone.lock().await;
-                            AcpMessage::Event { 
+                            AcpMessage::Event {
                                 session_id: agent_lock.session_id.clone(),
-                                event 
+                                event
                             }
                         }
                     };
@@ -56,29 +56,49 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         let _ = agent_lock.approval_tx.send((id, approved));
                     }
                     AcpMessage::Initialize { .. } => {
-                        let _ = tx_clone.send(AcpMessage::Initialized { 
-                            server_version: "0.1.0".to_string(),
-                            capabilities: vec!["streaming".to_string(), "approvals".to_string(), "soul_control".to_string()]
-                        }).await;
+                        let _ = tx_clone
+                            .send(AcpMessage::Initialized {
+                                server_version: "0.1.0".to_string(),
+                                capabilities: vec![
+                                    "streaming".to_string(),
+                                    "approvals".to_string(),
+                                    "soul_control".to_string(),
+                                ],
+                            })
+                            .await;
                     }
-                    AcpMessage::UpdateSoul { traits, system_prompt } => {
+                    AcpMessage::UpdateSoul {
+                        traits,
+                        system_prompt,
+                    } => {
                         let mut agent_lock = agent_clone.lock().await;
                         let mut soul = agent_lock.prompt_manager.soul().clone();
-                        if let Some(t) = traits { soul.traits = t; }
-                        if let Some(p) = system_prompt { soul.system_prompt = p; }
+                        if let Some(t) = traits {
+                            soul.traits = t;
+                        }
+                        if let Some(p) = system_prompt {
+                            soul.system_prompt = p;
+                        }
                         agent_lock.set_soul(soul);
                     }
-                    AcpMessage::Prompt { session_id: _, message } => {
+                    AcpMessage::Prompt {
+                        session_id: _,
+                        message,
+                    } => {
                         let agent_inner = agent_clone.clone();
                         tokio::spawn(async move {
                             let mut agent_lock = agent_inner.lock().await;
                             if let Err(e) = agent_lock.chat(&message).await {
-                                let _ = agent_lock.event_tx.send(Event::Error { message: e.to_string() });
+                                let _ = agent_lock.event_tx.send(Event::Error {
+                                    message: e.to_string(),
+                                });
                             }
                         });
                     }
                     AcpMessage::Cancel { .. } => {
-                        log::warn!("ACP Cancel requested but not fully implemented in core agent loop");
+                        log::warn!(
+                            "ACP Cancel requested but not fully implemented in core agent loop"
+                        );
                     }
                     AcpMessage::ListSessions => {
                         let _ = tx_clone.send(AcpMessage::Sessions { 
@@ -87,9 +107,11 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                     }
                     AcpMessage::GetConfig => {
                         if let Ok(config) = pharmakon_common::Config::load() {
-                            let _ = tx_clone.send(AcpMessage::Config { 
-                                data: serde_json::to_value(config).unwrap_or_default() 
-                            }).await;
+                            let _ = tx_clone
+                                .send(AcpMessage::Config {
+                                    data: serde_json::to_value(config).unwrap_or_default(),
+                                })
+                                .await;
                         }
                     }
                     _ => {}

@@ -1,10 +1,10 @@
-use anyhow::{Result, Context};
-use std::path::PathBuf;
-use notify::{Watcher, RecursiveMode, Event};
-use std::fs;
-use pharmakon_tools::wasm_tool::WasmTool;
-use std::sync::Arc;
 use crate::agent::Agent;
+use anyhow::{Context, Result};
+use notify::{Event, RecursiveMode, Watcher};
+use pharmakon_tools::wasm_tool::WasmTool;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub mod markdown;
@@ -34,9 +34,11 @@ impl SkillLoader {
                     log::info!("Skills directory changed, reloading...");
                     let agent_for_task = agent_clone.clone();
                     let skills_dir_for_task = skills_dir.clone();
-                    
+
                     tokio::spawn(async move {
-                        if let Err(e) = Self::load_skills_internal(&skills_dir_for_task, &agent_for_task).await {
+                        if let Err(e) =
+                            Self::load_skills_internal(&skills_dir_for_task, &agent_for_task).await
+                        {
                             log::error!("Failed to reload skills: {}", e);
                         }
                     });
@@ -45,7 +47,7 @@ impl SkillLoader {
         })?;
 
         watcher.watch(&self.skills_dir, RecursiveMode::NonRecursive)?;
-        
+
         // Initial load
         self.load_skills(&agent).await?;
 
@@ -64,12 +66,16 @@ impl SkillLoader {
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
                 log::info!("Loading WASM skill: {:?}", path);
                 let wasm_bytes = fs::read(&path)?;
-                let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
-                
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
                 let tool = WasmTool::new(name, wasm_bytes);
                 let mut agent_lock = agent.lock().await;
                 agent_lock.add_tool(Arc::new(tool));
@@ -78,10 +84,10 @@ impl SkillLoader {
                 let content = fs::read_to_string(&path)?;
                 match MarkdownSkill::parse(&content) {
                     Ok(skill) => {
-                        let mut agent_lock = agent.lock().await;
-                        agent_lock.prompt_manager.add_contribution(Box::new(MarkdownSkillContribution::new(
+                        let agent_lock = agent.lock().await;
+                        agent_lock.add_contribution(Box::new(MarkdownSkillContribution::new(
                             &skill.metadata.name,
-                            &skill.content
+                            &skill.content,
                         )));
                         log::info!("Registered Markdown skill: {}", skill.metadata.name);
                     }

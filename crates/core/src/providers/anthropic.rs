@@ -1,7 +1,10 @@
+use crate::model::{
+    AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse, FunctionCall,
+    Message, MessageContent, ToolCall,
+};
 use async_trait::async_trait;
-use crate::model::{CompletionRequest, CompletionResponse, Message, AgentModel, MessageContent, AgentResult, AgentError, ToolCall, FunctionCall};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct AnthropicModel {
     api_key: String,
@@ -66,7 +69,9 @@ impl AnthropicModel {
 #[async_trait]
 impl AgentModel for AnthropicModel {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
-        let system_prompt = request.messages.iter()
+        let system_prompt = request
+            .messages
+            .iter()
             .find(|m| m.role == "system")
             .and_then(|m| m.content.as_ref().map(|c| c.to_string()));
 
@@ -83,16 +88,23 @@ impl AgentModel for AnthropicModel {
         }
 
         if let Some(tools) = &request.tools {
-            body["tools"] = json!(tools.iter().map(|t| {
-                json!({
-                    "name": t.function.name,
-                    "description": t.function.description,
-                    "input_schema": t.function.parameters
-                })
-            }).collect::<Vec<_>>());
+            body["tools"] = json!(
+                tools
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "name": t.function.name,
+                            "description": t.function.description,
+                            "input_schema": t.function.parameters
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            );
         }
 
-        let res = self.client.post("https://api.anthropic.com/v1/messages")
+        let res = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
@@ -107,7 +119,7 @@ impl AgentModel for AnthropicModel {
         }
 
         let json: Value = res.json().await.map_err(|e| AgentError(e.to_string()))?;
-        
+
         let mut content_text = String::new();
         let mut tool_calls = Vec::new();
 
@@ -126,7 +138,7 @@ impl AgentModel for AnthropicModel {
                             function: FunctionCall {
                                 name: part["name"].as_str().unwrap_or_default().to_string(),
                                 arguments: part["input"].to_string(),
-                            }
+                            },
                         });
                     }
                     _ => {}
@@ -135,13 +147,26 @@ impl AgentModel for AnthropicModel {
         }
 
         Ok(CompletionResponse {
-            content: if content_text.is_empty() { None } else { Some(MessageContent::Text(content_text)) },
-            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+            content: if content_text.is_empty() {
+                None
+            } else {
+                Some(MessageContent::Text(content_text))
+            },
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
             usage: None,
         })
     }
 
-    async fn stream_complete(&self, _request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>> {
+    async fn stream_complete(
+        &self,
+        _request: CompletionRequest,
+    ) -> AgentResult<
+        std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
+    > {
         // ... (Streaming implementation - simplified for now as it's less critical for tools)
         unimplemented!("Streaming not yet updated for tools")
     }

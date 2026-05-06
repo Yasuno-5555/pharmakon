@@ -1,19 +1,19 @@
 pub mod app;
-pub mod widgets;
 pub mod tray;
+pub mod widgets;
 
 pub use app::{AppData, ViewType};
+use pharmakon_core::agent::Agent;
+use pharmakon_core::automation::cron::CronManager;
+use pharmakon_core::persistence::DbSessionStore;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use pharmakon_core::agent::Agent;
-use pharmakon_core::persistence::DbSessionStore;
-use pharmakon_core::automation::cron::CronManager;
 use tray::TrayHandler;
 
-use xilem::{EventLoop, Xilem};
 use masonry_winit::app::MasonryUserEvent;
-use tray_icon::menu::MenuEvent;
 use std::sync::atomic::Ordering;
+use tray_icon::menu::MenuEvent;
+use xilem::{EventLoop, Xilem};
 
 fn app_logic_wrapper(data: &mut AppData) -> std::vec::IntoIter<xilem::WindowView<AppData>> {
     app::app_logic(data).into_iter()
@@ -31,14 +31,14 @@ pub fn run_app(
     cron_manager: Arc<CronManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app_data = AppData::new(agent, db, cron_manager);
-    
+
     // Create Event Loop first to get proxy
     let event_loop = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
-    
+
     // Initialize Tray
     let _tray = TrayHandler::new();
-    
+
     // Spawn tray event handler
     let proxy_clone = proxy.clone();
     let show_requested = app_data.show_requested.clone();
@@ -54,22 +54,18 @@ pub fn run_app(
             ));
         }
     });
-    
-    let app = Xilem::new(
-        app_data, 
-        app_logic_wrapper, 
-    );
-    
-    let (driver, windows) = app.into_driver_and_windows(move |event| {
-        proxy.send_event(event).map_err(|err| err.0)
-    });
-    
+
+    let app = Xilem::new(app_data, app_logic_wrapper);
+
+    let (driver, windows) =
+        app.into_driver_and_windows(move |event| proxy.send_event(event).map_err(|err| err.0));
+
     masonry_winit::app::run_with(
-        event_loop, 
-        windows, 
-        driver, 
-        xilem::masonry::theme::default_property_set()
+        event_loop,
+        windows,
+        driver,
+        xilem::masonry::theme::default_property_set(),
     )?;
-    
+
     Ok(())
 }

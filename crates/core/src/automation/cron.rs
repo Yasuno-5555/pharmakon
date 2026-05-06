@@ -1,11 +1,11 @@
-use tokio_cron_scheduler::{Job, JobScheduler};
-use tokio::sync::Mutex;
 use crate::agent::Agent;
 use anyhow::{Result, anyhow};
-use uuid::Uuid;
 use pharmakon_common::CronJobInfo;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio_cron_scheduler::{Job, JobScheduler};
+use uuid::Uuid;
 
 pub struct CronJobData {
     pub id: Uuid,
@@ -23,16 +23,21 @@ impl CronManager {
     pub async fn new() -> Result<Self> {
         let scheduler = JobScheduler::new().await?;
         scheduler.start().await?;
-        Ok(Self { 
+        Ok(Self {
             scheduler,
             jobs: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub async fn add_agent_job(&self, schedule: &str, agent: std::sync::Weak<Mutex<Agent>>, message: String) -> Result<Uuid> {
+    pub async fn add_agent_job(
+        &self,
+        schedule: &str,
+        agent: std::sync::Weak<Mutex<Agent>>,
+        message: String,
+    ) -> Result<Uuid> {
         let jobs_arc = self.jobs.clone();
         let closure_message = message.clone();
-        
+
         let job = Job::new_async(schedule, move |uuid, _l| {
             let agent = agent.clone();
             let msg = closure_message.clone();
@@ -54,28 +59,39 @@ impl CronManager {
         })?;
 
         let id = self.scheduler.add(job).await?;
-        
-        self.jobs.lock().await.insert(id, CronJobData {
+
+        self.jobs.lock().await.insert(
             id,
-            schedule_type: "cron".to_string(),
-            expr: schedule.to_string(),
-            message: message.clone(),
-        });
-        
+            CronJobData {
+                id,
+                schedule_type: "cron".to_string(),
+                expr: schedule.to_string(),
+                message: message.clone(),
+            },
+        );
+
         Ok(id)
     }
 
-    pub async fn add_one_shot(&self, delay_secs: u64, agent: std::sync::Weak<Mutex<Agent>>, message: String) -> Result<Uuid> {
+    pub async fn add_one_shot(
+        &self,
+        delay_secs: u64,
+        agent: std::sync::Weak<Mutex<Agent>>,
+        message: String,
+    ) -> Result<Uuid> {
         let id = Uuid::new_v4();
         let jobs_arc = self.jobs.clone();
-        
-        self.jobs.lock().await.insert(id, CronJobData {
+
+        self.jobs.lock().await.insert(
             id,
-            schedule_type: "delay".to_string(),
-            expr: delay_secs.to_string(),
-            message: message.clone(),
-        });
-        
+            CronJobData {
+                id,
+                schedule_type: "delay".to_string(),
+                expr: delay_secs.to_string(),
+                message: message.clone(),
+            },
+        );
+
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
             if let Some(agent_arc) = agent.upgrade() {
@@ -95,29 +111,32 @@ impl CronManager {
                 jobs_arc.lock().await.remove(&id);
             }
         });
-        
+
         Ok(id)
     }
 
     pub async fn list_jobs(&self) -> Vec<CronJobInfo> {
         let jobs_lock = self.jobs.lock().await;
-        jobs_lock.values().map(|data| CronJobInfo {
-            id: data.id.to_string(),
-            schedule_type: data.schedule_type.clone(),
-            expr: data.expr.clone(),
-            message: data.message.clone(),
-        }).collect()
+        jobs_lock
+            .values()
+            .map(|data| CronJobInfo {
+                id: data.id.to_string(),
+                schedule_type: data.schedule_type.clone(),
+                expr: data.expr.clone(),
+                message: data.message.clone(),
+            })
+            .collect()
     }
 
     pub async fn cancel_job(&self, id_str: &str) -> Result<()> {
         let id = Uuid::parse_str(id_str).map_err(|e| anyhow!("Invalid UUID: {}", e))?;
-        
+
         let mut jobs_lock = self.jobs.lock().await;
         if let Some(data) = jobs_lock.remove(&id) {
             if data.schedule_type == "cron" {
                 self.scheduler.remove(&id).await?;
             }
-            // For delay tasks, removing it from the map is enough to prevent execution 
+            // For delay tasks, removing it from the map is enough to prevent execution
             // since the spawned task checks the map before running.
             Ok(())
         } else {

@@ -1,6 +1,6 @@
-pub mod redaction;
-pub mod policy;
 pub mod pairing;
+pub mod policy;
+pub mod redaction;
 use anyhow::{Result, anyhow};
 use std::path::Path;
 
@@ -27,14 +27,7 @@ impl SecurityAuditor {
     }
 
     pub fn is_allowed_command(command: &str) -> bool {
-        let allowlist = [
-            "ls",
-            "pwd",
-            "whoami",
-            "date",
-            "cat ",
-            "grep ",
-        ];
+        let allowlist = ["ls", "pwd", "whoami", "date", "cat ", "grep "];
 
         for pattern in allowlist {
             if command.starts_with(pattern) {
@@ -46,18 +39,16 @@ impl SecurityAuditor {
 
     pub fn audit_file_path(path_str: &str) -> Result<()> {
         let path = Path::new(path_str);
-        
+
         // Prevent access to sensitive system directories
-        let sensitive_dirs = [
-            "/etc",
-            "/var/root",
-            "/System",
-            "/usr/bin",
-        ];
+        let sensitive_dirs = ["/etc", "/var/root", "/System", "/usr/bin"];
 
         for dir in sensitive_dirs {
             if path.starts_with(dir) {
-                return Err(anyhow!("Access to sensitive system directory denied: '{}'", dir));
+                return Err(anyhow!(
+                    "Access to sensitive system directory denied: '{}'",
+                    dir
+                ));
             }
         }
 

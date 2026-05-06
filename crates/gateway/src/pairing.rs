@@ -1,12 +1,12 @@
-use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use rand::Rng;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
 pub struct PairingManager {
     pending_pairings: HashMap<String, String>, // channel_id -> code
-    approved_users: Vec<String>, // list of user_ids
+    approved_users: Vec<String>,               // list of user_ids
     storage_path: PathBuf,
 }
 
@@ -14,7 +14,7 @@ impl PairingManager {
     pub fn new() -> Self {
         let home = dirs::home_dir().expect("Could not find home directory");
         let storage_path = home.join(".pharmakon").join("approved_users.json");
-        
+
         let approved_users = if storage_path.exists() {
             let content = fs::read_to_string(&storage_path).unwrap_or_default();
             serde_json::from_str(&content).unwrap_or_default()
@@ -30,8 +30,11 @@ impl PairingManager {
     }
 
     pub fn generate_code(&mut self, channel_id: &str) -> String {
-        let code: String = (0..6).map(|_| rand::thread_rng().gen_range(0..10).to_string()).collect();
-        self.pending_pairings.insert(channel_id.to_string(), code.clone());
+        let code: String = (0..6)
+            .map(|_| rand::thread_rng().gen_range(0..10).to_string())
+            .collect();
+        self.pending_pairings
+            .insert(channel_id.to_string(), code.clone());
         log::info!("Generated pairing code {} for channel {}", code, channel_id);
         code
     }

@@ -1,26 +1,26 @@
-use dialoguer::{Input, Select, Password, Confirm, theme::ColorfulTheme};
 use anyhow::{Result, anyhow};
-use rust_i18n::t;
+use dialoguer::{Confirm, Input, Password, Select, theme::ColorfulTheme};
 use pharmakon_common::{Config, SecretStore};
 use pharmakon_core::flows::crestodian::Crestodian;
 use pharmakon_core::providers::gemini::GeminiModel;
+use rust_i18n::t;
 use std::fs;
 use std::sync::Arc;
 
 pub fn run_wizard() -> Result<()> {
     let theme = ColorfulTheme::default();
-    
+
     // 1. Welcome & Security Note
     println!("\n=== {} ===", t!("intro_title"));
     println!("{}", t!("intro_note"));
     println!("\n--- {} ---", t!("security_note_title"));
     println!("{}", t!("security_note_text"));
-    
+
     let ok = Confirm::with_theme(&theme)
         .with_prompt(t!("security_confirm").to_string())
         .default(false)
         .interact()?;
-    
+
     if !ok {
         println!("{}", t!("denied_by_user"));
         return Ok(());
@@ -44,14 +44,17 @@ pub fn run_wizard() -> Result<()> {
     // 4. Provider & API Key
     let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity"];
     let mut selected_providers = Vec::new();
-    
-    println!("\n--- {} ---", t!("api_key_setup_title", default = "API Key Setup"));
-    
+
+    println!(
+        "\n--- {} ---",
+        t!("api_key_setup_title", default = "API Key Setup")
+    );
+
     for p in provider_options {
         if Confirm::with_theme(&theme)
             .with_prompt(format!("Do you want to configure {}?", p))
             .default(p == "gemini")
-            .interact()? 
+            .interact()?
         {
             let key: String = Password::with_theme(&theme)
                 .with_prompt(format!("Enter your {} API Key", p))
@@ -71,7 +74,7 @@ pub fn run_wizard() -> Result<()> {
         .with_prompt(t!("telegram_enable_prompt").to_string())
         .default(false)
         .interact()?;
-    
+
     let mut telegram_token = None;
     if enable_telegram {
         let token: String = Password::with_theme(&theme)
@@ -85,7 +88,7 @@ pub fn run_wizard() -> Result<()> {
         .with_prompt(t!("discord_enable_prompt").to_string())
         .default(false)
         .interact()?;
-    
+
     let mut discord_token = None;
     if enable_discord {
         let token: String = Password::with_theme(&theme)
@@ -111,7 +114,7 @@ pub fn run_wizard() -> Result<()> {
             .items(&auth_options)
             .default(0)
             .interact()?;
-        
+
         if auth_idx == 0 {
             auth_mode = "token".to_string();
             auth_value = Password::with_theme(&theme)
@@ -126,8 +129,15 @@ pub fn run_wizard() -> Result<()> {
     }
 
     // 7. Save configuration
-    println!("\n{}", t!("configuring_agent", name = &name, provider = &default_provider));
-    
+    println!(
+        "\n{}",
+        t!(
+            "configuring_agent",
+            name = &name,
+            provider = &default_provider
+        )
+    );
+
     let mut config = Config::load().unwrap_or_default();
     config.default_agent.provider = default_provider.clone();
     config.default_agent.model = match default_provider.as_str() {
@@ -136,7 +146,7 @@ pub fn run_wizard() -> Result<()> {
         "gemini" => "gemini-1.5-pro".to_string(),
         _ => "default".to_string(),
     };
-    
+
     config.gateway.port = gateway_port;
     config.gateway.dm_policy = "pairing".to_string();
     if auth_mode == "token" {
@@ -153,7 +163,7 @@ pub fn run_wizard() -> Result<()> {
         secret_store.set_secret(&secret_name, &key)?;
         println!("✅ Stored {} in security layer.", secret_name);
     }
-    
+
     if let Some(tg_token) = telegram_token {
         secret_store.set_secret("TELEGRAM_BOT_TOKEN", &tg_token)?;
         println!("✅ Stored TELEGRAM_BOT_TOKEN in security layer.");
@@ -163,7 +173,7 @@ pub fn run_wizard() -> Result<()> {
         secret_store.set_secret("DISCORD_BOT_TOKEN", &ds_token)?;
         println!("✅ Stored DISCORD_BOT_TOKEN in security layer.");
     }
-    
+
     if auth_mode == "token" {
         secret_store.set_secret("GATEWAY_TOKEN", &auth_value)?;
         println!("✅ Stored GATEWAY_TOKEN in security layer.");
@@ -171,16 +181,17 @@ pub fn run_wizard() -> Result<()> {
         secret_store.set_secret("GATEWAY_PASSWORD", &auth_value)?;
         println!("✅ Stored GATEWAY_PASSWORD in security layer.");
     }
-    
-    println!("💡 Note: Secrets are stored in your OS Keyring with a fallback to ~/.pharmakon/secrets.json");
 
-    
+    println!(
+        "💡 Note: Secrets are stored in your OS Keyring with a fallback to ~/.pharmakon/secrets.json"
+    );
+
     // 8.5 Install as background service?
     let install_daemon = Confirm::with_theme(&theme)
         .with_prompt("Do you want to install Pharmakon as a persistent background service?")
         .default(true)
         .interact()?;
-    
+
     if install_daemon {
         if let Err(e) = crate::service_installer::install_service(gateway_port) {
             println!("❌ Failed to install service: {}", e);
@@ -194,18 +205,20 @@ pub fn run_wizard() -> Result<()> {
 
     println!("\n{}", t!("setup_success"));
     println!("{}", t!("next_steps"));
-    
+
     Ok(())
 }
 
 pub async fn run_conversational_wizard() -> Result<()> {
     let theme = ColorfulTheme::default();
     println!("\n=== {} (Conversational) ===", t!("intro_title"));
-    
+
     // 1. Check for basic API key to start
     let secret_store = SecretStore::new();
-    let gemini_key = secret_store.get_secret("GEMINI_API_KEY").or_else(|_| std::env::var("GEMINI_API_KEY"));
-    
+    let gemini_key = secret_store
+        .get_secret("GEMINI_API_KEY")
+        .or_else(|_| std::env::var("GEMINI_API_KEY"));
+
     let api_key = match gemini_key {
         Ok(key) => key,
         Err(_) => {
@@ -221,7 +234,7 @@ pub async fn run_conversational_wizard() -> Result<()> {
     // 2. Initialize Crestodian Agent
     let model = Arc::new(GeminiModel::new(api_key, "gemini-1.5-pro".to_string()));
     let mut agent = Crestodian::create_agent(model);
-    
+
     println!("\n--- Talking to Crestodian ---");
     println!("Type 'exit' to finish setup.\n");
 
@@ -229,7 +242,7 @@ pub async fn run_conversational_wizard() -> Result<()> {
         let input: String = Input::with_theme(&theme)
             .with_prompt("You")
             .interact_text()?;
-        
+
         if input == "exit" || input == "quit" {
             break;
         }

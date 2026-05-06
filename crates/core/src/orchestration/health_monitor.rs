@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-
 #[derive(Default)]
 struct HealthStats {
     total_calls: u64,
@@ -36,7 +35,9 @@ impl HealthMonitor {
 
     pub fn is_healthy(&self) -> bool {
         let stats = self.stats.lock().unwrap();
-        if stats.total_calls < 5 { return true; }
+        if stats.total_calls < 5 {
+            return true;
+        }
         let failure_rate = stats.failure_count as f32 / stats.total_calls as f32;
         failure_rate < self.threshold
     }

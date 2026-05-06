@@ -1,5 +1,8 @@
+use crate::model::{
+    AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse, ContentPart,
+    FunctionCall, MessageContent, ToolCall, Usage,
+};
 use async_trait::async_trait;
-use crate::model::{CompletionRequest, CompletionResponse, AgentModel, Usage, ToolCall, FunctionCall, MessageContent, ContentPart, AgentResult, AgentError};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -59,11 +62,17 @@ struct GeminiThinkingConfig {
 
 #[derive(Serialize, Deserialize)]
 struct GeminiTool {
-    #[serde(skip_serializing_if = "Option::is_none", rename = "function_declarations")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "function_declarations"
+    )]
     function_declarations: Option<Vec<GeminiFunction>>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "google_search")]
     google_search: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "google_search_retrieval")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "google_search_retrieval"
+    )]
     google_search_retrieval: Option<serde_json::Value>,
 }
 
@@ -86,11 +95,23 @@ struct GeminiContent {
 struct GeminiPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "inline_data")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "inline_data",
+        alias = "inlineData"
+    )]
     inline_data: Option<GeminiInlineData>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "function_call")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "function_call",
+        alias = "functionCall"
+    )]
     function_call: Option<GeminiFunctionCall>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "function_response")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "function_response",
+        alias = "functionResponse"
+    )]
     function_response: Option<GeminiFunctionResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thought: Option<String>,
@@ -125,10 +146,10 @@ struct GeminiResponse {
 struct Candidate {
     content: GeminiContent,
     #[allow(dead_code)]
-    #[serde(rename = "finish_reason")]
+    #[serde(rename = "finish_reason", alias = "finishReason")]
     finish_reason: Option<String>,
     #[allow(dead_code)]
-    #[serde(rename = "safety_ratings")]
+    #[serde(rename = "safety_ratings", alias = "safetyRatings")]
     safety_ratings: Option<Vec<SafetyRating>>,
 }
 
@@ -142,13 +163,13 @@ struct SafetyRating {
 
 #[derive(Deserialize)]
 struct GeminiUsage {
-    #[serde(rename = "prompt_token_count")]
+    #[serde(rename = "prompt_token_count", alias = "promptTokenCount")]
     prompt_token_count: u32,
-    #[serde(rename = "candidates_token_count")]
+    #[serde(rename = "candidates_token_count", alias = "candidatesTokenCount")]
     candidates_token_count: u32,
-    #[serde(rename = "total_token_count")]
+    #[serde(rename = "total_token_count", alias = "totalTokenCount")]
     total_token_count: u32,
-    #[serde(rename = "thoughts_token_count", default)]
+    #[serde(rename = "thoughts_token_count", alias = "thoughtsTokenCount", default)]
     thoughts_token_count: u32,
 }
 
@@ -161,7 +182,10 @@ impl GeminiModel {
         }
     }
 
-    fn map_to_gemini_content(&self, messages: Vec<crate::model::Message>) -> (Vec<GeminiContent>, Option<GeminiContent>) {
+    fn map_to_gemini_content(
+        &self,
+        messages: Vec<crate::model::Message>,
+    ) -> (Vec<GeminiContent>, Option<GeminiContent>) {
         let mut raw_contents = Vec::new();
         let mut system_instruction = None;
 
@@ -191,7 +215,7 @@ impl GeminiModel {
             };
 
             let mut parts = Vec::new();
-            
+
             if let Some(ref content) = m.content {
                 match content {
                     MessageContent::Text(t) => parts.push(GeminiPart {
@@ -225,7 +249,9 @@ impl GeminiModel {
                         inline_data: None,
                         function_call: Some(GeminiFunctionCall {
                             name: tc.function.name.clone(),
-                            args: serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| serde_json::json!({ "raw_args": tc.function.arguments })),
+                            args: serde_json::from_str(&tc.function.arguments).unwrap_or_else(
+                                |_| serde_json::json!({ "raw_args": tc.function.arguments }),
+                            ),
                         }),
                         function_response: None,
                         thought: None,
@@ -236,7 +262,8 @@ impl GeminiModel {
             if m.role == "tool" {
                 if let Some(ref content) = m.content {
                     let function_name = if let Some(id) = &m.tool_call_id {
-                        all_messages.iter()
+                        all_messages
+                            .iter()
                             .filter_map(|prev| prev.tool_calls.as_ref())
                             .flatten()
                             .find(|tc| tc.id == *id)
@@ -287,7 +314,11 @@ impl GeminiModel {
         for content in cleaned_contents {
             if content.role == next_expected_role {
                 final_contents.push(content);
-                next_expected_role = if next_expected_role == "user" { "model" } else { "user" };
+                next_expected_role = if next_expected_role == "user" {
+                    "model"
+                } else {
+                    "user"
+                };
             } else {
                 if next_expected_role == "user" && content.role == "model" {
                     // Insert a dummy user message to maintain alternation
@@ -320,20 +351,22 @@ impl GeminiModel {
 impl AgentModel for GeminiModel {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
         let (contents, system_instruction) = self.map_to_gemini_content(request.messages);
-        
+
         let gemini_req = GeminiRequest {
             contents,
             tools: request.tools.as_ref().map(|tools| {
                 let mut gemini_tools = Vec::new();
-                
-                let functions: Vec<_> = tools.iter()
+
+                let functions: Vec<_> = tools
+                    .iter()
                     .filter(|t| t.function.name != "google_search")
                     .map(|t| GeminiFunction {
                         name: t.function.name.clone(),
                         description: t.function.description.clone(),
                         parameters: Some(t.function.parameters.clone()),
-                    }).collect();
-                
+                    })
+                    .collect();
+
                 let has_other_functions = !functions.is_empty();
 
                 if has_other_functions {
@@ -344,7 +377,8 @@ impl AgentModel for GeminiModel {
                     });
                 }
 
-                if tools.iter().any(|t| t.function.name == "google_search") && !has_other_functions {
+                if tools.iter().any(|t| t.function.name == "google_search") && !has_other_functions
+                {
                     if self.model_id.contains("1.5") {
                         gemini_tools.push(GeminiTool {
                             function_declarations: None,
@@ -369,33 +403,66 @@ impl AgentModel for GeminiModel {
             }),
             tool_config: if request.tools.is_some() {
                 Some(GeminiToolConfig {
-                    function_calling_config: GeminiFunctionCallingConfig { mode: "AUTO".to_string() }
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "AUTO".to_string(),
+                    },
                 })
-            } else { None },
+            } else {
+                None
+            },
             generation_config: Some(GeminiConfig {
                 temperature: request.temperature,
                 max_output_tokens: request.max_tokens,
                 // Only enable Thinking Mode for high-end Pro models to balance performance and cost
-                thinking_config: if self.model_id.contains("pro") && !self.model_id.contains("flash") {
-                    Some(GeminiThinkingConfig { thinking_budget: 4096 })
-                } else { None },
+                thinking_config: if self.model_id.contains("pro")
+                    && !self.model_id.contains("flash")
+                {
+                    Some(GeminiThinkingConfig {
+                        thinking_budget: 4096,
+                    })
+                } else {
+                    None
+                },
             }),
             system_instruction,
             safety_settings: Some(vec![
-                SafetySetting { category: "HARM_CATEGORY_HARASSMENT".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_HATE_SPEECH".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_DANGEROUS_CONTENT".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_CIVIC_INTEGRITY".to_string(), threshold: "BLOCK_NONE".to_string() },
+                SafetySetting {
+                    category: "HARM_CATEGORY_HARASSMENT".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_HATE_SPEECH".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_DANGEROUS_CONTENT".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_CIVIC_INTEGRITY".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
             ]),
         };
 
-        let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent", self.model_id);
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            self.model_id
+        );
 
-        log::debug!("Gemini API URL: {}", url);
-        log::debug!("Gemini Request Body: {}", serde_json::to_string(&gemini_req).unwrap_or_default());
+        log::info!("Gemini API URL: {}", url);
+        log::info!(
+            "Gemini Request Body: {}",
+            serde_json::to_string(&gemini_req).unwrap_or_default()
+        );
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .header("x-goog-api-key", &self.api_key)
             .json(&gemini_req)
             .send()
@@ -406,22 +473,59 @@ impl AgentModel for GeminiModel {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             log::error!("Gemini API Error Status: {}, Body: {}", status, error_text);
-            return Err(AgentError(format!("Gemini API error ({}): {}", status, error_text)));
+            return Err(AgentError(format!(
+                "Gemini API error ({}): {}",
+                status, error_text
+            )));
         }
 
-        let response_text = response.text().await.map_err(|e| AgentError(e.to_string()))?;
-        log::debug!("Gemini Response Body: {}", response_text);
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| AgentError(e.to_string()))?;
+        log::info!("Gemini Response Body: {}", response_text);
 
         let gemini_resp: GeminiResponse = serde_json::from_str(&response_text).map_err(|e| {
-            log::error!("Failed to decode Gemini response: {}. Body: {}", e, response_text);
+            log::error!(
+                "Failed to decode Gemini response: {}. Body: {}",
+                e,
+                response_text
+            );
             AgentError(e.to_string())
         })?;
-        let candidate = gemini_resp.candidates.get(0).ok_or_else(|| AgentError("No candidates returned from Gemini".to_string()))?;
+
+        log::info!(
+            "Successfully decoded Gemini response. Candidates: {}",
+            gemini_resp.candidates.len()
+        );
+        if let Some(usage) = &gemini_resp.usage_metadata {
+            log::info!(
+                "Usage: prompt={}, candidates={}, total={}",
+                usage.prompt_token_count,
+                usage.candidates_token_count,
+                usage.total_token_count
+            );
+        }
+
+        let candidate = gemini_resp
+            .candidates
+            .get(0)
+            .ok_or_else(|| AgentError("No candidates returned from Gemini".to_string()))?;
+        log::info!("Candidate 0: finish_reason={:?}", candidate.finish_reason);
 
         let mut content = None;
         let mut tool_calls = Vec::new();
 
-        for part in &candidate.content.parts {
+        for (i, part) in candidate.content.parts.iter().enumerate() {
+            log::info!(
+                "Processing part {}: text={}, function_call={}, function_response={}, inline_data={}",
+                i,
+                part.text.is_some(),
+                part.function_call.is_some(),
+                part.function_response.is_some(),
+                part.inline_data.is_some()
+            );
+
             if let Some(ref t) = part.text {
                 if content.is_none() {
                     content = Some(MessageContent::Text(t.clone()));
@@ -429,46 +533,81 @@ impl AgentModel for GeminiModel {
                     existing.push_str(t);
                 }
             }
+            if let Some(ref th) = part.thought {
+                log::info!("Received native thought from Gemini (length: {})", th.len());
+                if content.is_none() {
+                    // For now, let's treat native thoughts as a special type of content if we want to show them
+                    // or just log them. OpenClaw wants them separate.
+                    // We'll wrap it in <think> tags if it's not already, so the agent can filter it later.
+                    content = Some(MessageContent::Text(format!("<think>{}</think>", th)));
+                } else if let Some(MessageContent::Text(ref mut existing)) = content {
+                    existing.push_str(&format!("\n<think>{}</think>", th));
+                }
+            }
+
             if let Some(ref fc) = part.function_call {
                 tool_calls.push(ToolCall {
-                    id: format!("call_{}_{}", fc.name, uuid::Uuid::new_v4().to_string().chars().take(8).collect::<String>()),
+                    id: format!(
+                        "call_{}_{}",
+                        fc.name,
+                        uuid::Uuid::new_v4()
+                            .to_string()
+                            .chars()
+                            .take(8)
+                            .collect::<String>()
+                    ),
                     r#type: "function".to_string(),
                     function: FunctionCall {
                         name: fc.name.clone(),
                         arguments: fc.args.to_string(),
-                    }
+                    },
                 });
             }
         }
 
         Ok(CompletionResponse {
             content,
-            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
             usage: gemini_resp.usage_metadata.map(|u| Usage {
                 prompt_tokens: u.prompt_token_count,
                 completion_tokens: u.candidates_token_count,
                 total_tokens: u.total_token_count,
-                thoughts_tokens: if u.thoughts_token_count > 0 { Some(u.thoughts_token_count) } else { None },
+                thoughts_tokens: if u.thoughts_token_count > 0 {
+                    Some(u.thoughts_token_count)
+                } else {
+                    None
+                },
             }),
         })
     }
 
-    async fn stream_complete(&self, request: CompletionRequest) -> AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>> {
+    async fn stream_complete(
+        &self,
+        request: CompletionRequest,
+    ) -> AgentResult<
+        std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
+    > {
         let (contents, system_instruction) = self.map_to_gemini_content(request.messages);
-        
+
         let gemini_req = GeminiRequest {
             contents,
             tools: request.tools.as_ref().map(|tools| {
                 let mut gemini_tools = Vec::new();
-                
-                let functions: Vec<_> = tools.iter()
+
+                let functions: Vec<_> = tools
+                    .iter()
                     .filter(|t| t.function.name != "google_search")
                     .map(|t| GeminiFunction {
                         name: t.function.name.clone(),
                         description: t.function.description.clone(),
                         parameters: Some(t.function.parameters.clone()),
-                    }).collect();
-                
+                    })
+                    .collect();
+
                 let has_other_functions = !functions.is_empty();
 
                 if has_other_functions {
@@ -479,7 +618,8 @@ impl AgentModel for GeminiModel {
                     });
                 }
 
-                if tools.iter().any(|t| t.function.name == "google_search") && !has_other_functions {
+                if tools.iter().any(|t| t.function.name == "google_search") && !has_other_functions
+                {
                     if self.model_id.contains("1.5") {
                         gemini_tools.push(GeminiTool {
                             function_declarations: None,
@@ -504,32 +644,65 @@ impl AgentModel for GeminiModel {
             }),
             tool_config: if request.tools.is_some() {
                 Some(GeminiToolConfig {
-                    function_calling_config: GeminiFunctionCallingConfig { mode: "AUTO".to_string() }
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "AUTO".to_string(),
+                    },
                 })
-            } else { None },
+            } else {
+                None
+            },
             generation_config: Some(GeminiConfig {
                 temperature: request.temperature,
                 max_output_tokens: request.max_tokens,
                 // Only enable Thinking Mode for high-end Pro models to balance performance and cost
-                thinking_config: if self.model_id.contains("pro") && !self.model_id.contains("flash") {
-                    Some(GeminiThinkingConfig { thinking_budget: 4096 })
-                } else { None },
+                thinking_config: if self.model_id.contains("pro")
+                    && !self.model_id.contains("flash")
+                {
+                    Some(GeminiThinkingConfig {
+                        thinking_budget: 4096,
+                    })
+                } else {
+                    None
+                },
             }),
             system_instruction,
             safety_settings: Some(vec![
-                SafetySetting { category: "HARM_CATEGORY_HARASSMENT".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_HATE_SPEECH".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_DANGEROUS_CONTENT".to_string(), threshold: "BLOCK_NONE".to_string() },
-                SafetySetting { category: "HARM_CATEGORY_CIVIC_INTEGRITY".to_string(), threshold: "BLOCK_NONE".to_string() },
+                SafetySetting {
+                    category: "HARM_CATEGORY_HARASSMENT".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_HATE_SPEECH".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_DANGEROUS_CONTENT".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
+                SafetySetting {
+                    category: "HARM_CATEGORY_CIVIC_INTEGRITY".to_string(),
+                    threshold: "BLOCK_NONE".to_string(),
+                },
             ]),
         };
 
-        let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse", self.model_id);
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+            self.model_id
+        );
         log::debug!("Gemini Streaming API URL: {}", url);
-        log::debug!("Gemini Request Body: {}", serde_json::to_string(&gemini_req).unwrap_or_default());
+        log::debug!(
+            "Gemini Request Body: {}",
+            serde_json::to_string(&gemini_req).unwrap_or_default()
+        );
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .header("x-goog-api-key", &self.api_key)
             .json(&gemini_req)
             .send()
@@ -538,7 +711,10 @@ impl AgentModel for GeminiModel {
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AgentError(format!("Gemini streaming API error: {}", error_text)));
+            return Err(AgentError(format!(
+                "Gemini streaming API error: {}",
+                error_text
+            )));
         }
 
         let byte_stream = response.bytes_stream();
@@ -551,16 +727,23 @@ impl AgentModel for GeminiModel {
                         let line = buffer[..newline_pos].trim().to_string();
                         buffer = buffer[newline_pos + 1..].to_string();
 
-                        if line.is_empty() { continue; }
+                        if line.is_empty() {
+                            continue;
+                        }
                         if let Some(data) = line.strip_prefix("data: ") {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                                 if let Some(candidates) = json["candidates"].as_array() {
                                     if let Some(first_candidate) = candidates.get(0) {
-                                        if let Some(parts) = first_candidate["content"]["parts"].as_array() {
+                                        if let Some(parts) =
+                                            first_candidate["content"]["parts"].as_array()
+                                        {
                                             for part in parts {
                                                 if let Some(text) = part["text"].as_str() {
                                                     if !text.is_empty() {
-                                                        return Some((Ok(text.to_string()), (byte_stream, buffer)));
+                                                        return Some((
+                                                            Ok(text.to_string()),
+                                                            (byte_stream, buffer),
+                                                        ));
                                                     }
                                                 }
                                             }
@@ -575,7 +758,12 @@ impl AgentModel for GeminiModel {
                     match byte_stream.try_next().await {
                         Ok(Some(chunk)) => buffer.push_str(&String::from_utf8_lossy(&chunk)),
                         Ok(None) => return None,
-                        Err(e) => return Some((Err(AgentError(format!("Stream error: {}", e))), (byte_stream, buffer))),
+                        Err(e) => {
+                            return Some((
+                                Err(AgentError(format!("Stream error: {}", e))),
+                                (byte_stream, buffer),
+                            ));
+                        }
                     }
                 }
             },

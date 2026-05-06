@@ -1,7 +1,7 @@
+use crate::agent::Agent;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::agent::Agent;
 
 pub enum AutoReplyResult {
     Handled(String),
@@ -18,9 +18,14 @@ impl AutoReplyEngine {
         Self { agent }
     }
 
-    pub async fn handle_message(&self, text: &str, is_group: bool, bot_id: &str) -> Result<AutoReplyResult> {
+    pub async fn handle_message(
+        &self,
+        text: &str,
+        is_group: bool,
+        bot_id: &str,
+    ) -> Result<AutoReplyResult> {
         let text = text.trim();
-        
+
         // 1. Handle Slash Commands
         if text.starts_with('/') {
             return self.handle_slash_command(text).await;
@@ -49,13 +54,13 @@ impl AutoReplyEngine {
                 Ok(AutoReplyResult::Handled("Pharmakon is active and monitoring channels.".to_string()))
             }
             "/reset" => {
-                let mut agent = self.agent.lock().await;
+                let agent = self.agent.lock().await;
                 agent.reset_history();
                 Ok(AutoReplyResult::Handled("Session history has been reset.".to_string()))
             }
             "/model" => {
                 let agent = self.agent.lock().await;
-                Ok(AutoReplyResult::Handled(format!("Current model: {}", agent.model.name())))
+                Ok(AutoReplyResult::Handled(format!("Current model: {}", agent.model_name())))
             }
             "/help" => {
                 Ok(AutoReplyResult::Handled(

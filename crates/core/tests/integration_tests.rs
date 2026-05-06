@@ -6,9 +6,9 @@ use std::sync::Arc;
 async fn test_agent_basic_chat() {
     let model = Arc::new(MockModel);
     let mut agent = Agent::new(model, "test-session".to_string());
-    
+
     let response = agent.chat("Hello from integration test!").await.unwrap();
-    
+
     assert!(response.contains("Mock stream response"));
     // History should have user message and assistant message
     assert_eq!(agent.history.len(), 2);
@@ -20,10 +20,10 @@ async fn test_agent_basic_chat() {
 async fn test_agent_history_reset() {
     let model = Arc::new(MockModel);
     let mut agent = Agent::new(model, "test-session".to_string());
-    
+
     agent.chat("Message 1").await.unwrap();
     assert_eq!(agent.history.len(), 2);
-    
+
     agent.reset_history();
     assert_eq!(agent.history.len(), 0);
 }

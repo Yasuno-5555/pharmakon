@@ -1,12 +1,11 @@
+use accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, BoxConstraints, ChildrenIds, LayoutCtx, PaintCtx,
-    PropertiesMut, PropertiesRef, RegisterCtx,
-    UpdateCtx, Widget, WidgetId,
+    AccessCtx, BoxConstraints, ChildrenIds, LayoutCtx, PaintCtx, PropertiesMut, PropertiesRef,
+    RegisterCtx, UpdateCtx, Widget, WidgetId,
 };
-use vello::Scene;
 use peniko::{Color, Fill};
-use vello::kurbo::{Size, Point, Circle, Stroke, Affine};
-use accesskit::{Role, Node};
+use vello::Scene;
+use vello::kurbo::{Affine, Circle, Point, Size, Stroke};
 
 pub struct SwarmVisualizerWidget {
     pub swarms: Vec<crate::app::SwarmStatus>,
@@ -22,7 +21,12 @@ impl SwarmVisualizerWidget {
 impl Widget for SwarmVisualizerWidget {
     type Action = ();
 
-    fn on_anim_frame(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, interval: u64) {
+    fn on_anim_frame(
+        &mut self,
+        ctx: &mut UpdateCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        interval: u64,
+    ) {
         self.time += interval as f32 / 1_000_000_000.0;
         ctx.request_paint_only();
         ctx.request_anim_frame(); // Keep animating
@@ -42,7 +46,7 @@ impl Widget for SwarmVisualizerWidget {
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
         let size = ctx.size();
         let center = Point::new(size.width / 2.0, size.height / 2.0);
-        
+
         // Draw background glow
         let bg_glow = Circle::new(center, (self.time.sin() * 10.0 + 100.0) as f64);
         scene.fill(
@@ -56,7 +60,9 @@ impl Widget for SwarmVisualizerWidget {
         // Draw Swarm Nodes
         let radius = 120.0;
         let count = self.swarms.len();
-        if count == 0 { return; }
+        if count == 0 {
+            return;
+        }
 
         for (i, swarm) in self.swarms.iter().enumerate() {
             let angle = (i as f32 / count as f32) * 2.0 * std::f32::consts::PI + self.time * 0.2;
@@ -95,7 +101,13 @@ impl Widget for SwarmVisualizerWidget {
         Role::Unknown
     }
 
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
+    fn accessibility(
+        &mut self,
+        _ctx: &mut AccessCtx<'_>,
+        _props: &PropertiesRef<'_>,
+        _node: &mut Node,
+    ) {
+    }
 
     fn children_ids(&self) -> ChildrenIds {
         ChildrenIds::new()

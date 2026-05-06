@@ -1,6 +1,6 @@
-use std::sync::Mutex;
-use pharmakon_common::visual_primitives::CanvasState;
 use pharmakon_common::Event;
+use pharmakon_common::visual_primitives::CanvasState;
+use std::sync::Mutex;
 
 pub struct CanvasHost {
     state: Mutex<CanvasState>,
@@ -9,7 +9,9 @@ pub struct CanvasHost {
 impl CanvasHost {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(CanvasState { elements: Vec::new() }),
+            state: Mutex::new(CanvasState {
+                elements: Vec::new(),
+            }),
         }
     }
 

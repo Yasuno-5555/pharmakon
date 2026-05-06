@@ -1,10 +1,10 @@
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
-use async_trait::async_trait;
-use anyhow::Result;
 use crate::model::Message;
 use crate::trajectory::Trajectory;
-use std::str::FromStr;
+use anyhow::Result;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use std::str::FromStr;
 
 pub struct DbSessionStore {
     pool: SqlitePool,
@@ -16,9 +16,9 @@ impl DbSessionStore {
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal);
-        
+
         let pool = SqlitePool::connect_with(options).await?;
-        
+
         // Initialize schema
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS messages (
@@ -29,8 +29,10 @@ impl DbSessionStore {
                 tool_calls TEXT,
                 tool_call_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS usage_stats (
@@ -41,7 +43,7 @@ impl DbSessionStore {
                 prompt_tokens INTEGER,
                 completion_tokens INTEGER,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -56,7 +58,7 @@ impl DbSessionStore {
                 request_body TEXT,
                 response_body TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -69,8 +71,10 @@ impl DbSessionStore {
                 retry_count INTEGER DEFAULT 0,
                 next_retry TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'pending'
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS trajectories (
@@ -79,8 +83,10 @@ impl DbSessionStore {
                 steps_json TEXT NOT NULL,
                 model TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS commitments (
@@ -90,15 +96,19 @@ impl DbSessionStore {
                 status TEXT NOT NULL,
                 metadata TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS approved_users (
                 channel_id TEXT PRIMARY KEY,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS agent_souls (
@@ -108,8 +118,10 @@ impl DbSessionStore {
                 avatar_url TEXT,
                 metadata TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS facts (
@@ -119,19 +131,27 @@ impl DbSessionStore {
                 importance INTEGER DEFAULT 1,
                 metadata TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         Ok(Self { pool })
     }
 
     pub async fn save_message(&self, session_id: &str, msg: &Message) -> Result<()> {
-        let content_json = msg.content.as_ref().map(|c| serde_json::to_string(c).unwrap());
-        let tool_calls_json = msg.tool_calls.as_ref().map(|tc| serde_json::to_string(tc).unwrap());
-        
+        let content_json = msg
+            .content
+            .as_ref()
+            .map(|c| serde_json::to_string(c).unwrap());
+        let tool_calls_json = msg
+            .tool_calls
+            .as_ref()
+            .map(|tc| serde_json::to_string(tc).unwrap());
+
         sqlx::query(
             "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id)
-             VALUES (?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?)",
         )
         .bind(session_id)
         .bind(&msg.role)
@@ -147,38 +167,41 @@ impl DbSessionStore {
     pub async fn load_history(&self, session_id: &str) -> Result<Vec<Message>> {
         let rows = sqlx::query_as::<_, MessageRow>(
             "SELECT role, content, tool_calls, tool_call_id FROM messages 
-             WHERE session_id = ? ORDER BY created_at ASC"
+             WHERE session_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id)
         .fetch_all(&self.pool)
         .await?;
 
-        let messages = rows.into_iter().map(|row| {
-            let content = row.content.and_then(|c| {
-                // Try to parse as JSON first, if it fails, it might be a raw quoted string from sqlite3 output or old data
-                if let Ok(parsed) = serde_json::from_str::<crate::model::MessageContent>(&c) {
-                    Some(parsed)
-                } else if let Ok(s) = serde_json::from_str::<String>(&c) {
-                    Some(crate::model::MessageContent::Text(s))
-                } else {
-                    Some(crate::model::MessageContent::Text(c))
+        let messages = rows
+            .into_iter()
+            .map(|row| {
+                let content = row.content.and_then(|c| {
+                    // Try to parse as JSON first, if it fails, it might be a raw quoted string from sqlite3 output or old data
+                    if let Ok(parsed) = serde_json::from_str::<crate::model::MessageContent>(&c) {
+                        Some(parsed)
+                    } else if let Ok(s) = serde_json::from_str::<String>(&c) {
+                        Some(crate::model::MessageContent::Text(s))
+                    } else {
+                        Some(crate::model::MessageContent::Text(c))
+                    }
+                });
+                Message {
+                    role: row.role,
+                    content,
+                    tool_calls: row.tool_calls.and_then(|tc| serde_json::from_str(&tc).ok()),
+                    tool_call_id: row.tool_call_id,
+                    ..Default::default()
                 }
-            });
-            Message {
-                role: row.role,
-                content,
-                tool_calls: row.tool_calls.and_then(|tc| serde_json::from_str(&tc).ok()),
-                tool_call_id: row.tool_call_id,
-                ..Default::default()
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(messages)
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<String>> {
         let rows = sqlx::query_as::<_, (String,)>(
-            "SELECT DISTINCT session_id FROM messages ORDER BY created_at DESC"
+            "SELECT DISTINCT session_id FROM messages ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -190,7 +213,7 @@ impl DbSessionStore {
         let rows = sqlx::query_as::<_, (String,)>(
             "SELECT DISTINCT session_id FROM messages 
              WHERE session_id LIKE ? OR content LIKE ? 
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC",
         )
         .bind(&sql_query)
         .bind(&sql_query)
@@ -200,13 +223,11 @@ impl DbSessionStore {
     }
 
     pub async fn enqueue_delivery(&self, session_id: &str, payload: &str) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO delivery_queue (session_id, payload) VALUES (?, ?)"
-        )
-        .bind(session_id)
-        .bind(payload)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("INSERT INTO delivery_queue (session_id, payload) VALUES (?, ?)")
+            .bind(session_id)
+            .bind(payload)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -227,7 +248,14 @@ impl DbSessionStore {
         Ok(())
     }
 
-    pub async fn log_usage(&self, session_id: &str, provider: &str, model: &str, prompt: u32, completion: u32) -> Result<()> {
+    pub async fn log_usage(
+        &self,
+        session_id: &str,
+        provider: &str,
+        model: &str,
+        prompt: u32,
+        completion: u32,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO usage_stats (session_id, provider, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, ?)"
         )
@@ -241,7 +269,15 @@ impl DbSessionStore {
         Ok(())
     }
 
-    pub async fn log_traffic(&self, session_id: &str, url: &str, method: &str, status: u16, req: &str, res: &str) -> Result<()> {
+    pub async fn log_traffic(
+        &self,
+        session_id: &str,
+        url: &str,
+        method: &str,
+        status: u16,
+        req: &str,
+        res: &str,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO traffic_capture (session_id, url, method, status, request_body, response_body) VALUES (?, ?, ?, ?, ?, ?)"
         )
@@ -256,7 +292,14 @@ impl DbSessionStore {
         Ok(())
     }
 
-    pub async fn save_commitment(&self, id: &str, description: &str, deadline: Option<DateTime<Utc>>, status: &str, metadata: &Value) -> Result<()> {
+    pub async fn save_commitment(
+        &self,
+        id: &str,
+        description: &str,
+        deadline: Option<DateTime<Utc>>,
+        status: &str,
+        metadata: &Value,
+    ) -> Result<()> {
         let metadata_json = serde_json::to_string(metadata)?;
         sqlx::query(
             "INSERT OR REPLACE INTO commitments (id, description, deadline, status, metadata) VALUES (?, ?, ?, ?, ?)"
@@ -278,15 +321,18 @@ impl DbSessionStore {
         .fetch_all(&self.pool)
         .await?;
 
-        let commitments = rows.into_iter().map(|(id, desc, deadline, status, meta)| {
-            serde_json::json!({
-                "id": id,
-                "description": desc,
-                "deadline": deadline,
-                "status": status,
-                "metadata": serde_json::from_str::<Value>(&meta).unwrap_or_default()
+        let commitments = rows
+            .into_iter()
+            .map(|(id, desc, deadline, status, meta)| {
+                serde_json::json!({
+                    "id": id,
+                    "description": desc,
+                    "deadline": deadline,
+                    "status": status,
+                    "metadata": serde_json::from_str::<Value>(&meta).unwrap_or_default()
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(commitments)
     }
@@ -316,10 +362,16 @@ impl DbSessionStore {
         Ok(row.is_some())
     }
 
-    pub async fn add_fact(&self, content: &str, source: Option<&str>, importance: i32, metadata: &Value) -> Result<()> {
+    pub async fn add_fact(
+        &self,
+        content: &str,
+        source: Option<&str>,
+        importance: i32,
+        metadata: &Value,
+    ) -> Result<()> {
         let metadata_json = serde_json::to_string(metadata)?;
         sqlx::query(
-            "INSERT INTO facts (content, source, importance, metadata) VALUES (?, ?, ?, ?)"
+            "INSERT INTO facts (content, source, importance, metadata) VALUES (?, ?, ?, ?)",
         )
         .bind(content)
         .bind(source)
@@ -335,21 +387,24 @@ impl DbSessionStore {
         let search_query = format!("%{}%", query);
         let rows = sqlx::query_as::<_, (String, Option<String>, i32, String)>(
             "SELECT content, source, importance, metadata FROM facts 
-             WHERE content LIKE ? OR source LIKE ? ORDER BY importance DESC, created_at DESC"
+             WHERE content LIKE ? OR source LIKE ? ORDER BY importance DESC, created_at DESC",
         )
         .bind(&search_query)
         .bind(&search_query)
         .fetch_all(&self.pool)
         .await?;
 
-        let facts = rows.into_iter().map(|(content, source, importance, meta)| {
-            serde_json::json!({
-                "content": content,
-                "source": source,
-                "importance": importance,
-                "metadata": serde_json::from_str::<Value>(&meta).unwrap_or_default()
+        let facts = rows
+            .into_iter()
+            .map(|(content, source, importance, meta)| {
+                serde_json::json!({
+                    "content": content,
+                    "source": source,
+                    "importance": importance,
+                    "metadata": serde_json::from_str::<Value>(&meta).unwrap_or_default()
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(facts)
     }
@@ -357,8 +412,16 @@ impl DbSessionStore {
 
 #[async_trait]
 impl pharmakon_common::CommitmentPersistence for DbSessionStore {
-    async fn save_commitment(&self, id: &str, description: &str, deadline: Option<DateTime<Utc>>, status: &str, metadata: &Value) -> Result<()> {
-        self.save_commitment(id, description, deadline, status, metadata).await
+    async fn save_commitment(
+        &self,
+        id: &str,
+        description: &str,
+        deadline: Option<DateTime<Utc>>,
+        status: &str,
+        metadata: &Value,
+    ) -> Result<()> {
+        self.save_commitment(id, description, deadline, status, metadata)
+            .await
     }
 
     async fn load_commitments(&self) -> Result<Vec<Value>> {
@@ -370,9 +433,7 @@ impl pharmakon_common::CommitmentPersistence for DbSessionStore {
     }
 }
 
-
 use serde_json::Value;
-
 
 #[derive(sqlx::FromRow)]
 struct MessageRow {
@@ -385,14 +446,12 @@ struct MessageRow {
 impl DbSessionStore {
     pub async fn save_trajectory(&self, trajectory: &Trajectory) -> Result<()> {
         let steps_json = serde_json::to_string(&trajectory.steps)?;
-        sqlx::query(
-            "INSERT INTO trajectories (session_id, steps_json, model) VALUES (?, ?, ?)"
-        )
-        .bind(&trajectory.session_id)
-        .bind(&steps_json)
-        .bind(&trajectory.metadata.model)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("INSERT INTO trajectories (session_id, steps_json, model) VALUES (?, ?, ?)")
+            .bind(&trajectory.session_id)
+            .bind(&steps_json)
+            .bind(&trajectory.metadata.model)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -412,7 +471,8 @@ impl DbSessionStore {
         .await?;
 
         if let Some(r) = row {
-            let steps: Vec<crate::trajectory::TrajectoryStep> = serde_json::from_str(&r.steps_json)?;
+            let steps: Vec<crate::trajectory::TrajectoryStep> =
+                serde_json::from_str(&r.steps_json)?;
             Ok(Some(Trajectory {
                 session_id: session_id.to_string(),
                 steps,

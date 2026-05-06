@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait SpeechToText: Send + Sync {
@@ -13,10 +13,16 @@ pub trait TextToSpeech: Send + Sync {
 
 #[async_trait]
 pub trait StreamedSpeechToText: Send + Sync {
-    async fn transcribe_stream(&self, audio_rx: tokio::sync::mpsc::Receiver<Vec<u8>>) -> Result<tokio::sync::mpsc::Receiver<String>>;
+    async fn transcribe_stream(
+        &self,
+        audio_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    ) -> Result<tokio::sync::mpsc::Receiver<String>>;
 }
 
 #[async_trait]
 pub trait StreamedTextToSpeech: Send + Sync {
-    async fn synthesize_stream(&self, text_rx: tokio::sync::mpsc::Receiver<String>) -> Result<tokio::sync::mpsc::Receiver<Vec<u8>>>;
+    async fn synthesize_stream(
+        &self,
+        text_rx: tokio::sync::mpsc::Receiver<String>,
+    ) -> Result<tokio::sync::mpsc::Receiver<Vec<u8>>>;
 }

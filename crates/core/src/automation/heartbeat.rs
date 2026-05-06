@@ -1,8 +1,7 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::time::Duration;
 use crate::agent::Agent;
-
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
 
 pub struct HeartbeatManager {
     agent: Arc<Mutex<Agent>>,
@@ -25,12 +24,12 @@ impl HeartbeatManager {
         tokio::spawn(async move {
             let mut timer = tokio::time::interval(interval);
             // First tick fires immediately, we might want to skip it
-            timer.tick().await; 
+            timer.tick().await;
 
             loop {
                 timer.tick().await;
                 log::info!("HeartbeatManager: Triggering autonomous check...");
-                
+
                 let mut agent_lock = agent.lock().await;
                 match agent_lock.heartbeat().await {
                     Ok(response) => {
