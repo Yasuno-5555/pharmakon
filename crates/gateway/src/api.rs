@@ -18,7 +18,7 @@ pub struct ExecuteToolResponse {
 
 pub async fn execute_tool(
     State((agent, _, _, _)): State<(
-        Arc<Mutex<Agent>>,
+        Arc<Agent>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -31,7 +31,7 @@ pub async fn execute_tool(
         req.args
     );
 
-    let agent_lock = agent.lock().await;
+    let agent_lock = agent;
     let tools = agent_lock.tools.lock().await;
     if let Some(tool) = tools.iter().find(|t| t.name() == req.name) {
         match tool.call(req.args).await {
@@ -58,7 +58,7 @@ pub struct ChatRequest {
 
 pub async fn agent_chat(
     State((agent, _, _, _)): State<(
-        Arc<Mutex<Agent>>,
+        Arc<Agent>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -66,7 +66,7 @@ pub async fn agent_chat(
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
     log::info!("API: Agent chat request: {}", req.message);
-    let agent_lock = agent.lock().await;
+    let agent_lock = agent;
     match agent_lock.chat(&req.message).await {
         Ok(response) => (StatusCode::OK, Json(json!({ "response": response }))).into_response(),
         Err(e) => (
@@ -79,13 +79,13 @@ pub async fn agent_chat(
 
 pub async fn get_state(
     State((agent, _, _, _)): State<(
-        Arc<Mutex<Agent>>,
+        Arc<Agent>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
     )>,
 ) -> impl IntoResponse {
-    let agent_lock = agent.lock().await;
+    let agent_lock = agent;
     let trajectory = agent_lock.trajectory.lock().await;
     let state_arc = agent_lock.get_current_session_state().await;
     let state = state_arc.lock().await;

@@ -28,5 +28,5 @@ The system uses two specialized engines:
 3. **Context Weighting**: Combine scores using `decay_score` and `graph_weight`.
 
 ## 3. Maintenance
-- **Decay Logic**: Memories that are not accessed lose 5% of their `decay_score` per day.
-- **Pruning**: Memories with `decay_score < 0.1` are moved to archival storage.
+- **Decay Logic**: Runtime decay is bounded and should not exceed a 2% reduction per cycle. Retrieval separately boosts frequently accessed and structural nodes, so long-term architecture context remains recoverable.
+- **Pruning**: Memories with persistently low `decay_score`, low access count, and no graph importance may be moved to archival storage. Pinned or high-access nodes are not candidates for routine pruning.

@@ -80,5 +80,7 @@ Move beyond text-based search to compiler-level understanding.
 ---
 
 ## 4. Maintenance & Optimization
-- **Memory Decay**: A periodic background process reduces `decay_score` for unused memories, preventing "context pollution" from stale data.
-- **Access Tracking**: High-traffic nodes (frequently accessed code) are pinned in the Working Memory to reduce retrieval latency.
+- **Bounded Memory Decay**: A periodic background process may reduce `decay_score`, but the runtime clamps aggressive factors so long-term project knowledge cannot silently vanish after a few idle weeks.
+- **Access-Aware Ranking**: Retrieval combines vector similarity, keyword overlap, graph expansion, node type, `access_count`, and last access time. High-traffic and structural code nodes are favored rather than treated like disposable chat snippets.
+- **Pinned/Structural Context**: Working memory keeps high-importance entries, while `code_struct` and `code_trait` nodes receive slower freshness decay during smart search.
+- **Conflict Handling**: The Knowledge Nexus supports isolated writes and commit-time conflict logging. For semantic conflicts, use `semantic_conflict_resolution`, which prefers source code and compiler/test evidence over stale notes.

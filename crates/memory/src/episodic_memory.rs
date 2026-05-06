@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::weaver::KnowledgeNexus;
+use anyhow::Result;
 use std::sync::Arc;
 
 pub struct EpisodicMemory {
@@ -15,7 +15,9 @@ impl EpisodicMemory {
         // Break trajectory into logical segments if too long, or just index the whole thing
         // For now, index as a single unit or by steps if possible.
         let id = format!("episode_{}", trajectory_id);
-        self.nexus.remember_batch(vec![(id, content.to_string())]).await?;
+        self.nexus
+            .remember_batch(vec![(id, content.to_string())])
+            .await?;
         Ok(())
     }
 

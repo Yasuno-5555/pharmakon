@@ -102,17 +102,20 @@ impl GraphStore {
     }
 
     pub async fn get_pending_embeddings(&self) -> Result<Vec<(String, String)>> {
-        let rows = sqlx::query("SELECT id, content FROM graph_nodes WHERE embedding_status = 'PENDING'")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query("SELECT id, content FROM graph_nodes WHERE embedding_status = 'PENDING'")
+                .fetch_all(&self.pool)
+                .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| (r.get(0), r.get(1)))
-            .collect())
+        Ok(rows.into_iter().map(|r| (r.get(0), r.get(1))).collect())
     }
 
-    pub async fn update_embedding_status(&self, id: &str, status: &str, embedding_id: Option<&str>) -> Result<()> {
+    pub async fn update_embedding_status(
+        &self,
+        id: &str,
+        status: &str,
+        embedding_id: Option<&str>,
+    ) -> Result<()> {
         sqlx::query("UPDATE graph_nodes SET embedding_status = ?, embedding_id = ? WHERE id = ?")
             .bind(status)
             .bind(embedding_id)

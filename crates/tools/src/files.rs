@@ -109,8 +109,12 @@ impl Tool for ApplyPatchTool {
         let patched = diffy::apply(&original, &patch)
             .map_err(|e| AgentError(format!("Failed to apply patch: {}", e)))?;
 
-        fs::write(path, patched)
-            .map_err(|e| AgentError(format!("Failed to write patched content to {}: {}", path, e)))?;
+        fs::write(path, patched).map_err(|e| {
+            AgentError(format!(
+                "Failed to write patched content to {}: {}",
+                path, e
+            ))
+        })?;
 
         Ok(format!("Successfully applied patch to {}", path))
     }

@@ -34,11 +34,14 @@ impl Tool for HydrateContextTool {
             Some(id) => id,
             None => return Err(AgentError("Missing context_id".to_string())),
         };
-        
+
         // This tool needs access to the Agent's session state.
         // In the current architecture, we'll need to pass that or use a global-ish hook.
         // For now, return a placeholder that instructions the agent on how this works.
-        
-        Ok(format!("Successfully hydrated context ID: {}. [SYSTEM: In this implementation, the hydration occurs by the agent internalizing the referenced Working Memory unit or knowledge slot.]", id))
+
+        Ok(format!(
+            "Successfully hydrated context ID: {}. [SYSTEM: In this implementation, the hydration occurs by the agent internalizing the referenced Working Memory unit or knowledge slot.]",
+            id
+        ))
     }
 }

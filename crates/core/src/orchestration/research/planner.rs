@@ -10,14 +10,20 @@ pub struct DeepResearchPlanner {
 
 impl DeepResearchPlanner {
     pub fn new(notebook: Arc<Mutex<ResearchNotebook>>, max_depth: u8, beam_width: usize) -> Self {
-        Self { notebook, max_depth, beam_width }
+        Self {
+            notebook,
+            max_depth,
+            beam_width,
+        }
     }
 
     pub async fn plan_next_step(&self) -> anyhow::Result<String> {
         let mut notebook = self.notebook.lock().await;
-        
+
         if notebook.should_stop() {
-            return Ok("RESEARCH_COMPLETE: Goal achieved or information gain saturated.".to_string());
+            return Ok(
+                "RESEARCH_COMPLETE: Goal achieved or information gain saturated.".to_string(),
+            );
         }
 
         notebook.step_count += 1;

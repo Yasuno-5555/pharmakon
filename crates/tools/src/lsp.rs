@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool};
 use serde_json::{Value, json};
+use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
-use std::process::Stdio;
 
 pub struct LspClient {
     stdin: Mutex<ChildStdin>,
@@ -63,11 +63,11 @@ impl LspClient {
             if line.starts_with("Content-Length: ") {
                 let len: usize = line["Content-Length: ".len()..].trim().parse()?;
                 stdout.read_line(&mut line).await?; // Skip the empty line (\r\n)
-                
+
                 let mut body = vec![0u8; len];
                 stdout.read_exact(&mut body).await?;
                 let response: Value = serde_json::from_slice(&body)?;
-                
+
                 if response.get("id") == Some(&json!(id)) {
                     if let Some(error) = response.get("error") {
                         return Err(anyhow::anyhow!("LSP error: {}", error));
@@ -118,11 +118,17 @@ impl LspTool {
         let client = LspClient::spawn(lsp_cmd, &[])
             .await
             .map_err(|e| AgentError(format!("Failed to spawn {}: {}", lsp_cmd, e)))?;
-        
+
         let client_arc = Arc::new(client);
-        let root = std::env::current_dir().unwrap_or_default().to_string_lossy().to_string();
-        client_arc.initialize(&root).await.map_err(|e| AgentError(e.to_string()))?;
-        
+        let root = std::env::current_dir()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        client_arc
+            .initialize(&root)
+            .await
+            .map_err(|e| AgentError(e.to_string()))?;
+
         *client_lock = Some(client_arc.clone());
         Ok(client_arc)
     }
@@ -163,20 +169,29 @@ impl Tool for LspTool {
 
         match action {
             "definition" => {
-                let res = client.call("textDocument/definition", params).await.map_err(|e| AgentError(e.to_string()))?;
+                let res = client
+                    .call("textDocument/definition", params)
+                    .await
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(serde_json::to_string_pretty(&res).unwrap())
             }
             "references" => {
                 let mut ref_params = params.clone();
                 ref_params["context"] = json!({ "includeDeclaration": true });
-                let res = client.call("textDocument/references", ref_params).await.map_err(|e| AgentError(e.to_string()))?;
+                let res = client
+                    .call("textDocument/references", ref_params)
+                    .await
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(serde_json::to_string_pretty(&res).unwrap())
             }
             "hover" => {
-                let res = client.call("textDocument/hover", params).await.map_err(|e| AgentError(e.to_string()))?;
+                let res = client
+                    .call("textDocument/hover", params)
+                    .await
+                    .map_err(|e| AgentError(e.to_string()))?;
                 Ok(serde_json::to_string_pretty(&res).unwrap())
             }
-            _ => Err(AgentError("Unsupported LSP action".to_string()))
+            _ => Err(AgentError("Unsupported LSP action".to_string())),
         }
     }
 }

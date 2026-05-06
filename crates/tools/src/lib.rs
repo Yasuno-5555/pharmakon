@@ -2,7 +2,9 @@ pub mod anchors;
 pub mod ast_ingest;
 pub mod browser;
 pub mod canvas;
+pub mod checkpoint;
 pub mod code;
+pub mod codex;
 pub mod commitment_tool;
 pub mod config_tool;
 pub mod connectors;
@@ -11,23 +13,25 @@ pub mod docker_sandbox;
 pub mod fact_tool;
 pub mod files;
 pub mod git;
-pub mod lsp;
 pub mod host_script;
 pub mod link_understanding;
+pub mod lsp;
 pub mod mcp_tool;
 pub mod media;
 pub mod media_understanding;
 pub mod memory;
+pub mod memory_hydration;
+pub mod memory_mgmt;
+pub mod orchestration;
 pub mod playbook;
 pub mod probe;
-pub mod reflection;
-pub mod checkpoint;
-pub mod orchestration;
-pub mod memory_mgmt;
+pub mod project_management;
 pub mod quality;
+pub mod reflection;
 pub mod registry;
 pub mod repomap;
 pub mod research_tools;
+pub mod search;
 pub mod skill_factory;
 pub mod soul_tool;
 pub mod subagent;
@@ -38,24 +42,30 @@ pub mod tool_market;
 pub mod wasm_tool;
 pub mod web_fetch;
 pub mod web_search;
-pub mod search;
-pub mod memory_hydration;
-pub mod project_management;
 pub mod workspace;
 
 pub use crate::anchors::{ListAnchorsTool, SetAnchorTool};
 // ...
-pub use crate::memory_hydration::HydrateContextTool;
 pub use crate::ast_ingest::ASTKnowledgeIngestTool;
 pub use crate::browser::BrowserTool;
 pub use crate::canvas::CanvasTool;
 pub use crate::checkpoint::CheckpointTool;
-pub use crate::memory_mgmt::MemoryManagementTool;
-pub use crate::reflection::ReflectionTool;
-pub use crate::orchestration::ToolRouterTool;
 pub use crate::code::{
     ApplyPatchTool, CodeEditTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
     MultiCodeEditTool, PythonInterpreterTool, ViewFileTool,
+};
+pub use crate::codex::{
+    AstLspBridgeTool, AstNativeMutationTool, AttentionRouterTool, AutonomyDialTool,
+    CodexAutomationTool, CodexCatalogTool, CognitiveMirrorTool, ContextBudgetOptimizerTool,
+    CounterfactualSimulatorTool, CurrentTimeTool, DeterministicReplayTool, DiffSecurityAuditorTool,
+    DryRunTool, EphemeralRedTeamTool, ExecutionTraceTool, FailureMemoryTool, FailurePredictionTool,
+    FinanceLookupTool, FractalSwarmTool, GraphPrefetchTool, IntentCompilerTool,
+    LocalModelRouterTool, MctsSimulatorTool, MemoryActorStatusTool, NexusVisualizerTool,
+    NodeReplTool, ProactiveInterventionTool, ProactiveSelfOptimizationTool, RegretMinimizationTool,
+    RlfcTool, SemanticConflictResolutionTool, SemanticGrepTool, SkillCompositionTool,
+    SoftDependencyGraphTool, SpecFirstTestTool, SportsLookupTool, TemporalAwarenessTool,
+    TimeTravelDebuggerTool, ToolReliabilityScoringTool, WeatherLookupTool, WebTaskTool,
+    WorkspaceSnapshotTool,
 };
 pub use crate::commitment_tool::CommitmentTool;
 pub use crate::connectors::ContextConnectorTool;
@@ -67,10 +77,15 @@ pub use crate::link_understanding::LinkUnderstandingTool;
 pub use crate::mcp_tool::{ConnectMcpServerTool, McpTool};
 pub use crate::media::capture::{CameraTool, ScreenshotTool};
 pub use crate::media_understanding::MediaUnderstandingTool;
+pub use crate::memory_hydration::HydrateContextTool;
+pub use crate::memory_mgmt::MemoryManagementTool;
+pub use crate::orchestration::ToolRouterTool;
 pub use crate::playbook::PlaybookTool;
 pub use crate::quality::CargoQualityTool;
+pub use crate::reflection::ReflectionTool;
 pub use crate::repomap::RepoMapTool;
 pub use crate::research_tools::{ResearchConsolidateTool, ResearchFetchTool, ResearchSearchTool};
+pub use crate::search::custom_scout::CustomScoutTool;
 pub use crate::skill_factory::SkillFactoryTool;
 pub use crate::soul_tool::SoulTool;
 pub use crate::subagent::{ParallelSwarmTool, SubAgentTool};
@@ -79,6 +94,5 @@ pub use crate::token_economy_tool::TokenEconomyControlTool;
 pub use crate::tool_discovery::DiscoverToolsTool;
 pub use crate::web_fetch::WebFetchTool;
 pub use crate::web_search::{BraveSearchTool, GoogleSearchTool};
-pub use crate::search::custom_scout::CustomScoutTool;
 pub use crate::workspace::WorkspacePerceptionTool;
 pub use pharmakon_common::Tool;

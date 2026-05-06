@@ -5,13 +5,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct InitiativeEngineWorker {
-    agent: Arc<Mutex<Agent>>,
+    agent: Arc<Agent>,
     spawner: SwarmManager,
 }
 
 impl InitiativeEngineWorker {
-    pub fn new(agent: Arc<Mutex<Agent>>) -> Self {
-        let spawner = SwarmManager::new(agent.clone());
+    pub fn new(agent: Arc<Agent>) -> Self {
+        let spawner_agent = Arc::new(Mutex::new((*agent).clone()));
+        let spawner = SwarmManager::new(spawner_agent);
         Self { agent, spawner }
     }
 
@@ -19,10 +20,8 @@ impl InitiativeEngineWorker {
         log::info!("InitiativeEngine: Starting proactive evaluation cycle...");
 
         let (model, trajectory_context) = {
-            let agent_lock = self.agent.lock().await;
-
             // Extract recent trajectory to find unresolved threads
-            let trajectory = agent_lock.trajectory.lock().await;
+            let trajectory = self.agent.trajectory.lock().await;
             let recent_steps = trajectory
                 .steps
                 .iter()
@@ -60,7 +59,7 @@ impl InitiativeEngineWorker {
                 }
             }
 
-            (agent_lock.model.clone(), context_summary)
+            (self.agent.model.clone(), context_summary)
         };
 
         if trajectory_context.is_empty() {

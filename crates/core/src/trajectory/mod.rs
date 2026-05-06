@@ -71,7 +71,12 @@ impl Trajectory {
 
         for (i, step) in self.steps.iter().enumerate() {
             match step {
-                TrajectoryStep::Intent { goal, intent_type, confidence, timestamp } => {
+                TrajectoryStep::Intent {
+                    goal,
+                    intent_type,
+                    confidence,
+                    timestamp,
+                } => {
                     md.push_str(&format!(
                         "#### 🎯 Intent #{} ({})\n**Type**: `{}` (Confidence: {:.2})\n**Goal**: {}\n\n",
                         i,
@@ -94,7 +99,9 @@ impl Trajectory {
                     intent_id,
                     timestamp,
                 } => {
-                    let link = intent_id.map(|id| format!(" (from Intent #{})", id)).unwrap_or_default();
+                    let link = intent_id
+                        .map(|id| format!(" (from Intent #{})", id))
+                        .unwrap_or_default();
                     md.push_str(&format!(
                         "#### 🛠️ Action #{} ({}){})\nTool: `{}`\nArgs: ```json\n{}\n```\n\n",
                         i,
@@ -104,8 +111,14 @@ impl Trajectory {
                         serde_json::to_string_pretty(args).unwrap_or_default()
                     ));
                 }
-                TrajectoryStep::Observation { result, action_id, timestamp } => {
-                    let link = action_id.map(|id| format!(" (from Action #{})", id)).unwrap_or_default();
+                TrajectoryStep::Observation {
+                    result,
+                    action_id,
+                    timestamp,
+                } => {
+                    let link = action_id
+                        .map(|id| format!(" (from Action #{})", id))
+                        .unwrap_or_default();
                     md.push_str(&format!(
                         "#### 👁️ Observation ({}){})\n```\n{}\n```\n\n",
                         timestamp.format("%H:%M:%S"),

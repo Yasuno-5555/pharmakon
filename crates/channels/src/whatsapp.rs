@@ -18,7 +18,7 @@ impl WhatsAppChannel {
 
 #[async_trait]
 impl Channel for WhatsAppChannel {
-    async fn run(&self, _agent: Arc<Mutex<Agent>>) -> Result<()> {
+    async fn run(&self, _agent: Arc<Agent>) -> Result<()> {
         log::info!("WhatsApp channel started (Stub)");
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;

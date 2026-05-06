@@ -47,7 +47,7 @@ impl Tool for FactTool {
                     .as_str()
                     .ok_or_else(|| AgentError("Missing claim".to_string()))?;
                 let confidence = args["confidence"].as_f64().unwrap_or(0.9) as f32;
-                
+
                 memory
                     .add_belief(claim, confidence, "user_interaction")
                     .map_err(|e| AgentError(e.to_string()))?;

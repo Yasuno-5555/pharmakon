@@ -102,7 +102,7 @@ impl Hook for TokenEconomyHook {
                         let mut state = state_arc.lock().await;
                         let compactor = agent.compactor.lock().await;
                         if let Ok(new_h) = compactor.compact(state.history.clone()).await {
-                             state.history = new_h;
+                            state.history = new_h;
                         }
                     });
                 }

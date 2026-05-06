@@ -28,14 +28,16 @@ impl Tool for CustomScoutTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let query = args["query"].as_str().ok_or_else(|| AgentError("Missing query".to_string()))?;
-        
+        let query = args["query"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing query".to_string()))?;
+
         let mut report = format!("### Scout Report: {}\n\n", query);
         report.push_str("Searching via multi-engine ensemble...\n");
 
         // Note: In a real implementation, this would orchestrate other tools.
         // For now, we simulate the aggregation logic.
-        
+
         report.push_str("- [Aggregation] Merging results from Google and Brave...\n");
         report.push_str("- [Filtering] Removing low-relevance snippets...\n");
         report.push_str("- [Exploration] Extracting core facts...\n\n");
@@ -43,7 +45,7 @@ impl Tool for CustomScoutTool {
         report.push_str("#### Core Findings:\n");
         report.push_str("1. Initial results suggest high volatility in the target domain.\n");
         report.push_str("2. Key stakeholders have been identified in recent documentation.\n");
-        
+
         Ok(report)
     }
 }

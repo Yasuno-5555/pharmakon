@@ -4,14 +4,10 @@ use futures::{SinkExt, StreamExt};
 use pharmakon_common::Event;
 use pharmakon_core::agent::Agent;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
-pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
+pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Agent>) {
     let (mut sender, mut receiver) = socket.split();
-    let mut rx = {
-        let agent_lock = agent.lock().await;
-        agent_lock.event_tx.subscribe()
-    };
+    let mut rx = agent.event_tx.subscribe();
 
     let (tx, mut internal_rx) = tokio::sync::mpsc::channel::<AcpMessage>(32);
 
@@ -25,9 +21,8 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                             AcpMessage::ApprovalRequest { id, tool, args }
                         }
                         _ => {
-                            let agent_lock = agent_clone.lock().await;
                             AcpMessage::Event {
-                                session_id: agent_lock.session_id.lock().await.clone(),
+                                session_id: agent_clone.session_id.lock().await.clone(),
                                 event
                             }
                         }
@@ -52,8 +47,7 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
             if let Ok(acp_msg) = serde_json::from_str::<AcpMessage>(&text) {
                 match acp_msg {
                     AcpMessage::ApprovalResponse { id, approved } => {
-                        let agent_lock = agent_clone.lock().await;
-                        let _ = agent_lock.approval_tx.send((id, approved));
+                        let _ = agent_clone.approval_tx.send((id, approved));
                     }
                     AcpMessage::Initialize { .. } => {
                         let _ = tx_clone
@@ -71,15 +65,14 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         traits,
                         system_prompt,
                     } => {
-                        let agent_lock = agent_clone.lock().await;
-                        let mut soul = agent_lock.prompt_manager.lock().await.soul().clone();
+                        let mut soul = agent_clone.prompt_manager.lock().await.soul().clone();
                         if let Some(t) = traits {
                             soul.traits = t;
                         }
                         if let Some(p) = system_prompt {
                             soul.system_prompt = p;
                         }
-                        agent_lock.set_soul(soul).await;
+                        agent_clone.set_soul(soul).await;
                     }
                     AcpMessage::Prompt {
                         session_id: _,
@@ -87,9 +80,8 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                     } => {
                         let agent_inner = agent_clone.clone();
                         tokio::spawn(async move {
-                            let mut agent_lock = agent_inner.lock().await;
-                            if let Err(e) = agent_lock.chat(&message).await {
-                                let _ = agent_lock.event_tx.send(Event::Error {
+                            if let Err(e) = agent_inner.chat(&message).await {
+                                let _ = agent_inner.event_tx.send(Event::Error {
                                     message: e.to_string(),
                                 });
                             }

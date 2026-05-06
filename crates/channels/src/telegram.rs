@@ -28,7 +28,7 @@ impl TelegramChannel {
 
 #[async_trait]
 impl Channel for TelegramChannel {
-    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("TelegramChannel starting...");
 
         let bot = self.bot.clone();
@@ -62,7 +62,7 @@ impl Channel for TelegramChannel {
         }
 
         let handler = dptree::entry()
-            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Mutex<Agent>>, last_chat_id: Arc<Mutex<Option<ChatId>>>, chat_sessions: Arc<Mutex<std::collections::HashMap<ChatId, String>>>| async move {
+            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Agent>, last_chat_id: Arc<Mutex<Option<ChatId>>>, chat_sessions: Arc<Mutex<std::collections::HashMap<ChatId, String>>>| async move {
                 {
                     let mut last_id = last_chat_id.lock().await;
                     *last_id = Some(msg.chat.id);
@@ -80,14 +80,14 @@ impl Channel for TelegramChannel {
 
                     if text.starts_with("/approve ") {
                         let id = text.trim_start_matches("/approve ").to_string();
-                        agent.lock().await.approve(id.clone(), true);
+                        agent.approve(id.clone(), true);
                         let _ = bot.send_message(msg.chat.id, format!("✅ Tool call approved: {}", id)).await;
                         return Ok(());
                     }
 
                     if text.starts_with("/deny ") {
                         let id = text.trim_start_matches("/deny ").to_string();
-                        agent.lock().await.approve(id.clone(), false);
+                        agent.approve(id.clone(), false);
                         let _ = bot.send_message(msg.chat.id, format!("❌ Tool call denied: {}", id)).await;
                         return Ok(());
                     }
@@ -111,7 +111,7 @@ impl Channel for TelegramChannel {
                             let mut sessions = chat_sessions.lock().await;
                             sessions.insert(msg.chat.id, new_id.clone());
                         }
-                        agent.lock().await.reset_session_history(&session_id).await;
+                        agent.reset_session_history(&session_id).await;
                         let _ = bot.send_message(msg.chat.id, "🔄 New session started. Previous context has been cleared for this chat.").await;
                         return Ok(());
                     }
@@ -133,7 +133,7 @@ impl Channel for TelegramChannel {
                     let chat_id = msg.chat.id;
                     let text_owned = text.to_string();
                     tokio::spawn(async move {
-                        let agent_lock = agent_spawn.lock().await;
+                        let agent_lock = agent_spawn;
                         match agent_lock.chat_on_session(&text_owned, &session_id).await {
                             Ok(response) => {
                                 log::info!("Telegram sending response to {}: {}", chat_id, response);
@@ -153,7 +153,11 @@ impl Channel for TelegramChannel {
             }));
 
         let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
-            .dependencies(dptree::deps![agent.clone(), self.last_chat_id.clone(), self.chat_sessions.clone()])
+            .dependencies(dptree::deps![
+                agent.clone(),
+                self.last_chat_id.clone(),
+                self.chat_sessions.clone()
+            ])
             .enable_ctrlc_handler()
             .build();
 
@@ -162,7 +166,7 @@ impl Channel for TelegramChannel {
         let agent_for_events = agent.clone();
         let last_chat_id = self.last_chat_id.clone();
         tokio::spawn(async move {
-            let event_tx = agent_for_events.lock().await.event_tx.clone();
+            let event_tx = agent_for_events.event_tx.clone();
             let mut event_rx = event_tx.subscribe();
             log::info!("Telegram event listener started.");
 

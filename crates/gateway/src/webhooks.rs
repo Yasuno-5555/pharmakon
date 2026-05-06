@@ -6,7 +6,6 @@ use axum::{
 use pharmakon_core::agent::Agent;
 use serde::Deserialize;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Deserialize)]
 pub struct WebhookPayload {
@@ -16,7 +15,7 @@ pub struct WebhookPayload {
 pub async fn webhook_handler(
     Path(webhook_id): Path<String>,
     State((agent, _canvas_host, _cron_manager, config)): State<(
-        Arc<Mutex<Agent>>,
+        Arc<Agent>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -42,8 +41,7 @@ pub async fn webhook_handler(
         payload.message
     );
 
-    let mut agent_lock = agent.lock().await;
-    match agent_lock.chat(&payload.message).await {
+    match agent.chat(&payload.message).await {
         Ok(response) => {
             log::info!("Webhook agent response: {}", response);
             axum::http::StatusCode::OK.into_response()

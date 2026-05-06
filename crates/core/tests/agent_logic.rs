@@ -1,6 +1,6 @@
-use pharmakon_common::ToolRegistry;
 use async_trait::async_trait;
 use pharmakon_common::Config;
+use pharmakon_common::ToolRegistry;
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{
     AgentModel, AgentResult, CompletionRequest, CompletionResponse, MessageContent,

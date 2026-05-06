@@ -384,7 +384,9 @@ impl AgentModel for GeminiModel {
                     });
                 }
 
-                if tools.iter().any(|t| t.function.name == "google_search" || t.function.name == "gemini_search") {
+                if tools.iter().any(|t| {
+                    t.function.name == "google_search" || t.function.name == "gemini_search"
+                }) {
                     gemini_tools.push(GeminiTool {
                         function_declarations: None,
                         google_search: None,
@@ -530,10 +532,13 @@ impl AgentModel for GeminiModel {
 
         if let Some(cand_content) = &candidate.content {
             if cand_content.parts.is_empty() {
-                 log::warn!("Gemini returned a candidate with no parts. Finish reason: {:?}", candidate.finish_reason);
-                 if let Some(reason) = &candidate.finish_reason {
-                     content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
-                 }
+                log::warn!(
+                    "Gemini returned a candidate with no parts. Finish reason: {:?}",
+                    candidate.finish_reason
+                );
+                if let Some(reason) = &candidate.finish_reason {
+                    content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
+                }
             }
 
             for (i, part) in cand_content.parts.iter().enumerate() {
@@ -546,46 +551,46 @@ impl AgentModel for GeminiModel {
                     part.inline_data.is_some()
                 );
 
-            if let Some(ref t) = part.text {
-                if !t.is_empty() {
-                    if content.is_none() {
-                        content = Some(MessageContent::Text(t.clone()));
-                    } else if let Some(MessageContent::Text(ref mut existing)) = content {
-                        existing.push_str(t);
+                if let Some(ref t) = part.text {
+                    if !t.is_empty() {
+                        if content.is_none() {
+                            content = Some(MessageContent::Text(t.clone()));
+                        } else if let Some(MessageContent::Text(ref mut existing)) = content {
+                            existing.push_str(t);
+                        }
                     }
                 }
-            }
-            if let Some(ref th) = part.thought {
-                log::info!("Received native thought from Gemini (length: {})", th.len());
-                if content.is_none() {
-                    // For now, let's treat native thoughts as a special type of content if we want to show them
-                    // or just log them. OpenClaw wants them separate.
-                    // We'll wrap it in <think> tags if it's not already, so the agent can filter it later.
-                    content = Some(MessageContent::Text(format!("<think>{}</think>", th)));
-                } else if let Some(MessageContent::Text(ref mut existing)) = content {
-                    existing.push_str(&format!("\n<think>{}</think>", th));
+                if let Some(ref th) = part.thought {
+                    log::info!("Received native thought from Gemini (length: {})", th.len());
+                    if content.is_none() {
+                        // For now, let's treat native thoughts as a special type of content if we want to show them
+                        // or just log them. OpenClaw wants them separate.
+                        // We'll wrap it in <think> tags if it's not already, so the agent can filter it later.
+                        content = Some(MessageContent::Text(format!("<think>{}</think>", th)));
+                    } else if let Some(MessageContent::Text(ref mut existing)) = content {
+                        existing.push_str(&format!("\n<think>{}</think>", th));
+                    }
                 }
-            }
 
-            if let Some(ref fc) = part.function_call {
-                tool_calls.push(ToolCall {
-                    id: format!(
-                        "call_{}_{}",
-                        fc.name,
-                        uuid::Uuid::new_v4()
-                            .to_string()
-                            .chars()
-                            .take(8)
-                            .collect::<String>()
-                    ),
-                    r#type: "function".to_string(),
-                    function: FunctionCall {
-                        name: fc.name.clone(),
-                        arguments: fc.args.to_string(),
-                        thought_signature: fc.thought_signature.clone(),
-                    },
-                });
-            }
+                if let Some(ref fc) = part.function_call {
+                    tool_calls.push(ToolCall {
+                        id: format!(
+                            "call_{}_{}",
+                            fc.name,
+                            uuid::Uuid::new_v4()
+                                .to_string()
+                                .chars()
+                                .take(8)
+                                .collect::<String>()
+                        ),
+                        r#type: "function".to_string(),
+                        function: FunctionCall {
+                            name: fc.name.clone(),
+                            arguments: fc.args.to_string(),
+                            thought_signature: fc.thought_signature.clone(),
+                        },
+                    });
+                }
             }
         }
 
@@ -760,23 +765,23 @@ impl AgentModel for GeminiModel {
                                     if let Some(first_candidate) = candidates.get(0) {
                                         let parts = first_candidate["content"]["parts"].as_array();
                                         let mut chunk_text = String::new();
-                                        
+
                                         if let Some(parts_vec) = parts {
                                             for part in parts_vec {
                                                 if let Some(text) = part["text"].as_str() {
                                                     chunk_text.push_str(text);
                                                 }
                                                 if let Some(thought) = part["thought"].as_str() {
-                                                    chunk_text.push_str(&format!("<think>{}</think>", thought));
+                                                    chunk_text.push_str(&format!(
+                                                        "<think>{}</think>",
+                                                        thought
+                                                    ));
                                                 }
                                             }
                                         }
 
                                         if !chunk_text.is_empty() {
-                                            return Some((
-                                                Ok(chunk_text),
-                                                (byte_stream, buffer),
-                                            ));
+                                            return Some((Ok(chunk_text), (byte_stream, buffer)));
                                         }
                                     }
                                 }

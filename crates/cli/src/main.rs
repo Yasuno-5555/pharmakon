@@ -275,8 +275,9 @@ async fn main() -> Result<()> {
                 )
                 .await?,
             );
-            let fact_memory =
-                Arc::new(Mutex::new(pharmakon_memory::fact_memory::BeliefSystem::new()?));
+            let fact_memory = Arc::new(Mutex::new(
+                pharmakon_memory::fact_memory::BeliefSystem::new()?,
+            ));
 
             let mut agent = Agent::new(model_obj, "gateway".to_string())
                 .with_store(session_store.clone())
@@ -291,16 +292,8 @@ async fn main() -> Result<()> {
                 .add_tool(Arc::new(BraveSearchTool::new("".to_string())))
                 .await;
 
-            // The agent needs to be Arc-ed to have setup_autonomous_tools called,
-            // then we unwrap it to be put into the Mutex for the gateway.
-            let agent_arc_for_setup = Arc::new(agent);
-            agent_arc_for_setup.setup_autonomous_tools().await;
-            let agent = match Arc::try_unwrap(agent_arc_for_setup) {
-                Ok(agent) => agent,
-                Err(_) => panic!("Failed to unwrap Arc<Agent>; should have been single owner"),
-            };
-
-            let agent_arc = Arc::new(Mutex::new(agent));
+            let agent_arc = Arc::new(agent);
+            agent_arc.setup_autonomous_tools().await;
 
             let mut gateway = pharmakon_gateway::Gateway::new(
                 actual_port,
@@ -386,8 +379,9 @@ async fn main() -> Result<()> {
                 )
                 .await?,
             );
-            let fact_memory =
-                Arc::new(Mutex::new(pharmakon_memory::fact_memory::BeliefSystem::new()?));
+            let fact_memory = Arc::new(Mutex::new(
+                pharmakon_memory::fact_memory::BeliefSystem::new()?,
+            ));
 
             let mut agent = Agent::new(model_obj, session.clone())
                 .with_store(session_store.clone())

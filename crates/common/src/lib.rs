@@ -492,20 +492,26 @@ impl CodeUtils {
         let mut brace_count = 0;
         for line in code.lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
 
             if in_body == 0 {
                 skeleton.push_str(line);
                 if trimmed.ends_with('{') || trimmed.contains('{') {
                     skeleton.push_str(" { ... }\n");
                     in_body = 1;
-                    brace_count = trimmed.chars().filter(|&c| c == '{').count() as i32 - trimmed.chars().filter(|&c| c == '}').count() as i32;
-                    if brace_count <= 0 { in_body = 0; }
+                    brace_count = trimmed.chars().filter(|&c| c == '{').count() as i32
+                        - trimmed.chars().filter(|&c| c == '}').count() as i32;
+                    if brace_count <= 0 {
+                        in_body = 0;
+                    }
                 } else {
                     skeleton.push('\n');
                 }
             } else {
-                brace_count += trimmed.chars().filter(|&c| c == '{').count() as i32 - trimmed.chars().filter(|&c| c == '}').count() as i32;
+                brace_count += trimmed.chars().filter(|&c| c == '{').count() as i32
+                    - trimmed.chars().filter(|&c| c == '}').count() as i32;
                 if brace_count <= 0 {
                     in_body = 0;
                 }

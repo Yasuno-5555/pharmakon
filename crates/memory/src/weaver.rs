@@ -127,7 +127,10 @@ impl KnowledgeNexus {
             if let Ok(Some(_existing)) = self.graph.get_node(&node.id).await {
                 // If the node already exists and we didn't start with it, or it changed
                 // For now: prioritize local but log conflict
-                log::info!("Conflict detected for node {}. Applying local version.", node.id);
+                log::info!(
+                    "Conflict detected for node {}. Applying local version.",
+                    node.id
+                );
             }
             self.graph.add_node(node).await?;
         }
@@ -203,13 +206,23 @@ impl KnowledgeNexus {
         let mut synced_ids = Vec::new();
 
         for (id, text) in pending {
-            let node_info = self.graph.get_node(&id).await?.ok_or_else(|| anyhow::anyhow!("Node lost"))?;
-            
+            let node_info = self
+                .graph
+                .get_node(&id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Node lost"))?;
+
             let vector = match self.embedding_model.generate_embedding(&text).await {
                 Ok(v) => v,
                 Err(e) => {
-                    log::error!("Failed to generate embedding for {}: {}. Marking as FAILED.", id, e);
-                    self.graph.update_embedding_status(&id, "FAILED", None).await?;
+                    log::error!(
+                        "Failed to generate embedding for {}: {}. Marking as FAILED.",
+                        id,
+                        e
+                    );
+                    self.graph
+                        .update_embedding_status(&id, "FAILED", None)
+                        .await?;
                     continue;
                 }
             };
@@ -252,27 +265,48 @@ impl KnowledgeNexus {
 
         // ONLY AFTER SUCCESSFUL LANCEDB INSERTION, update SQLite status
         for id in synced_ids {
-            self.graph.update_embedding_status(&id, "COMPLETED", Some(&id)).await?;
+            self.graph
+                .update_embedding_status(&id, "COMPLETED", Some(&id))
+                .await?;
         }
 
         Ok(())
     }
 
     pub async fn smart_search(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
-        let vector = self.embedding_model.generate_embedding(query).await
+        let vector = self
+            .embedding_model
+            .generate_embedding(query)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
 
         let table = self.conn.open_table(&self.table_name).execute().await?;
         // Request more than limit to allow for re-ranking
-        let mut results = table.vector_search(vector)?.limit(limit * 2).execute().await?;
+        let mut results = table
+            .vector_search(vector)?
+            .limit(limit * 2)
+            .execute()
+            .await?;
 
         let mut candidates = Vec::new();
 
         while let Some(batch_result) = results.next().await {
             let batch: RecordBatch = batch_result?;
-            let id_col = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
-            let text_col = batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
-            let distance_col = batch.column(batch.num_columns() - 1).as_any().downcast_ref::<Float32Array>().unwrap();
+            let id_col = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let text_col = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let distance_col = batch
+                .column(batch.num_columns() - 1)
+                .as_any()
+                .downcast_ref::<Float32Array>()
+                .unwrap();
 
             for i in 0..id_col.len() {
                 let id = id_col.value(i).to_string();
@@ -291,12 +325,16 @@ impl KnowledgeNexus {
             if let Ok(Some(node)) = self.graph.get_node(&id).await {
                 // 1. Relevance (Hybrid: Vector Similarity + Keyword Boost)
                 let vector_sim = 1.0 / (1.0 + distance);
-                
+
                 // Lightweight Keyword Score (approx BM25 without full index)
                 let text_lower = text.to_lowercase();
-                let match_count = query_tokens.iter().filter(|&&t| text_lower.contains(t)).count();
-                let keyword_score = (match_count as f32 / query_tokens.len().max(1) as f32).min(1.0);
-                
+                let match_count = query_tokens
+                    .iter()
+                    .filter(|&&t| text_lower.contains(t))
+                    .count();
+                let keyword_score =
+                    (match_count as f32 / query_tokens.len().max(1) as f32).min(1.0);
+
                 // Hybrid mix (weighted)
                 let relevance = (vector_sim * 0.7) + (keyword_score * 0.3);
 
@@ -305,7 +343,7 @@ impl KnowledgeNexus {
                 let t_delta = (now - node.last_access_time).max(0) as f32 / 86400.0; // in days
                 let lambda = match node.node_type.as_str() {
                     "code_struct" | "code_trait" => 0.01, // slow decay for core structures
-                    _ => 0.05, // standard decay
+                    _ => 0.05,                            // standard decay
                 };
                 let freshness = (-lambda * t_delta).exp() * (1.0 + (node.access_count as f32).ln());
 
@@ -314,7 +352,7 @@ impl KnowledgeNexus {
                 let structural_boost = 1.0 + (relations.len() as f32 * 0.1).min(1.0);
 
                 let final_score = relevance * freshness * structural_boost;
-                
+
                 ranked_results.push((node, final_score));
             }
         }
@@ -331,13 +369,22 @@ impl KnowledgeNexus {
             if let Ok(relations) = self.graph.query_relations(&node.id).await {
                 for (rel_node, edge) in relations.into_iter().take(3) {
                     if edge.weight > 0.9 {
-                        documents.push(format!("[Related: {}] Full Content:\n{}", edge.relation, rel_node.content));
+                        documents.push(format!(
+                            "[Related: {}] Full Content:\n{}",
+                            edge.relation, rel_node.content
+                        ));
                     } else if edge.weight > 0.5 {
                         let summary = rel_node.summary.clone().unwrap_or_else(|| {
-                            let preview = rel_node.content.chars().take(120).collect::<String>().replace('\n', " ");
+                            let preview = rel_node
+                                .content
+                                .chars()
+                                .take(120)
+                                .collect::<String>()
+                                .replace('\n', " ");
                             format!("{}...", preview)
                         });
-                        documents.push(format!("[Related: {}] Summary: {}", edge.relation, summary));
+                        documents
+                            .push(format!("[Related: {}] Summary: {}", edge.relation, summary));
                     }
                 }
             }
@@ -348,11 +395,14 @@ impl KnowledgeNexus {
 
     pub async fn decay_memories(&self, factor: f32) -> anyhow::Result<()> {
         let table = self.conn.open_table(&self.table_name).execute().await?;
+        let bounded_factor = factor.clamp(0.98, 1.0);
 
-        // Update: decay_score = decay_score * factor
+        // Bound decay so long-running project knowledge cannot silently vanish in a
+        // few weeks. Access frequency and node type are handled during smart_search
+        // reranking, where frequently used and structural code nodes stay favored.
         table
             .update()
-            .column("decay_score", format!("decay_score * {}", factor))
+            .column("decay_score", format!("decay_score * {}", bounded_factor))
             .execute()
             .await?;
 

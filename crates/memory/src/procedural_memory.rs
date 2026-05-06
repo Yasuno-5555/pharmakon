@@ -35,14 +35,17 @@ impl ProceduralStore {
     }
 
     pub fn record_success(&mut self, intent: &str, steps: Vec<String>) -> Result<()> {
-        let entry = self.procedures.entry(intent.to_string()).or_insert_with(|| Procedure {
-            id: uuid::Uuid::new_v4().to_string(),
-            intent: intent.to_string(),
-            steps: steps.clone(),
-            success_count: 0,
-            failure_count: 0,
-            last_used: chrono::Utc::now(),
-        });
+        let entry = self
+            .procedures
+            .entry(intent.to_string())
+            .or_insert_with(|| Procedure {
+                id: uuid::Uuid::new_v4().to_string(),
+                intent: intent.to_string(),
+                steps: steps.clone(),
+                success_count: 0,
+                failure_count: 0,
+                last_used: chrono::Utc::now(),
+            });
 
         entry.success_count += 1;
         entry.steps = steps; // Update with latest successful steps

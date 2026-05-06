@@ -64,7 +64,7 @@ impl Tool for ToolRouterTool {
             _ => json!({
                 "allowed_tools": ["all"],
                 "cost_grade": "Variable"
-            })
+            }),
         };
 
         Ok(recommendations.to_string())

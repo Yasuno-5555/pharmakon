@@ -501,8 +501,8 @@ impl DbSessionStore {
 
         let mut steps = Vec::new();
         for (event_type, payload) in rows {
-            // We need to reconstruct TrajectoryStep. 
-            // Since TrajectoryStep is an enum with #[serde(tag = "type")], 
+            // We need to reconstruct TrajectoryStep.
+            // Since TrajectoryStep is an enum with #[serde(tag = "type")],
             // the payload must match that structure.
             let step: crate::trajectory::TrajectoryStep = serde_json::from_str(&payload)?;
             steps.push(step);

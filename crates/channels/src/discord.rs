@@ -6,7 +6,6 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub struct DiscordChannel {
     pub token: String,
@@ -26,7 +25,7 @@ impl DiscordChannel {
 }
 
 struct Handler {
-    agent: Arc<Mutex<Agent>>,
+    agent: Arc<Agent>,
 }
 
 #[async_trait]
@@ -41,8 +40,7 @@ impl EventHandler for Handler {
         let agent_clone = self.agent.clone();
         let content = msg.content.clone();
         tokio::spawn(async move {
-            let agent_lock = agent_clone.lock().await;
-            match agent_lock.chat(&content).await {
+            match agent_clone.chat(&content).await {
                 Ok(response) => {
                     if let Err(e) = msg.channel_id.say(&ctx.http, response).await {
                         log::error!("Discord send error: {}", e);
@@ -63,7 +61,7 @@ impl EventHandler for Handler {
 
 #[async_trait]
 impl Channel for DiscordChannel {
-    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
+    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()> {
         log::info!("DiscordChannel starting...");
 
         let intents = GatewayIntents::GUILD_MESSAGES

@@ -42,7 +42,7 @@ impl ContextEngine {
     pub fn generate_virtual_index(&self, entries: &[ContextEntry]) -> String {
         let mut index = String::from("### Virtual Context Index\n");
         index.push_str("Available information slots (use tools to hydrate details):\n\n");
-        
+
         for entry in entries {
             index.push_str(&format!(
                 "- [{}] id: `{}` | relevance: {:.2} | summary: {}\n",

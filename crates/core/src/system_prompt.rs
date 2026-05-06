@@ -49,7 +49,10 @@ impl PromptLayout {
         if let Some(kg) = &self.knowledge_graph {
             p.push_str(&format!("\n\n### KNOWLEDGE GRAPH\n{}", kg));
         }
-        p.push_str(&format!("\n\n### WORKING MEMORY (Recent Findings)\n{}", self.working_memory));
+        p.push_str(&format!(
+            "\n\n### WORKING MEMORY (Recent Findings)\n{}",
+            self.working_memory
+        ));
         p.push_str(&format!("\n\n### CURRENT TASK\n{}", self.current_task));
         p
     }
@@ -95,15 +98,17 @@ impl SystemPromptManager {
             if contrib.name() == "Playbooks" {
                 playbook_content = contrib.get_content();
             } else {
-                other_contribs.push_str(&format!("\n\n### {}\n{}", contrib.name(), contrib.get_content()));
+                other_contribs.push_str(&format!(
+                    "\n\n### {}\n{}",
+                    contrib.name(),
+                    contrib.get_content()
+                ));
             }
         }
 
         format!(
             "{}\n\n{}\n{}",
-            self.base_soul.system_prompt,
-            playbook_content,
-            other_contribs
+            self.base_soul.system_prompt, playbook_content, other_contribs
         )
     }
 
@@ -139,7 +144,11 @@ impl SystemPromptContribution for PlaybookContribution {
         } else {
             format!(
                 "You have access to the following playbooks (workflows). Use the `playbook` tool to load or inject them for specific tasks:\n{}",
-                self.names.iter().map(|n| format!("- {}", n)).collect::<Vec<_>>().join("\n")
+                self.names
+                    .iter()
+                    .map(|n| format!("- {}", n))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             )
         }
     }

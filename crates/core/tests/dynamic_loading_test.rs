@@ -71,7 +71,12 @@ async fn test_dynamic_agent_loading() {
 
     // Check model
     assert!(
-        gemini_agent.model.lock().await.name().contains("gemini-2.5-flash"),
+        gemini_agent
+            .model
+            .lock()
+            .await
+            .name()
+            .contains("gemini-2.5-flash"),
         "Gemini agent should have the specified Gemini model. Found: {}",
         gemini_agent.model.lock().await.name()
     );
@@ -104,7 +109,12 @@ async fn test_dynamic_agent_loading() {
 
     // Check model (should be the default model)
     assert!(
-        openai_agent.model.lock().await.name().contains("gemini-2.5-flash"),
+        openai_agent
+            .model
+            .lock()
+            .await
+            .name()
+            .contains("gemini-2.5-flash"),
         "OpenAI agent should fall back to the default Gemini model. Found: {}",
         openai_agent.model.lock().await.name()
     );

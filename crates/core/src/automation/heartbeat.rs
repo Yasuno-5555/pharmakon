@@ -1,15 +1,14 @@
 use crate::agent::Agent;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 
 pub struct HeartbeatManager {
-    agent: Arc<Mutex<Agent>>,
+    agent: Arc<Agent>,
     interval: Duration,
 }
 
 impl HeartbeatManager {
-    pub fn new(agent: Arc<Mutex<Agent>>, interval_minutes: u64) -> Self {
+    pub fn new(agent: Arc<Agent>, interval_minutes: u64) -> Self {
         Self {
             agent,
             interval: Duration::from_secs(interval_minutes * 60),
@@ -30,8 +29,7 @@ impl HeartbeatManager {
                 timer.tick().await;
                 log::info!("HeartbeatManager: Triggering autonomous check...");
 
-                let mut agent_lock = agent.lock().await;
-                match agent_lock.heartbeat().await {
+                match agent.heartbeat().await {
                     Ok(response) => {
                         if !response.contains("HEARTBEAT_OK") {
                             log::info!("HeartbeatManager: Agent performed actions: {}", response);
@@ -43,11 +41,9 @@ impl HeartbeatManager {
                 }
 
                 // Maintenance (Memory Decay, etc.)
-                if let Err(e) = agent_lock.perform_maintenance().await {
+                if let Err(e) = agent.perform_maintenance().await {
                     log::error!("HeartbeatManager: Maintenance error: {}", e);
                 }
-
-                drop(agent_lock);
 
                 // Run Initiative Engine
                 if let Err(e) = initiative_engine.run_initiative_cycle().await {

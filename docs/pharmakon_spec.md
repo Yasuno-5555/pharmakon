@@ -15,6 +15,7 @@ Pharmakon is built as a modular workspace of Rust crates, ensuring high performa
 - **MemoryWeaver**: A high-performance vector database (LanceDB) that stores semantic embeddings of past interactions.
 - **FactMemory**: A structured SQL database (SQLite with WAL mode) for storing hard facts, configuration, and long-term commitments.
 - **Context Anchoring**: A semantic compression mechanism that prunes old messages while preserving core intent as "anchors".
+- **Implementation status**: `crates/memory` exists in the workspace and implements LanceDB + FastEmbed + SQLite graph storage. Ranking is access-aware; decay is bounded so project-critical context does not disappear after a short idle period.
 
 ### 2.3 Interface & Connectivity (`pharmakon-gateway`, `pharmakon-gui`)
 - **Gateway**: An Axum-based web server providing WebSocket event streaming, HTTP API, and static UI serving with Brotli/Gzip compression.
@@ -25,6 +26,7 @@ Pharmakon is built as a modular workspace of Rust crates, ensuring high performa
 - **Parallel Context Gathering**: Simultaneous retrieval of vector memories and structured facts to minimize TTFT (Time To First Token).
 - **Multi-threaded Tooling**: Non-blocking tool execution with I/O multiplexing (stdout/stderr capture).
 - **Vision RAG**: Automatic indexing of image descriptions for semantic visual search.
+- **Codex-Compatible Tooling**: The standard tool pack includes trace/replay, dry-run, reliability scoring, workspace snapshots, semantic grep, AST/LSP bridge, diff security auditing, intent compilation, cognitive mirror, autonomy dial, local model routing, and Knowledge Nexus visualization.
 
 ## 4. Technology Stack
 - **Language**: Rust (Edition 2024)
@@ -42,6 +44,11 @@ Pharmakon is built as a modular workspace of Rust crates, ensuring high performa
 - `crates/gateway`: Web server and WebSocket bridge.
 - `crates/tools`: Standard tool library (Shell, Browser, Media, etc.).
 - `crates/gui`: System tray and native window management.
+- `crates/channels`: Telegram, Discord, WhatsApp, and related channel adapters.
+- `crates/cli`: The installable `pharmakon` binary.
+- `crates/mcp`: MCP integration for external tool servers.
+- `crates/plugin-sdk`: WASM plugin SDK.
+- `crates/audio`: Audio capability crate.
 
 ## 6. Security & Safety
 - **Policy Engine**: Configurable rules for tool execution.

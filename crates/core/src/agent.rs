@@ -6,10 +6,11 @@ use crate::system_prompt::SystemPromptManager;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use pharmakon_common::{Event, ToolRegistry};
-use std::sync::Arc;
-use tokio::sync::{Mutex, broadcast};
-use pharmakon_tools::{GoogleSearchTool, search::custom_scout::CustomScoutTool};
 use pharmakon_memory::BeliefSystem;
+use pharmakon_tools::{GoogleSearchTool, search::custom_scout::CustomScoutTool};
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use tokio::sync::{Mutex, broadcast};
 
 tokio::task_local! {
     pub static CURRENT_SESSION_ID: String;
@@ -21,7 +22,7 @@ pub struct WorkingMemoryUnit {
     pub summary: Option<String>, // Micro-summary (1-2 lines)
     pub importance: f32,
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub tokens: usize, // Estimated tokens
+    pub tokens: usize,  // Estimated tokens
     pub source: String, // Where it came from
 }
 
@@ -39,7 +40,6 @@ pub struct Agent {
     pub prompt_manager: Arc<Mutex<SystemPromptManager>>,
     pub event_tx: broadcast::Sender<Event>,
     pub approval_tx: broadcast::Sender<(String, bool)>,
-    pub approval_rx: Option<broadcast::Receiver<(String, bool)>>,
     pub trajectory: Arc<Mutex<crate::trajectory::Trajectory>>,
     pub compactor: Arc<Mutex<crate::memory::compactor::ContextCompactor>>,
     pub tools: Arc<Mutex<Vec<Arc<dyn pharmakon_common::Tool>>>>,
@@ -54,7 +54,7 @@ pub struct Agent {
     pub vision_stream: Option<Arc<Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
     pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
     pub interaction_count: Arc<std::sync::atomic::AtomicU32>,
-    pub fallback_models: Vec<String>,
+    pub fallback_models: Arc<StdMutex<Vec<String>>>,
     pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
     pub total_cost: Arc<Mutex<f64>>,
     pub start_time: std::time::Instant,
@@ -73,7 +73,6 @@ impl Clone for Agent {
             prompt_manager: self.prompt_manager.clone(),
             event_tx: self.event_tx.clone(),
             approval_tx: self.approval_tx.clone(),
-            approval_rx: None, // Cannot clone Receiver
             trajectory: self.trajectory.clone(),
             compactor: self.compactor.clone(),
             tools: self.tools.clone(),
@@ -103,7 +102,7 @@ impl Clone for Agent {
 impl Agent {
     pub fn new(model: Arc<dyn AgentModel>, session_id: String) -> Self {
         let (event_tx, _) = broadcast::channel(100);
-        let (approval_tx, approval_rx) = broadcast::channel(10);
+        let (approval_tx, _) = broadcast::channel(100);
         let trajectory = Arc::new(Mutex::new(crate::trajectory::Trajectory::new(
             session_id.clone(),
             model.name().to_string(),
@@ -112,13 +111,14 @@ impl Agent {
             model.clone(),
         )));
         let mut pm = SystemPromptManager::new(crate::soul::Soul::default_soul());
-        pm.add_contribution(Box::new(crate::system_prompt::autonomy::AutonomyContribution));
-        
+        pm.add_contribution(Box::new(
+            crate::system_prompt::autonomy::AutonomyContribution,
+        ));
+
         let playbook_names = pharmakon_tools::playbook::PlaybookTool::list_names();
         pm.add_contribution(Box::new(crate::system_prompt::PlaybookContribution {
             names: playbook_names,
         }));
-        let prompt_manager = Arc::new(Mutex::new(pm));
 
         let mut hooks = crate::hooks::HookRegistry::new();
         hooks.register(Box::new(
@@ -126,13 +126,12 @@ impl Agent {
         )); // 100k token default budget
 
         Self {
-            model: Arc::new(Mutex::new(model)),
+            model: Arc::new(Mutex::new(model.clone())),
             session_id: Arc::new(Mutex::new(session_id)),
             session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            prompt_manager,
+            prompt_manager: Arc::new(Mutex::new(pm)),
             event_tx,
             approval_tx,
-            approval_rx: Some(approval_rx),
             trajectory,
             compactor,
             tools: Arc::new(Mutex::new(Vec::new())),
@@ -140,14 +139,14 @@ impl Agent {
             fact_memory: None,
             semantic_search: None,
             knowledge_nexus: None,
-            health_monitor: crate::orchestration::health_monitor::HealthMonitor::new(0.5),
+            health_monitor: crate::orchestration::health_monitor::HealthMonitor::new(0.3),
             policy_engine: Arc::new(crate::security::policy::PolicyEngine::new()),
             session_store: None,
             planner_model: None,
             vision_stream: None,
             graph_store: None,
             interaction_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            fallback_models: Vec::new(),
+            fallback_models: Arc::new(StdMutex::new(Vec::new())),
             total_tokens: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             total_cost: Arc::new(Mutex::new(0.0)),
             start_time: std::time::Instant::now(),
@@ -160,8 +159,11 @@ impl Agent {
         }
     }
 
-    pub fn with_fallback_models(mut self, models: Vec<String>) -> Self {
-        self.fallback_models = models;
+    pub fn with_fallback_models(self, models: Vec<String>) -> Self {
+        {
+            let mut fm = self.fallback_models.lock().unwrap();
+            *fm = models;
+        }
         self
     }
 
@@ -172,7 +174,11 @@ impl Agent {
         };
         // Check if task-local session ID is available, override if so
         let session_id = CURRENT_SESSION_ID.with(|id| {
-            if id.is_empty() { session_id } else { id.clone() }
+            if id.is_empty() {
+                session_id
+            } else {
+                id.clone()
+            }
         });
         self.get_session_state(&session_id).await
     }
@@ -194,7 +200,9 @@ impl Agent {
             history,
             working_memory: Vec::new(),
             active_playbooks: Vec::new(),
-            context_engine: Arc::new(Mutex::new(crate::memory::context_engine::ContextEngine::new(8192))),
+            context_engine: Arc::new(Mutex::new(
+                crate::memory::context_engine::ContextEngine::new(8192),
+            )),
         }));
         states.insert(session_id.to_string(), state.clone());
         state
@@ -205,10 +213,7 @@ impl Agent {
         self
     }
 
-    pub fn with_fact_memory(
-        mut self,
-        fact_memory: Arc<Mutex<BeliefSystem>>,
-    ) -> Self {
+    pub fn with_fact_memory(mut self, fact_memory: Arc<Mutex<BeliefSystem>>) -> Self {
         self.fact_memory = Some(fact_memory);
         self
     }
@@ -231,38 +236,212 @@ impl Agent {
 
     pub async fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
         let mut tools = self.tools.lock().await;
+        let name = tool.name().to_string();
+        if tools.iter().any(|existing| existing.name() == name) {
+            log::debug!("Skipping duplicate tool registration: {}", name);
+            return;
+        }
         tools.push(tool);
     }
 
     pub async fn init_standard_tools(&self) {
-        self.add_tool(Arc::new(pharmakon_tools::terminal::TerminalTool::new())).await;
-        self.add_tool(Arc::new(pharmakon_tools::code::ViewFileTool)).await;
-        self.add_tool(Arc::new(pharmakon_tools::code::CodeEditTool)).await;
-        self.add_tool(Arc::new(pharmakon_tools::code::GrepSearchTool)).await;
-        self.add_tool(Arc::new(pharmakon_tools::repomap::RepoMapTool::new())).await;
-        
+        let background_processes = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        self.add_tool(Arc::new(pharmakon_tools::terminal::ShellTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::terminal::TerminalTool::new()))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::terminal::BackgroundRunTool {
+            active_processes: background_processes.clone(),
+        }))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::terminal::ProcessStatusTool {
+            active_processes: background_processes,
+            retry_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::files::FileReadTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::files::FileWriteTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::ViewFileTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::ListDirTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::CodeEditTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::MultiCodeEditTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::GrepSearchTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::FindDefinitionTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::code::PythonInterpreterTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::repomap::RepoMapTool::new()))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::git::GitStatusTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::git::GitDiffTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::git::GitCommitTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::browser::BrowserTool::new(None)))
+            .await;
+
         if let Ok(key) = std::env::var("BRAVE_SEARCH_API_KEY") {
-            self.add_tool(Arc::new(pharmakon_tools::search::BraveSearchTool::new(key))).await;
+            self.add_tool(Arc::new(pharmakon_tools::search::BraveSearchTool::new(key)))
+                .await;
         }
-        
-        self.add_tool(Arc::new(pharmakon_tools::web_fetch::WebFetchTool::new())).await;
-        self.add_tool(Arc::new(pharmakon_tools::memory_hydration::HydrateContextTool::new())).await;
+
+        self.add_tool(Arc::new(pharmakon_tools::web_fetch::WebFetchTool::new()))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::web_search::BraveSearchTool::new(
+            "".to_string(),
+        )))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::web_search::GoogleSearchTool))
+            .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::search::custom_scout::CustomScoutTool,
+        ))
+        .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::memory_hydration::HydrateContextTool::new(),
+        ))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::playbook::PlaybookTool::new()))
+            .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::project_management::TaskTrackerTool::new(),
+        ))
+        .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::workspace::WorkspacePerceptionTool::new(),
+        ))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::probe::EnvironmentProbeTool::new()))
+            .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::link_understanding::LinkUnderstandingTool::new(),
+        ))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::quality::CargoQualityTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::tool_market::ToolMarketTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::ExecutionTraceTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::DeterministicReplayTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::ToolReliabilityScoringTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::ContextBudgetOptimizerTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::DryRunTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::WorkspaceSnapshotTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::SemanticGrepTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::WebTaskTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::LocalModelRouterTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::SkillCompositionTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::FailureMemoryTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::ProactiveInterventionTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::CognitiveMirrorTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::IntentCompilerTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::RegretMinimizationTool))
+            .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::codex::CounterfactualSimulatorTool,
+        ))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::AttentionRouterTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::TemporalAwarenessTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::SoftDependencyGraphTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::AutonomyDialTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::FailurePredictionTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::AstLspBridgeTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::SpecFirstTestTool))
+            .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::codex::SemanticConflictResolutionTool,
+        ))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::TimeTravelDebuggerTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::NexusVisualizerTool))
+            .await;
+        self.add_tool(Arc::new(
+            pharmakon_tools::codex::ProactiveSelfOptimizationTool,
+        ))
+        .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::DiffSecurityAuditorTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::AstNativeMutationTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::MctsSimulatorTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::MemoryActorStatusTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::GraphPrefetchTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::RlfcTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::EphemeralRedTeamTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::FractalSwarmTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::NodeReplTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::CodexAutomationTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::CurrentTimeTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::WeatherLookupTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::FinanceLookupTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::SportsLookupTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::codex::CodexCatalogTool))
+            .await;
     }
 
     pub async fn setup_autonomous_tools(&self) {
         self.init_standard_tools().await;
-        
+
         // Add Phase 3 Tools
-        self.add_tool(Arc::new(pharmakon_tools::checkpoint::CheckpointTool)).await;
-        self.add_tool(Arc::new(pharmakon_tools::reflection::ReflectionTool)).await;
-        self.add_tool(Arc::new(pharmakon_tools::orchestration::ToolRouterTool)).await;
-        
+        self.add_tool(Arc::new(pharmakon_tools::checkpoint::CheckpointTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::reflection::ReflectionTool))
+            .await;
+        self.add_tool(Arc::new(pharmakon_tools::orchestration::ToolRouterTool))
+            .await;
+
         if let Some(nexus) = &self.knowledge_nexus {
-            self.add_tool(Arc::new(pharmakon_tools::memory_mgmt::MemoryManagementTool::new(Some(nexus.clone())))).await;
+            self.add_tool(Arc::new(
+                pharmakon_tools::memory_mgmt::MemoryManagementTool::new(Some(nexus.clone())),
+            ))
+            .await;
         }
 
         // Add apply_patch (SAFER replacement for write_file)
-        self.add_tool(Arc::new(pharmakon_tools::code::ApplyPatchTool)).await;
+        self.add_tool(Arc::new(pharmakon_tools::code::ApplyPatchTool))
+            .await;
     }
 
     pub async fn chat(&self, message: &str) -> Result<String> {
@@ -487,7 +666,7 @@ impl Agent {
             }
 
             log::info!("Agent iteration start ({})...", iteration_count);
-            
+
             // 0. SPECULATIVE PRE-FETCHING:
             // Proactively load potentially relevant context in the background.
             let prefetch_task = {
@@ -509,7 +688,7 @@ impl Agent {
             let mut messages_to_send = Vec::new();
             {
                 let prompt_manager = self.prompt_manager.lock().await;
-                
+
                 // 1. VIRTUAL CONTEXT SCALING:
                 // Instead of loading all context, we load a sparse index.
                 let state_arc = self.get_current_session_state().await;
@@ -617,8 +796,9 @@ impl Agent {
                             || e.to_string().to_lowercase().contains("too many requests")
                             || e.to_string().to_lowercase().contains("quota");
 
-                        if is_rate_limit && current_fallback_index < fallback_models.len() {
-                            let fallback_id = &fallback_models[current_fallback_index];
+                        let fallback_list = fallback_models.lock().unwrap();
+                        if is_rate_limit && current_fallback_index < fallback_list.len() {
+                            let fallback_id = &fallback_list[current_fallback_index];
                             log::warn!(
                                 "Rate limit encountered for {}. Falling back to: {}",
                                 target_model.name(),
@@ -697,7 +877,7 @@ impl Agent {
                         .find(|t| t.name() == tool_call.function.name)
                         .cloned();
                     let event_tx = self.event_tx.clone();
-                    let mut approval_rx = self.approval_rx.as_ref().map(|rx| rx.resubscribe());
+                    let mut approval_rx = self.approval_tx.subscribe();
                     let hooks = self.hooks.clone();
                     let soul = {
                         let pm = self.prompt_manager.lock().await;
@@ -765,20 +945,18 @@ impl Agent {
                                 tool: tool.name().to_string(),
                                 args: args.clone(),
                             });
-                            if let Some(ref mut rx) = approval_rx {
-                                let mut approved = false;
-                                while let Ok((id, result)) = rx.recv().await {
-                                    if id == approval_id {
-                                        approved = result;
-                                        break;
-                                    }
+                            let mut approved = false;
+                            while let Ok((id, result)) = approval_rx.recv().await {
+                                if id == approval_id {
+                                    approved = result;
+                                    break;
                                 }
-                                if !approved {
-                                    return (
-                                        tool_call.id.clone(),
-                                        Ok("Denied by user.".to_string()),
-                                    );
-                                }
+                            }
+                            if !approved {
+                                return (
+                                    tool_call.id.clone(),
+                                    Ok("Denied by user.".to_string()),
+                                );
                             }
                         }
 
@@ -847,7 +1025,7 @@ impl Agent {
                                 e.to_string()
                             }
                         };
-                        
+
                         if result.contains("### INJECTED PLAYBOOK") {
                             if let Some(line) = result.lines().next() {
                                 let name = line.replace("### INJECTED PLAYBOOK: ", "").trim().to_string();
@@ -984,7 +1162,11 @@ impl Agent {
     pub async fn add_to_working_memory(&self, content: String, importance: f32, source: String) {
         // SEMANTIC NOISE GATE: Filter out low-importance signals
         if importance < 0.3 {
-            log::debug!("Agent: Noise Gate blocked low-importance context ({:.2}) from {}", importance, source);
+            log::debug!(
+                "Agent: Noise Gate blocked low-importance context ({:.2}) from {}",
+                importance,
+                source
+            );
             return;
         }
 
@@ -1019,7 +1201,9 @@ impl Agent {
     pub async fn scout_workspace(&self, query: &str) -> Option<String> {
         let nexus = self.knowledge_nexus.clone()?;
         let results = nexus.smart_search(query, 5).await.ok()?;
-        if results.is_empty() { return None; }
+        if results.is_empty() {
+            return None;
+        }
         Some(results.join("\\n---\\n"))
     }
 
@@ -1027,21 +1211,42 @@ impl Agent {
         log::info!("Agent: Performing periodic self-reflection...");
         let state_arc = self.get_current_session_state().await;
         let state = state_arc.lock().await;
-        
-        if state.history.len() < 4 { return Ok(()); }
 
-        let context = state.history.iter()
+        if state.history.len() < 4 {
+            return Ok(());
+        }
+
+        let context = state
+            .history
+            .iter()
             .rev()
             .take(10)
-            .map(|m| format!("{}: {}", m.role, m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()))
+            .map(|m| {
+                format!(
+                    "{}: {}",
+                    m.role,
+                    m.content
+                        .as_ref()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default()
+                )
+            })
             .collect::<Vec<_>>()
             .join("\\n");
 
         let system_prompt = "Analyze the recent conversation and extract ONE key learned fact, architectural decision, or verified constraint. Output only the distilled insight.";
         let request = CompletionRequest {
             messages: vec![
-                Message { role: "system".to_string(), content: Some(MessageContent::Text(system_prompt.to_string())), ..Default::default() },
-                Message { role: "user".to_string(), content: Some(MessageContent::Text(format!("Context:\\n{}", context))), ..Default::default() },
+                Message {
+                    role: "system".to_string(),
+                    content: Some(MessageContent::Text(system_prompt.to_string())),
+                    ..Default::default()
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: Some(MessageContent::Text(format!("Context:\\n{}", context))),
+                    ..Default::default()
+                },
             ],
             temperature: Some(0.3),
             max_tokens: Some(200),
@@ -1053,7 +1258,7 @@ impl Agent {
             if let Some(insight) = response.content.as_ref().and_then(|c| c.as_text()) {
                 if !insight.trim().is_empty() {
                     log::info!("Agent Reflection Insight: {}", insight);
-                    
+
                     // Save to fact memory for long-term recall
                     if let Some(fact_mem) = &self.fact_memory {
                         let mut fm = fact_mem.lock().await;
@@ -1087,7 +1292,9 @@ impl Agent {
         if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
             let mut model = self.model.lock().await;
             *model = new_model;
-            let _ = self.event_tx.send(Event::ModelSwitched { model_id: model_id.to_string() });
+            let _ = self.event_tx.send(Event::ModelSwitched {
+                model_id: model_id.to_string(),
+            });
             Ok(format!("Switched to model: {}", model_id))
         } else {
             Ok(format!("Model not found: {}", model_id))
@@ -1104,7 +1311,10 @@ impl Agent {
         pm.set_soul(soul);
     }
 
-    pub async fn add_contribution(&self, contribution: Box<dyn crate::system_prompt::SystemPromptContribution>) {
+    pub async fn add_contribution(
+        &self,
+        contribution: Box<dyn crate::system_prompt::SystemPromptContribution>,
+    ) {
         let mut pm = self.prompt_manager.lock().await;
         pm.add_contribution(contribution);
     }
@@ -1130,7 +1340,9 @@ impl Agent {
     }
 
     pub async fn record_step(&self, step: crate::trajectory::TrajectoryStep) -> Result<()> {
-        let session_id = CURRENT_SESSION_ID.try_with(|id| id.clone()).unwrap_or_else(|_| "default".to_string());
+        let session_id = CURRENT_SESSION_ID
+            .try_with(|id| id.clone())
+            .unwrap_or_else(|_| "default".to_string());
 
         {
             let mut trajectory = self.trajectory.lock().await;
@@ -1146,12 +1358,19 @@ impl Agent {
                 crate::trajectory::TrajectoryStep::Response { .. } => "response",
             };
             let payload = serde_json::to_value(&step)?;
-            let _ = store.save_trajectory_event(&session_id, event_type, &payload).await;
+            let _ = store
+                .save_trajectory_event(&session_id, event_type, &payload)
+                .await;
         }
         Ok(())
     }
 
-    pub async fn register_playbook(&self, session_id: &str, name: String, content: String) -> Result<()> {
+    pub async fn register_playbook(
+        &self,
+        session_id: &str,
+        name: String,
+        content: String,
+    ) -> Result<()> {
         let state_arc = self.get_session_state(session_id).await;
         let mut state = state_arc.lock().await;
         if !state.active_playbooks.iter().any(|(n, _)| n == &name) {

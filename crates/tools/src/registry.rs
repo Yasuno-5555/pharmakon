@@ -10,7 +10,8 @@ pub struct ToolDependencies {
     pub soul_manager: Option<Arc<dyn SoulManager>>,
     pub event_tx: Option<broadcast::Sender<Event>>,
     pub nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
-    pub vision_stream: Option<Arc<tokio::sync::Mutex<crate::media::vision_stream::VisionRingBuffer>>>,
+    pub vision_stream:
+        Option<Arc<tokio::sync::Mutex<crate::media::vision_stream::VisionRingBuffer>>>,
     pub total_tokens: Option<Arc<std::sync::atomic::AtomicU64>>,
     pub total_cost: Option<Arc<tokio::sync::Mutex<f64>>>,
 }
@@ -47,13 +48,17 @@ impl ToolRegistry {
                 total_tokens: deps.total_tokens.clone(),
                 total_cost: deps.total_cost.clone(),
             })),
-            "workspace_perception" => Some(Arc::new(crate::workspace::WorkspacePerceptionTool::new())),
-            "subagent" => deps.model.as_ref().map(|m| {
-                Arc::new(crate::subagent::SubAgentTool::new(Arc::new(crate::subagent::NoopSpawner))) as Arc<dyn Tool>
-            }),
-            "link_understanding" => {
-                Some(Arc::new(crate::link_understanding::LinkUnderstandingTool::new()))
+            "workspace_perception" => {
+                Some(Arc::new(crate::workspace::WorkspacePerceptionTool::new()))
             }
+            "subagent" => deps.model.as_ref().map(|m| {
+                Arc::new(crate::subagent::SubAgentTool::new(Arc::new(
+                    crate::subagent::NoopSpawner,
+                ))) as Arc<dyn Tool>
+            }),
+            "link_understanding" => Some(Arc::new(
+                crate::link_understanding::LinkUnderstandingTool::new(),
+            )),
             "media_understanding" => deps.model.as_ref().map(|m| {
                 Arc::new(crate::media_understanding::MediaUnderstandingTool::new(
                     m.clone(),
@@ -78,7 +83,55 @@ impl ToolRegistry {
             "checkpoint" => Some(Arc::new(crate::checkpoint::CheckpointTool)),
             "reflect" => Some(Arc::new(crate::reflection::ReflectionTool)),
             "route_tools" => Some(Arc::new(crate::orchestration::ToolRouterTool)),
-            "memory_management" => Some(Arc::new(crate::memory_mgmt::MemoryManagementTool::new(deps.nexus.clone()))),
+            "memory_management" => Some(Arc::new(crate::memory_mgmt::MemoryManagementTool::new(
+                deps.nexus.clone(),
+            ))),
+            "execution_trace" => Some(Arc::new(crate::codex::ExecutionTraceTool)),
+            "deterministic_replay" => Some(Arc::new(crate::codex::DeterministicReplayTool)),
+            "tool_reliability" => Some(Arc::new(crate::codex::ToolReliabilityScoringTool)),
+            "context_budget_optimizer" => Some(Arc::new(crate::codex::ContextBudgetOptimizerTool)),
+            "dry_run" => Some(Arc::new(crate::codex::DryRunTool)),
+            "workspace_snapshot" => Some(Arc::new(crate::codex::WorkspaceSnapshotTool)),
+            "semantic_grep" => Some(Arc::new(crate::codex::SemanticGrepTool)),
+            "web_task" => Some(Arc::new(crate::codex::WebTaskTool)),
+            "local_model_router" => Some(Arc::new(crate::codex::LocalModelRouterTool)),
+            "skill_composition" => Some(Arc::new(crate::codex::SkillCompositionTool)),
+            "failure_memory" => Some(Arc::new(crate::codex::FailureMemoryTool)),
+            "proactive_intervention" => Some(Arc::new(crate::codex::ProactiveInterventionTool)),
+            "cognitive_mirror" => Some(Arc::new(crate::codex::CognitiveMirrorTool)),
+            "intent_compiler" => Some(Arc::new(crate::codex::IntentCompilerTool)),
+            "regret_minimization" => Some(Arc::new(crate::codex::RegretMinimizationTool)),
+            "counterfactual_simulator" => Some(Arc::new(crate::codex::CounterfactualSimulatorTool)),
+            "attention_router" => Some(Arc::new(crate::codex::AttentionRouterTool)),
+            "temporal_awareness" => Some(Arc::new(crate::codex::TemporalAwarenessTool)),
+            "soft_dependency_graph" => Some(Arc::new(crate::codex::SoftDependencyGraphTool)),
+            "autonomy_dial" => Some(Arc::new(crate::codex::AutonomyDialTool)),
+            "failure_prediction" => Some(Arc::new(crate::codex::FailurePredictionTool)),
+            "ast_lsp_bridge" => Some(Arc::new(crate::codex::AstLspBridgeTool)),
+            "spec_first_test" => Some(Arc::new(crate::codex::SpecFirstTestTool)),
+            "semantic_conflict_resolution" => {
+                Some(Arc::new(crate::codex::SemanticConflictResolutionTool))
+            }
+            "time_travel_debugger" => Some(Arc::new(crate::codex::TimeTravelDebuggerTool)),
+            "nexus_visualizer" => Some(Arc::new(crate::codex::NexusVisualizerTool)),
+            "proactive_self_optimization" => {
+                Some(Arc::new(crate::codex::ProactiveSelfOptimizationTool))
+            }
+            "diff_security_auditor" => Some(Arc::new(crate::codex::DiffSecurityAuditorTool)),
+            "mutate_ast" => Some(Arc::new(crate::codex::AstNativeMutationTool)),
+            "mcts_simulator" => Some(Arc::new(crate::codex::MctsSimulatorTool)),
+            "memory_actor_status" => Some(Arc::new(crate::codex::MemoryActorStatusTool)),
+            "graph_prefetch" => Some(Arc::new(crate::codex::GraphPrefetchTool)),
+            "rlfc" => Some(Arc::new(crate::codex::RlfcTool)),
+            "ephemeral_red_team" => Some(Arc::new(crate::codex::EphemeralRedTeamTool)),
+            "fractal_swarm" => Some(Arc::new(crate::codex::FractalSwarmTool)),
+            "node_repl" => Some(Arc::new(crate::codex::NodeReplTool)),
+            "automation" => Some(Arc::new(crate::codex::CodexAutomationTool)),
+            "current_time" => Some(Arc::new(crate::codex::CurrentTimeTool)),
+            "weather_lookup" => Some(Arc::new(crate::codex::WeatherLookupTool)),
+            "finance_lookup" => Some(Arc::new(crate::codex::FinanceLookupTool)),
+            "sports_lookup" => Some(Arc::new(crate::codex::SportsLookupTool)),
+            "codex_tool_catalog" => Some(Arc::new(crate::codex::CodexCatalogTool)),
             _ => None,
         }
     }

@@ -32,7 +32,7 @@ struct StatusResponse {
 pub struct Gateway {
     pub port: u16,
     pub channels: Vec<Arc<dyn Channel>>,
-    pub agent: Arc<Mutex<Agent>>,
+    pub agent: Arc<Agent>,
     pub canvas_host: Arc<canvas::CanvasHost>,
     pub cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
     pub config: pharmakon_common::Config,
@@ -41,7 +41,7 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(
         port: u16,
-        agent: Arc<Mutex<Agent>>,
+        agent: Arc<Agent>,
         cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
         config: pharmakon_common::Config,
     ) -> Self {
@@ -149,7 +149,7 @@ impl Gateway {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State((agent, canvas_host, cron_manager, _config)): State<(
-        Arc<Mutex<pharmakon_core::agent::Agent>>,
+        Arc<pharmakon_core::agent::Agent>,
         Arc<canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -162,7 +162,7 @@ async fn ws_handler(
 async fn acp_handler(
     ws: WebSocketUpgrade,
     State((agent, _, _, _)): State<(
-        Arc<Mutex<pharmakon_core::agent::Agent>>,
+        Arc<pharmakon_core::agent::Agent>,
         Arc<canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -173,12 +173,12 @@ async fn acp_handler(
 
 async fn handle_socket(
     socket: WebSocket,
-    agent: Arc<Mutex<pharmakon_core::agent::Agent>>,
+    agent: Arc<pharmakon_core::agent::Agent>,
     canvas_host: Arc<canvas::CanvasHost>,
     cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
 ) {
     tracing::info!("WebSocket connection established.");
-    let mut rx = agent.lock().await.event_tx.subscribe();
+    let mut rx = agent.event_tx.subscribe();
 
     let (mut sender, mut receiver) = socket.split();
 
@@ -228,7 +228,7 @@ async fn handle_socket(
                 match req {
                     Request::SendMessage { message } => {
                         tokio::spawn(async move {
-                            let agent_lock = agent_clone_inner.lock().await;
+                            let agent_lock = agent_clone_inner;
                             if let Err(e) = agent_lock.chat(&message).await {
                                 let _ = agent_lock.event_tx.send(Event::Error {
                                     message: e.to_string(),
@@ -237,14 +237,14 @@ async fn handle_socket(
                         });
                     }
                     Request::ProvideApproval { id, approved } => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let _ = agent_lock.approval_tx.send((id, approved));
                     }
                     Request::GetStatus => {
                         // Status handled via HTTP
                     }
                     Request::ResetHistory => {
-                        agent_clone_inner.lock().await.reset_history().await;
+                        agent_clone_inner.reset_history().await;
                     }
                     Request::InteractiveResponse {
                         element_id,
@@ -261,7 +261,7 @@ async fn handle_socket(
                     Request::GetCronJobs => {
                         let jobs = cron_manager.list_jobs().await;
                         let event = Event::CronJobList { jobs };
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::CancelCronJob { id } => {
@@ -270,12 +270,12 @@ async fn handle_socket(
                         } else {
                             let jobs = cron_manager.list_jobs().await;
                             let event = Event::CronJobList { jobs };
-                            let agent_lock = agent_clone_inner.lock().await;
+                            let agent_lock = agent_clone_inner;
                             let _ = agent_lock.event_tx.send(event);
                         }
                     }
                     Request::GetSessions => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let sessions: Vec<String> = if let Some(store) = &agent_lock.session_store {
                             store.list_sessions().await.unwrap_or_default()
                         } else {
@@ -284,7 +284,7 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
                     }
                     Request::SwitchSession { id } => {
-                        let mut agent_lock = agent_clone_inner.lock().await;
+                        let mut agent_lock = agent_clone_inner;
                         agent_lock.set_session_id(id.clone()).await;
                         agent_lock.reset_history().await;
 
@@ -303,7 +303,7 @@ async fn handle_socket(
                             .send(Event::Action("Session switched".to_string()));
                     }
                     Request::GetHistory { session_id } => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let history = if let Some(store) = &agent_lock.session_store {
                             store.load_history(&session_id).await.unwrap_or_default()
                         } else {
@@ -314,7 +314,7 @@ async fn handle_socket(
                             .send(Event::HistoryList { messages: history });
                     }
                     Request::SearchSessions { query } => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let sessions = if let Some(store) = &agent_lock.session_store {
                             store.search_sessions(&query).await.unwrap_or_default()
                         } else {
@@ -340,11 +340,11 @@ async fn handle_socket(
                                 },
                             ],
                         };
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetGatewayStatus => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let uptime = agent_lock.start_time.elapsed().as_secs();
 
                         use sysinfo::System;
@@ -360,7 +360,7 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetMcpStats => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let counts = agent_lock.tool_call_counts.lock().await;
                         let stats = counts
                             .iter()
@@ -373,7 +373,7 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetTools => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let tools_lock = agent_lock.tools.lock().await;
                         let tools = tools_lock
                             .iter()
@@ -387,7 +387,7 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetUsageHistory => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let history_lock = agent_lock.usage_history.lock().await;
                         let history = history_lock
                             .iter()
@@ -401,7 +401,7 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetResearchNotebook => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let notebook = agent_lock.research_notebook.lock().await.clone();
                         let event = Event::ResearchNotebookUpdate { notebook };
                         let _ = agent_lock.event_tx.send(event);
@@ -416,17 +416,17 @@ async fn handle_socket(
                                 "max_tokens": 100000
                             }),
                         };
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::UpdateSettings { settings } => {
                         log::info!("Settings updated: {:?}", settings);
                         let event = Event::Action("Settings updated successfully".to_string());
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetVisionFrames => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         if let Some(stream) = &agent_lock.vision_stream {
                             let stream_lock = stream.lock().await;
                             let frames = stream_lock
@@ -442,23 +442,28 @@ async fn handle_socket(
                         }
                     }
                     Request::GetGraphMemory { query } => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         if let Some(graph) = &agent_lock.graph_store {
                             if let Ok(relations) = graph.query_relations(&query).await {
-                                let relations_str = relations.into_iter()
-                                    .map(|(n, e)| format!("{} -> {} ({})", e.from_id, n.label, e.relation))
+                                let relations_str = relations
+                                    .into_iter()
+                                    .map(|(n, e)| {
+                                        format!("{} -> {} ({})", e.from_id, n.label, e.relation)
+                                    })
                                     .collect();
-                                let _ = agent_lock.event_tx.send(Event::GraphUpdate { relations: relations_str });
+                                let _ = agent_lock.event_tx.send(Event::GraphUpdate {
+                                    relations: relations_str,
+                                });
                             }
                         }
                     }
                     Request::GetModels => {
                         let models = pharmakon_core::providers::registry::ModelRegistry::list_available_models();
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         let _ = agent_lock.event_tx.send(Event::ModelList { models });
                     }
                     Request::SwitchModel { model_id } => {
-                        let agent_lock = agent_clone_inner.lock().await;
+                        let agent_lock = agent_clone_inner;
                         if let Some(model) =
                             pharmakon_core::providers::registry::ModelRegistry::get_model(&model_id)
                         {

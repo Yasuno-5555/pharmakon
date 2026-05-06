@@ -27,10 +27,11 @@ impl ContextCompactor {
         let len = history.len();
         let middle_part = &history[1..len - 5];
 
-        let mut summary_prompt =
-            String::from("Compress the following conversation into a HIGH-DENSITY semantic summary. \
+        let mut summary_prompt = String::from(
+            "Compress the following conversation into a HIGH-DENSITY semantic summary. \
                           Focus on key facts, user preferences, current goals, and finalized decisions. \
-                          Use a structural format if possible. Avoid conversational filler.\n\n");
+                          Use a structural format if possible. Avoid conversational filler.\n\n",
+        );
         for msg in middle_part {
             let role = &msg.role;
             let content = match &msg.content {
@@ -87,17 +88,24 @@ impl ContextCompactor {
             content
         );
 
-        let res = self.model.complete(CompletionRequest {
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: Some(MessageContent::Text(prompt)),
-                ..Default::default()
-            }],
-            temperature: Some(0.2),
-            max_tokens: None,
-            tools: None,
-        }).await.map_err(anyhow::Error::new)?;
+        let res = self
+            .model
+            .complete(CompletionRequest {
+                messages: vec![Message {
+                    role: "user".to_string(),
+                    content: Some(MessageContent::Text(prompt)),
+                    ..Default::default()
+                }],
+                temperature: Some(0.2),
+                max_tokens: None,
+                tools: None,
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
 
-        Ok(res.content.map(|c| c.to_string()).unwrap_or_else(|| "[Compression failed]".to_string()))
+        Ok(res
+            .content
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "[Compression failed]".to_string()))
     }
 }

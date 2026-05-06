@@ -43,7 +43,9 @@ impl Tool for MemoryManagementTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let action = args["action"].as_str().ok_or_else(|| AgentError("Missing action".to_string()))?;
+        let action = args["action"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing action".to_string()))?;
 
         match action {
             "epistemic_gc" => {
@@ -51,12 +53,15 @@ impl Tool for MemoryManagementTool {
                 // and use an LLM turn to resolve them.
                 // For now, we simulate the logic.
                 Ok("✅ Epistemic GC cycle complete. Scanned 150 beliefs, resolved 3 contradictions, merged 5 redundant nodes.".to_string())
-            },
+            }
             "importance_filter" => {
                 let threshold = args["threshold"].as_f64().unwrap_or(0.3);
-                Ok(format!("✅ Importance filter applied (threshold: {}). Pruned 12 low-signal beliefs from long-term memory.", threshold))
-            },
-            _ => Err(AgentError("Unknown action".to_string()))
+                Ok(format!(
+                    "✅ Importance filter applied (threshold: {}). Pruned 12 low-signal beliefs from long-term memory.",
+                    threshold
+                ))
+            }
+            _ => Err(AgentError("Unknown action".to_string())),
         }
     }
 }
