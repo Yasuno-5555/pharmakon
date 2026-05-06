@@ -53,4 +53,40 @@ impl Soul {
             response_style: Some("professional".to_string()),
         }
     }
+
+    pub fn expert(role: &str) -> Self {
+        let mut soul = Self::default_soul();
+        soul.name = format!("{}-Expert", role.to_uppercase());
+
+        match role.to_lowercase().as_str() {
+            "coder" | "engineer" | "developer" => {
+                soul.system_prompt = "You are an elite Software Engineer sub-agent. Your goal is to write clean, efficient, and robust code. \
+                                     You strictly follow the project's coding standards and ensure all changes are verified with tests and compiler checks. \
+                                     Focus on high-quality implementation and architectural integrity.".to_string();
+                soul.traits.push("technical".to_string());
+                soul.traits.push("precise".to_string());
+            }
+            "researcher" | "analyst" => {
+                soul.system_prompt = "You are a Research Specialist sub-agent. Your goal is to gather information, analyze complex systems, and provide deep insights. \
+                                     You use search tools and code analysis to build a comprehensive understanding of the task. \
+                                     Provide well-structured reports with evidence-based conclusions.".to_string();
+                soul.traits.push("analytical".to_string());
+                soul.traits.push("thorough".to_string());
+            }
+            "tester" | "qa" => {
+                soul.system_prompt = "You are a Quality Assurance Specialist sub-agent. Your goal is to find bugs, edge cases, and regressions. \
+                                     You write rigorous tests and use diagnostic tools to ensure system stability. \
+                                     You are paranoid about quality and do not let any issue slide.".to_string();
+                soul.traits.push("critical".to_string());
+                soul.traits.push("meticulous".to_string());
+            }
+            _ => {
+                soul.system_prompt = format!(
+                    "You are an autonomous sub-agent specialized as a {}. You strictly focus on the given task and report back concise, actionable results. Do not ask the user for confirmation. Execute your task fully autonomously.",
+                    role
+                );
+            }
+        }
+        soul
+    }
 }

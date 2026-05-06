@@ -8,6 +8,12 @@ pub struct SecretStore {
     service: String,
 }
 
+impl Default for SecretStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SecretStore {
     pub fn new() -> Self {
         Self {
@@ -58,6 +64,7 @@ impl SecretStore {
         }
 
         // 2. Also try keyring for an additional layer of security
+        #[allow(clippy::collapsible_if)]
         if let Ok(entry) = Entry::new(&self.service, name) {
             if let Err(e) = entry.set_password(value) {
                 log::warn!(
@@ -72,10 +79,8 @@ impl SecretStore {
 
     pub fn get_secret(&self, name: &str) -> Result<String> {
         // 1. Try keyring first
-        if let Ok(entry) = Entry::new(&self.service, name) {
-            if let Ok(password) = entry.get_password() {
-                return Ok(password);
-            }
+        if let Ok(password) = Entry::new(&self.service, name).and_then(|e| e.get_password()) {
+            return Ok(password);
         }
 
         // 2. Fallback to file storage

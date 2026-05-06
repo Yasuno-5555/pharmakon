@@ -50,7 +50,7 @@ impl Supervisor {
             // Check if the agent wants to talk to someone else
             let next_target = {
                 let agent = agent_arc.lock().await;
-                let history = agent.history.blocking_lock();
+                let history = agent.history.lock().await;
                 let mut target = None;
 
                 // Scan history in reverse to find routing tool calls from the last turn

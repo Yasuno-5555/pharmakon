@@ -125,7 +125,7 @@ impl pharmakon_common::Tool for WeatherTool {
 async fn test_parallel_tool_execution() {
     let model = Arc::new(ParallelMockModel);
     let mut agent = Agent::new(model, "parallel-session".to_string());
-    agent.add_tool(Arc::new(WeatherTool));
+    agent.add_tool(Arc::new(WeatherTool)).await;
 
     let result = agent
         .chat("Check weather in Tokyo and Osaka")

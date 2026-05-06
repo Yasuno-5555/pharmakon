@@ -10,7 +10,7 @@ pub struct ToolDependencies {
     pub store: Option<Arc<dyn CommitmentPersistence>>,
     pub soul_manager: Option<Arc<dyn SoulManager>>,
     pub event_tx: Option<broadcast::Sender<Event>>,
-    pub weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
+    pub nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
 }
 
 impl ToolRegistry {
@@ -33,7 +33,7 @@ impl ToolRegistry {
             "media_understanding" => deps.model.as_ref().map(|m| {
                 Arc::new(media_understanding::MediaUnderstandingTool::new(
                     m.clone(),
-                    deps.weaver.clone(),
+                    deps.nexus.clone(),
                 )) as Arc<dyn Tool>
             }),
             "canvas" => deps
@@ -48,6 +48,9 @@ impl ToolRegistry {
                 .soul_manager
                 .as_ref()
                 .map(|m| Arc::new(soul_tool::SoulTool::new(m.clone())) as Arc<dyn Tool>),
+            "ingest_ast_knowledge" => deps.nexus.as_ref().map(|n| {
+                Arc::new(ast_ingest::ASTKnowledgeIngestTool::new(n.clone())) as Arc<dyn Tool>
+            }),
             _ => None,
         }
     }

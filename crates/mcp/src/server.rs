@@ -41,6 +41,12 @@ pub struct McpServerInfo {
     pub version: String,
 }
 
+impl Default for McpServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpServer {
     pub fn new() -> Self {
         Self { tools: Vec::new() }

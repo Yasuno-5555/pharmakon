@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct Crestodian;
 
 impl Crestodian {
-    pub fn create_agent(model: Arc<dyn AgentModel>) -> Agent {
+    pub async fn create_agent(model: Arc<dyn AgentModel>) -> Agent {
         let soul = Soul {
             name: "Crestodian".to_string(),
             version: "1.0.0".to_string(),
@@ -20,10 +20,10 @@ impl Crestodian {
         };
 
         let mut agent = Agent::new(model, "onboarding-session".to_string());
-        agent = agent.with_soul(soul);
+        agent.set_soul(soul).await;
 
-        agent.add_tool(Arc::new(ConfigTool));
-        agent.add_tool(Arc::new(pharmakon_tools::ShellTool));
+        agent.add_tool(Arc::new(ConfigTool)).await;
+        agent.add_tool(Arc::new(pharmakon_tools::ShellTool)).await;
 
         agent
     }

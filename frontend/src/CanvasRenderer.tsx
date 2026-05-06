@@ -62,10 +62,10 @@ const CanvasRenderer: React.FC<CanvasRendererProps> = ({ primitives }) => {
 
   return (
     <div className="canvas-container">
-      <canvas 
-        ref={canvasRef} 
-        width={800} 
-        height={600} 
+      <canvas
+        ref={canvasRef}
+        width={800}
+        height={600}
         className="main-canvas"
       />
     </div>

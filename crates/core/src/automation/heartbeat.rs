@@ -41,6 +41,12 @@ impl HeartbeatManager {
                         log::error!("HeartbeatManager: Error during heartbeat: {}", e);
                     }
                 }
+
+                // Maintenance (Memory Decay, etc.)
+                if let Err(e) = agent_lock.perform_maintenance().await {
+                    log::error!("HeartbeatManager: Maintenance error: {}", e);
+                }
+
                 drop(agent_lock);
 
                 // Run Initiative Engine

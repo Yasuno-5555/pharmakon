@@ -31,54 +31,60 @@ impl AgentSpawner for SwarmManager {
             depth
         );
 
-        let (model, session_store, mut tools, memory_weaver, semantic_search, fact_memory) = {
+        let (
+            model,
+            session_store,
+            tools,
+            knowledge_nexus,
+            semantic_search,
+            fact_memory,
+            territory_manager,
+        ) = {
             let parent_lock = self.parent.lock().await;
             (
                 parent_lock.model.clone(),
                 parent_lock.session_store.clone(),
                 parent_lock.tools.clone(),
-                parent_lock.memory_weaver.clone(),
+                parent_lock.knowledge_nexus.clone(),
                 parent_lock.semantic_search.clone(),
                 parent_lock.fact_memory.clone(),
+                parent_lock.territory_manager.clone(),
             )
         };
 
-        let mut sub_agent_tools = {
+        let mut sub_agent_tools: Vec<Arc<dyn pharmakon_common::Tool>> = {
             let t = tools.lock().await;
-            t.clone()
+            t.iter().cloned().collect()
         };
 
         // Remove tools that might be dangerous for sub-agents or cause infinite recursion
-        sub_agent_tools.retain(|t| t.name() != "spawn_sub_agent" && t.name() != "run_shell_command");
+        sub_agent_tools
+            .retain(|t| t.name() != "spawn_sub_agent" && t.name() != "run_shell_command");
 
         let session_id = format!("swarm-depth{}-{}", depth, rand::random::<u32>());
 
         let inner_model = {
             let m = model.lock().await;
-            (*m).clone()
+            m.clone()
         };
         let mut sub_agent = Agent::new(inner_model, session_id.clone());
         if let Some(store) = session_store {
             sub_agent = sub_agent.with_store(store);
         }
-        if let Some(weaver) = memory_weaver {
-            sub_agent = sub_agent.with_memory_weaver(weaver);
+        if let Some(nexus) = knowledge_nexus {
+            sub_agent = sub_agent.with_knowledge_nexus(nexus);
         }
         if let Some(search) = semantic_search {
             sub_agent = sub_agent.with_semantic_search(search);
         }
 
         sub_agent.fact_memory = fact_memory;
+        sub_agent.territory_manager = territory_manager;
         sub_agent.tools = Arc::new(Mutex::new(sub_agent_tools));
 
         // Apply specialized Soul based on role
-        let mut soul = crate::soul::Soul::default_soul();
-        soul.name = format!("Swarm-{}", role_str.to_uppercase());
-        soul.system_prompt = format!(
-            "You are an autonomous sub-agent specialized as a {}. You strictly focus on the given task and report back concise, actionable results. Do not ask the user for confirmation. Execute your task fully autonomously.",
-            role_str
-        );
-        sub_agent = sub_agent.with_soul(soul);
+        let soul = crate::soul::Soul::expert(&role_str);
+        sub_agent.set_soul(soul).await;
 
         let sub_agent_arc = Arc::new(Mutex::new(sub_agent));
         let task_clone = task.to_string();

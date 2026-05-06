@@ -99,6 +99,19 @@ impl McpClient {
         self.call("tools/list", serde_json::json!({})).await
     }
 
+    pub async fn list_resources(&self) -> Result<serde_json::Value> {
+        self.call("resources/list", serde_json::json!({})).await
+    }
+
+    pub async fn list_prompts(&self) -> Result<serde_json::Value> {
+        self.call("prompts/list", serde_json::json!({})).await
+    }
+
+    pub async fn read_resource(&self, uri: &str) -> Result<serde_json::Value> {
+        self.call("resources/read", serde_json::json!({ "uri": uri }))
+            .await
+    }
+
     pub async fn call_tool(
         &self,
         name: &str,

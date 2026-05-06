@@ -63,7 +63,7 @@ impl ContextCompactor {
         new_history.push(Message {
             role: "system".to_string(),
             content: Option::Some(MessageContent::Text(format!(
-                "### CONTEXT ANCHOR ###\nThe following is a compressed semantic summary of the preceding conversation to preserve intent and state:\n{}\n######################", 
+                "### CONTEXT ANCHOR ###\nThe following is a compressed semantic summary of the preceding conversation to preserve intent and state:\n{}\n######################",
                 summary
             ))),
             ..Default::default()

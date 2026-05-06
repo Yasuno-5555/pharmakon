@@ -79,17 +79,19 @@ impl SkillLoader {
 
                 let tool = WasmTool::new(name, wasm_bytes);
                 let mut agent_lock = agent.lock().await;
-                agent_lock.add_tool(Arc::new(tool));
+                agent_lock.add_tool(Arc::new(tool)).await;
             } else if path.extension().and_then(|s| s.to_str()) == Some("md") {
                 log::info!("Loading Markdown skill: {:?}", path);
                 let content = fs::read_to_string(&path)?;
                 match MarkdownSkill::parse(&content) {
                     Ok(skill) => {
                         let agent_lock = agent.lock().await;
-                        agent_lock.add_contribution(Box::new(MarkdownSkillContribution::new(
-                            &skill.metadata.name,
-                            &skill.content,
-                        )));
+                        agent_lock
+                            .add_contribution(Box::new(MarkdownSkillContribution::new(
+                                &skill.metadata.name,
+                                &skill.content,
+                            )))
+                            .await;
                         log::info!("Registered Markdown skill: {}", skill.metadata.name);
                     }
                     Err(e) => {

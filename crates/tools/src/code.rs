@@ -371,9 +371,40 @@ impl Tool for PythonInterpreterTool {
             .as_str()
             .ok_or_else(|| AgentError("Missing code".to_string()))?;
 
+        // Preamble for CodeAct bridge
+        let preamble = r#"
+import os, sys, json, subprocess
+
+class Pharmakon:
+    def read_file(self, path, start=1, end=100):
+        try:
+            with open(path, 'r') as f:
+                lines = f.readlines()
+                return "".join(lines[start-1:end])
+        except Exception as e:
+            return f"Error: {e}"
+
+    def list_dir(self, path='.'):
+        try:
+            return os.listdir(path)
+        except Exception as e:
+            return f"Error: {e}"
+
+    def grep(self, query, path='.'):
+        try:
+            res = subprocess.check_output(['grep', '-rn', query, path], text=True)
+            return res
+        except:
+            return "No matches."
+
+pharmakon = Pharmakon()
+"#;
+
+        let full_code = format!("{}\n{}", preamble, code);
+
         let output = std::process::Command::new("python3")
             .arg("-c")
-            .arg(code)
+            .arg(full_code)
             .output()
             .map_err(|e| AgentError(format!("Python failed: {}", e)))?;
 
@@ -384,6 +415,66 @@ impl Tool for PythonInterpreterTool {
             Ok(stdout)
         } else {
             Ok(format!("Error: {}\nStdout: {}", stderr, stdout))
+        }
+    }
+}
+
+pub struct ApplyPatchTool;
+
+#[async_trait]
+impl Tool for ApplyPatchTool {
+    fn name(&self) -> &str {
+        "apply_patch"
+    }
+    fn description(&self) -> &str {
+        "Apply a unified diff patch to the workspace. This is the preferred way to edit files for precision and token efficiency."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "patch": { "type": "string", "description": "The unified diff content to apply" }
+            },
+            "required": ["patch"]
+        })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileSystem
+    }
+
+    async fn call(&self, args: Value) -> AgentResult<String> {
+        let patch = args["patch"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing patch content".to_string()))?;
+
+        // Write the patch to a temporary file
+        let patch_id = uuid::Uuid::new_v4().to_string();
+        let patch_path = format!("/tmp/pharmakon_{}.patch", patch_id);
+        fs::write(&patch_path, patch)
+            .map_err(|e| AgentError(format!("Failed to write temp patch: {}", e)))?;
+
+        // Apply the patch using the system 'patch' command
+        let output = Command::new("patch")
+            .arg("-p1") // Standard -p1 for unified diffs from repo root
+            .arg("-i")
+            .arg(&patch_path)
+            .output()
+            .map_err(|e| AgentError(format!("Patch execution failed: {}", e)))?;
+
+        // Clean up
+        let _ = fs::remove_file(&patch_path);
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if output.status.success() {
+            Ok(format!("Successfully applied patch:\n{}", stdout))
+        } else {
+            Err(AgentError(format!(
+                "Failed to apply patch:\nStdout: {}\nStderr: {}",
+                stdout, stderr
+            )))
         }
     }
 }

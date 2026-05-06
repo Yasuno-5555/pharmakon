@@ -23,21 +23,21 @@ const SkillBrowser: React.FC = () => {
     { name: 'tmux', description: 'Control terminal multiplexer sessions.' },
   ].sort((a, b) => a.name.localeCompare(b.name));
 
-  const filtered = skills.filter(s => 
-    s.name.toLowerCase().includes(search.toLowerCase()) || 
+  const filtered = skills.filter(s =>
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
     s.description.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="skill-browser-container" style={{ margin: '0 20px' }}>
-      <button 
+      <button
         className="glass-card skill-toggle"
         onClick={() => setIsOpen(!isOpen)}
-        style={{ 
-          width: '100%', 
-          padding: '12px 16px', 
-          display: 'flex', 
-          alignItems: 'center', 
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
           gap: '10px',
           color: 'var(--text-secondary)',
           background: isOpen ? 'var(--accent-muted)' : 'var(--bg-card)'
@@ -61,8 +61,8 @@ const SkillBrowser: React.FC = () => {
           >
             <div className="search-bar-mini" style={{ margin: '12px 0', position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
-              <input 
-                type="text" 
+              <input
+                type="text"
                 placeholder="Search 53 skills..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}

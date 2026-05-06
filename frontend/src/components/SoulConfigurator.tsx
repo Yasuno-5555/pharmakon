@@ -38,8 +38,8 @@ const SoulConfigurator: React.FC<{ socket: WebSocket | null }> = ({ socket }) =>
           <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>TRAITS (COMMA SEPARATED)</label>
           <div style={{ position: 'relative' }}>
             <UserCircle size={14} style={{ position: 'absolute', left: '10px', top: '10px', opacity: 0.5 }} />
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={soul.traits.join(', ')}
               onChange={e => setSoul({...soul, traits: e.target.value.split(',').map(t => t.trim())})}
               style={{
@@ -59,7 +59,7 @@ const SoulConfigurator: React.FC<{ socket: WebSocket | null }> = ({ socket }) =>
           <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>SYSTEM DIRECTIVE</label>
           <div style={{ position: 'relative' }}>
             <MessageSquare size={14} style={{ position: 'absolute', left: '10px', top: '10px', opacity: 0.5 }} />
-            <textarea 
+            <textarea
               value={soul.system_prompt}
               onChange={e => setSoul({...soul, system_prompt: e.target.value})}
               style={{
@@ -78,7 +78,7 @@ const SoulConfigurator: React.FC<{ socket: WebSocket | null }> = ({ socket }) =>
           </div>
         </div>
 
-        <motion.button 
+        <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={updateSoul}

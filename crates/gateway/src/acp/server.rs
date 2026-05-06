@@ -79,7 +79,7 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         if let Some(p) = system_prompt {
                             soul.system_prompt = p;
                         }
-                        agent_lock.set_soul(soul);
+                        agent_lock.set_soul(soul).await;
                     }
                     AcpMessage::Prompt {
                         session_id: _,
@@ -101,8 +101,8 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         );
                     }
                     AcpMessage::ListSessions => {
-                        let _ = tx_clone.send(AcpMessage::Sessions { 
-                            sessions: vec![serde_json::json!({"id": "cli-default", "label": "Default Session"})] 
+                        let _ = tx_clone.send(AcpMessage::Sessions {
+                            sessions: vec![serde_json::json!({"id": "cli-default", "label": "Default Session"})]
                         }).await;
                     }
                     AcpMessage::GetConfig => {

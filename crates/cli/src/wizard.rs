@@ -233,7 +233,7 @@ pub async fn run_conversational_wizard() -> Result<()> {
 
     // 2. Initialize Crestodian Agent
     let model = Arc::new(GeminiModel::new(api_key, "gemini-1.5-pro".to_string()));
-    let mut agent = Crestodian::create_agent(model);
+    let mut agent = Crestodian::create_agent(model).await;
 
     println!("\n--- Talking to Crestodian ---");
     println!("Type 'exit' to finish setup.\n");

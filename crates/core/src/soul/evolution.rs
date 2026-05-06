@@ -16,9 +16,8 @@ impl SoulEvolutionWorker {
         log::info!("Starting Soul Evolution cycle...");
 
         let (model, current_soul, recent_context) = {
-            let trajectory_summary = self
-                .agent
-                .trajectory_steps()
+            let steps = self.agent.trajectory_steps().await;
+            let trajectory_summary = steps
                 .iter()
                 .filter_map(|step| match step {
                     crate::trajectory::TrajectoryStep::Response { content, .. } => {
@@ -30,10 +29,10 @@ impl SoulEvolutionWorker {
                 .join("\n");
 
             let model = {
-                let m = self.agent.model.blocking_lock();
+                let m = self.agent.model.lock().await;
                 (*m).clone()
             };
-            (model, self.agent.soul(), trajectory_summary)
+            (model, self.agent.soul().await, trajectory_summary)
         };
 
         if recent_context.is_empty() {
@@ -77,9 +76,12 @@ impl SoulEvolutionWorker {
             // Apply updates to the agent's soul
             // Simple string append for now
             if text.contains("traits:") {
-                self.agent.add_contribution(Box::new(
-                    crate::system_prompt::StaticContribution::new("Learned Preferences", &text),
-                ));
+                self.agent
+                    .add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
+                        "Learned Preferences",
+                        &text,
+                    )))
+                    .await;
             }
         }
 

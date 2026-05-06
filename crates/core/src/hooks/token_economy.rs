@@ -60,11 +60,7 @@ impl Hook for TokenEconomyHook {
                     );
 
                     if *total > limit {
-                        log::warn!(
-                            "🚨 TOKEN BUDGET EXCEEDED! ({} > {})",
-                            *total,
-                            limit
-                        );
+                        log::warn!("🚨 TOKEN BUDGET EXCEEDED! ({} > {})", *total, limit);
                         // Inject a strong warning for the next turn
                         let mut history = ctx.agent.history.lock().await;
                         history.push(Message {
@@ -72,7 +68,7 @@ impl Hook for TokenEconomyHook {
                             content: Some(MessageContent::Text(format!(
                                 "CRITICAL: You have exceeded your token budget ({} / {}). \
                                 From now on, you MUST be extremely concise. No explanations, just direct answers or essential tool calls. \
-                                Failure to comply will result in task termination.", 
+                                Failure to comply will result in task termination.",
                                 *total, limit
                             ))),
                             ..Default::default()

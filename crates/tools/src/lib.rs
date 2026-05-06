@@ -1,3 +1,5 @@
+pub mod anchors;
+pub mod ast_ingest;
 pub mod browser;
 pub mod canvas;
 pub mod code;
@@ -9,45 +11,58 @@ pub mod docker_sandbox;
 pub mod fact_tool;
 pub mod files;
 pub mod git;
+pub mod host_script;
 pub mod link_understanding;
 pub mod mcp_tool;
 pub mod media;
 pub mod media_understanding;
 pub mod memory;
+pub mod playbook;
 pub mod probe;
 pub mod quality;
 pub mod registry;
+pub mod repomap;
+pub mod research_tools;
 pub mod skill_factory;
 pub mod soul_tool;
 pub mod subagent;
 pub mod terminal;
 pub mod token_economy_tool;
+pub mod tool_discovery;
 pub mod tool_market;
 pub mod wasm_tool;
 pub mod web_fetch;
 pub mod web_search;
 pub mod workspace;
 
+pub use crate::anchors::{ListAnchorsTool, SetAnchorTool};
+pub use crate::ast_ingest::ASTKnowledgeIngestTool;
 pub use crate::browser::BrowserTool;
 pub use crate::canvas::CanvasTool;
 pub use crate::code::{
-    CodeEditTool, FindDefinitionTool, GrepSearchTool, ListDirTool, MultiCodeEditTool,
-    PythonInterpreterTool, ViewFileTool,
+    ApplyPatchTool, CodeEditTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
+    MultiCodeEditTool, PythonInterpreterTool, ViewFileTool,
 };
 pub use crate::commitment_tool::CommitmentTool;
 pub use crate::connectors::ContextConnectorTool;
 pub use crate::diagnostic::DiagnosticTool;
 pub use crate::files::{FileReadTool, FileWriteTool};
 pub use crate::git::{GitCommitTool, GitDiffTool, GitStatusTool};
+pub use crate::host_script::HostScriptTool;
 pub use crate::link_understanding::LinkUnderstandingTool;
+pub use crate::mcp_tool::{ConnectMcpServerTool, McpTool};
 pub use crate::media::capture::{CameraTool, ScreenshotTool};
 pub use crate::media_understanding::MediaUnderstandingTool;
+pub use crate::playbook::PlaybookTool;
 pub use crate::quality::CargoQualityTool;
+pub use crate::repomap::RepoMapTool;
+pub use crate::research_tools::{ResearchConsolidateTool, ResearchFetchTool, ResearchSearchTool};
 pub use crate::skill_factory::SkillFactoryTool;
 pub use crate::soul_tool::SoulTool;
 pub use crate::subagent::{ParallelSwarmTool, SubAgentTool};
-pub use crate::terminal::{ShellTool, TerminalTool};
+pub use crate::terminal::{BackgroundRunTool, ProcessStatusTool, ShellTool, TerminalTool};
 pub use crate::token_economy_tool::TokenEconomyControlTool;
+pub use crate::tool_discovery::DiscoverToolsTool;
 pub use crate::web_fetch::WebFetchTool;
 pub use crate::web_search::BraveSearchTool;
 pub use crate::workspace::WorkspacePerceptionTool;

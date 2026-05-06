@@ -15,7 +15,7 @@ pub struct AgentRouter {
     model: Arc<dyn AgentModel>,
     store: Arc<DbSessionStore>,
     config: Config,
-    weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
+    nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
     fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>>,
 }
 
@@ -24,7 +24,7 @@ impl AgentRouter {
         model: Arc<dyn AgentModel>,
         store: Arc<DbSessionStore>,
         config: Config,
-        weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
+        nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
         fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>>,
     ) -> Self {
         Self {
@@ -32,7 +32,7 @@ impl AgentRouter {
             model,
             store,
             config,
-            weaver,
+            nexus,
             fact_memory,
         }
     }
@@ -56,8 +56,8 @@ impl AgentRouter {
                     agent = Agent::new(dynamic_model, format!("agent-{}", name))
                         .with_store(self.store.clone());
 
-                    if let Some(w) = &self.weaver {
-                        agent = agent.with_memory_weaver(w.clone());
+                    if let Some(n) = &self.nexus {
+                        agent = agent.with_knowledge_nexus(n.clone());
                     }
                     if let Some(f) = &self.fact_memory {
                         agent = agent.with_fact_memory(f.clone());
@@ -66,9 +66,9 @@ impl AgentRouter {
             }
         }
 
-        if agent.memory_weaver.is_none() {
-            if let Some(w) = &self.weaver {
-                agent = agent.with_memory_weaver(w.clone());
+        if agent.knowledge_nexus.is_none() {
+            if let Some(n) = &self.nexus {
+                agent = agent.with_knowledge_nexus(n.clone());
             }
         }
         if agent.fact_memory.is_none() {
@@ -95,7 +95,7 @@ impl AgentRouter {
             Soul::default_soul()
         };
 
-        agent = agent.with_soul(soul);
+        agent.set_soul(soul).await;
 
         // Load and add tools based on agent_config.allowed_tools
         if let Some(config) = &agent_config {
@@ -107,14 +107,14 @@ impl AgentRouter {
                     ),
                     soul_manager: None, // TODO: Initialize SoulManager if needed
                     event_tx: None,     // TODO: Initialize Event broadcaster if needed
-                    weaver: self.weaver.clone(),
+                    nexus: self.nexus.clone(),
                 };
 
                 for tool_name in allowed_tools {
                     if let Some(tool) =
                         pharmakon_tools::registry::ToolRegistry::get_tool(tool_name, &deps)
                     {
-                        agent.add_tool(tool);
+                        agent.add_tool(tool).await;
                     }
                 }
             }
@@ -139,14 +139,17 @@ impl AgentRouter {
             let mut m = manager.lock().await;
             m.add_tool(Arc::new(crate::orchestration::TeamMessageTool {
                 from: "Manager".to_string(),
-            }));
-            m.add_tool(Arc::new(crate::orchestration::FinalAnswerTool));
+            }))
+            .await;
+            m.add_tool(Arc::new(crate::orchestration::FinalAnswerTool))
+                .await;
         }
         {
             let mut r = researcher.lock().await;
             r.add_tool(Arc::new(crate::orchestration::TeamMessageTool {
                 from: "Researcher".to_string(),
-            }));
+            }))
+            .await;
         }
 
         let mut supervisor =

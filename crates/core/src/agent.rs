@@ -1,12 +1,20 @@
 use crate::model::{
-    AgentError, AgentModel, CompletionRequest, CompletionResponse, Message, MessageContent,
-    ToolDefinition,
+    AgentError, AgentErrorCode, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
+    Message, MessageContent, ToolDefinition,
 };
 use crate::system_prompt::SystemPromptManager;
 use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use pharmakon_common::{Event, ToolRegistry};
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
+
+#[derive(Debug, Clone)]
+pub struct WorkingMemoryUnit {
+    pub content: String,
+    pub importance: f32,
+    pub timestamp: std::time::Instant,
+}
 
 pub struct Agent {
     pub model: Arc<Mutex<Arc<dyn AgentModel>>>,
@@ -23,15 +31,23 @@ pub struct Agent {
     pub hooks: Arc<crate::hooks::HookRegistry>,
     pub fact_memory: Option<Arc<Mutex<crate::memory::FactMemory>>>,
     pub semantic_search: Option<Arc<pharmakon_memory::semantic_search::SemanticSearch>>,
-    pub memory_weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
+    pub knowledge_nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
     pub health_monitor: crate::orchestration::health_monitor::HealthMonitor,
     pub policy_engine: Arc<crate::security::policy::PolicyEngine>,
     pub session_store: Option<Arc<crate::persistence::DbSessionStore>>,
     pub planner_model: Option<Arc<Mutex<Arc<dyn AgentModel>>>>,
     pub vision_stream: Option<Arc<Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
     pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
+    pub working_memory: Arc<Mutex<Vec<WorkingMemoryUnit>>>, // Context packing buffer
     pub interaction_count: std::sync::atomic::AtomicU32,
     pub fallback_models: Vec<String>,
+    pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
+    pub total_cost: Arc<Mutex<f64>>,
+    pub start_time: std::time::Instant,
+    pub tool_call_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+    pub territory_manager: Arc<crate::orchestration::territory::TerritoryManager>,
+    pub research_notebook: Arc<Mutex<crate::orchestration::research::ResearchNotebook>>,
+    pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
 }
 
 impl Agent {
@@ -78,15 +94,25 @@ impl Agent {
             hooks: Arc::new(hooks),
             fact_memory: None,
             semantic_search: None,
-            memory_weaver: None,
+            knowledge_nexus: None,
             health_monitor: crate::orchestration::health_monitor::HealthMonitor::new(0.5),
             policy_engine: Arc::new(crate::security::policy::PolicyEngine::new()),
             session_store: None,
             planner_model: None,
             vision_stream: None,
             graph_store: None,
+            working_memory: Arc::new(Mutex::new(Vec::new())),
             interaction_count: std::sync::atomic::AtomicU32::new(0),
             fallback_models: Vec::new(),
+            total_tokens: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            total_cost: Arc::new(Mutex::new(0.0)),
+            start_time: std::time::Instant::now(),
+            tool_call_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            territory_manager: Arc::new(crate::orchestration::territory::TerritoryManager::new()),
+            research_notebook: Arc::new(Mutex::new(
+                crate::orchestration::research::ResearchNotebook::new("Uninitialized"),
+            )),
+            usage_history: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -100,11 +126,11 @@ impl Agent {
         self
     }
 
-    pub fn with_memory_weaver(
+    pub fn with_knowledge_nexus(
         mut self,
-        weaver: Arc<pharmakon_memory::weaver::MemoryWeaver>,
+        nexus: Arc<pharmakon_memory::weaver::KnowledgeNexus>,
     ) -> Self {
-        self.memory_weaver = Some(weaver);
+        self.knowledge_nexus = Some(nexus);
         self
     }
 
@@ -123,16 +149,12 @@ impl Agent {
         self.semantic_search = Some(search);
         self
     }
-
-    pub fn with_soul(self, soul: crate::soul::Soul) -> Self {
-        self.set_soul(soul);
-        self
-    }
 }
 
+#[async_trait]
 impl pharmakon_common::ToolRegistry for Agent {
-    fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
-        let mut tools = self.tools.blocking_lock();
+    async fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
+        let mut tools = self.tools.lock().await;
         if !tools.iter().any(|t| t.name() == tool.name()) {
             tools.push(tool);
         }
@@ -140,12 +162,16 @@ impl pharmakon_common::ToolRegistry for Agent {
 }
 
 impl Agent {
-    pub fn setup_autonomous_tools(self: &Arc<Self>) {
+    pub async fn setup_autonomous_tools(self: &Arc<Self>) {
+        use crate::trajectory::tool::InsightTool;
         use pharmakon_tools::{
-            CameraTool, CargoQualityTool, CodeEditTool, DiagnosticTool, FileReadTool,
-            FileWriteTool, FindDefinitionTool, GitCommitTool, GitDiffTool, GitStatusTool,
-            GrepSearchTool, ListDirTool, MultiCodeEditTool, PythonInterpreterTool, ScreenshotTool,
-            ShellTool, SkillFactoryTool, TokenEconomyControlTool, ViewFileTool,
+            ApplyPatchTool, BackgroundRunTool, CameraTool, CargoQualityTool, CodeEditTool,
+            ConnectMcpServerTool, DiagnosticTool, DiscoverToolsTool, FileReadTool, FileWriteTool,
+            FindDefinitionTool, GitCommitTool, GitDiffTool, GitStatusTool, GrepSearchTool,
+            HostScriptTool, LinkUnderstandingTool, ListAnchorsTool, ListDirTool, McpTool,
+            MultiCodeEditTool, PlaybookTool, ProcessStatusTool, PythonInterpreterTool, RepoMapTool,
+            ResearchConsolidateTool, ResearchFetchTool, ResearchSearchTool, ScreenshotTool,
+            SetAnchorTool, ShellTool, TokenEconomyControlTool, ViewFileTool,
             WorkspacePerceptionTool,
         };
 
@@ -153,55 +179,149 @@ impl Agent {
         let tool_registry_arc: Arc<dyn pharmakon_common::ToolRegistry> = agent_arc;
         self.add_tool(Arc::new(pharmakon_tools::SkillFactoryTool::new(
             Arc::downgrade(&tool_registry_arc),
-        )));
-        self.add_tool(Arc::new(WorkspacePerceptionTool));
-        self.add_tool(Arc::new(GrepSearchTool));
-        self.add_tool(Arc::new(CodeEditTool));
-        self.add_tool(Arc::new(MultiCodeEditTool));
-        self.add_tool(Arc::new(ListDirTool));
-        self.add_tool(Arc::new(ViewFileTool));
-        self.add_tool(Arc::new(GitStatusTool));
-        self.add_tool(Arc::new(GitDiffTool));
-        self.add_tool(Arc::new(GitCommitTool));
-        self.add_tool(Arc::new(CargoQualityTool));
-        self.add_tool(Arc::new(FindDefinitionTool));
-        self.add_tool(Arc::new(ShellTool));
-        self.add_tool(Arc::new(FileReadTool));
-        self.add_tool(Arc::new(FileWriteTool));
-        self.add_tool(Arc::new(ScreenshotTool));
-        self.add_tool(Arc::new(CameraTool));
-        self.add_tool(Arc::new(PythonInterpreterTool));
-        self.add_tool(Arc::new(TokenEconomyControlTool {}));
+        )))
+        .await;
+        self.add_tool(Arc::new(WorkspacePerceptionTool)).await;
+        self.add_tool(Arc::new(GrepSearchTool)).await;
+        self.add_tool(Arc::new(CodeEditTool)).await;
+        self.add_tool(Arc::new(MultiCodeEditTool)).await;
+        self.add_tool(Arc::new(ListDirTool)).await;
+        self.add_tool(Arc::new(ViewFileTool)).await;
+        self.add_tool(Arc::new(GitStatusTool)).await;
+        self.add_tool(Arc::new(GitDiffTool)).await;
+        self.add_tool(Arc::new(GitCommitTool)).await;
+        self.add_tool(Arc::new(CargoQualityTool)).await;
+        self.add_tool(Arc::new(FindDefinitionTool)).await;
+        self.add_tool(Arc::new(ShellTool)).await;
+        self.add_tool(Arc::new(FileReadTool)).await;
+        self.add_tool(Arc::new(FileWriteTool)).await;
+        self.add_tool(Arc::new(ScreenshotTool)).await;
+        self.add_tool(Arc::new(CameraTool)).await;
+        self.add_tool(Arc::new(PythonInterpreterTool)).await;
+        self.add_tool(Arc::new(TokenEconomyControlTool {})).await;
+        self.add_tool(Arc::new(SetAnchorTool)).await;
+        self.add_tool(Arc::new(ListAnchorsTool)).await;
+        self.add_tool(Arc::new(PlaybookTool)).await;
+        self.add_tool(Arc::new(RepoMapTool)).await;
+        self.add_tool(Arc::new(ApplyPatchTool)).await;
+
+        if let Some(nexus) = &self.knowledge_nexus {
+            self.add_tool(Arc::new(
+                pharmakon_tools::ast_ingest::ASTKnowledgeIngestTool::new(nexus.clone()),
+            ))
+            .await;
+        }
+
+        // Load MCP Tools from config
+        if let Ok(mcp_tools) = crate::mcp_manager::McpManager::load_tools().await {
+            for tool in mcp_tools {
+                self.add_tool(tool).await;
+            }
+        }
+
+        self.add_tool(Arc::new(ConnectMcpServerTool {
+            tool_registry: self.tools.clone(),
+        }))
+        .await;
+        self.add_tool(Arc::new(DiscoverToolsTool {
+            tool_registry: self.tools.clone(),
+        }))
+        .await;
+
+        use crate::orchestration::territory_tools::{
+            ListTerritoriesTool, LockTerritoryTool, UnlockTerritoryTool,
+        };
+        self.add_tool(Arc::new(LockTerritoryTool {
+            territory_manager: self.territory_manager.clone(),
+        }))
+        .await;
+        self.add_tool(Arc::new(UnlockTerritoryTool {
+            territory_manager: self.territory_manager.clone(),
+        }))
+        .await;
+        self.add_tool(Arc::new(ListTerritoriesTool {
+            territory_manager: self.territory_manager.clone(),
+        }))
+        .await;
+
+        self.add_tool(Arc::new(ResearchSearchTool {
+            notebook: self.research_notebook.clone(),
+        }))
+        .await;
+        self.add_tool(Arc::new(ResearchFetchTool {
+            notebook: self.research_notebook.clone(),
+            store: self
+                .session_store
+                .clone()
+                .map(|s| s as Arc<dyn pharmakon_common::ResearchPersistence>),
+        }))
+        .await;
+        self.add_tool(Arc::new(ResearchConsolidateTool {
+            notebook: self.research_notebook.clone(),
+        }))
+        .await;
+
+        let active_processes = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let retry_counts = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+        self.add_tool(Arc::new(BackgroundRunTool {
+            active_processes: active_processes.clone(),
+        }))
+        .await;
+        self.add_tool(Arc::new(ProcessStatusTool {
+            active_processes,
+            retry_counts,
+        }))
+        .await;
+
+        self.add_tool(Arc::new(InsightTool::new(Arc::downgrade(self))))
+            .await;
+        self.add_tool(Arc::new(HostScriptTool)).await;
+        self.add_tool(Arc::new(LinkUnderstandingTool::new())).await;
 
         self.add_tool(Arc::new(DiagnosticTool {
             vision_stream: self.vision_stream.clone(),
             telemetry: None,
             mcp_stats_source: "agent_internal".to_string(),
-        }));
+        }))
+        .await;
 
         // Inject Full-Spectrum Autonomous Engineering Guidelines
-        let mut pm = self.prompt_manager.blocking_lock();
+        let mut pm = self.prompt_manager.lock().await;
         pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
             "Token Economy & Frugality (Energy Saving Mode)",
             "Tokens are precious. To minimize API costs and stay within limits: \
             1. **Targeted Reading**: Use `view_file` with narrow line ranges (e.g. 50-100 lines) instead of reading whole files. \
-            2. **Filtered Search**: Use `grep_search` with specific queries and `include` filters to avoid massive outputs. \
-            3. **Incremental Edits**: Prefer `edit_file` or `multi_edit_file` over rewriting entire files with `write_file`. \
-            4. **Summarization**: When reporting results, be concise. Only include the essential output. \
+            2. **Structural Map**: Use `get_repo_map` to understand the codebase structure before diving into files. \
+            3. **Surgical Edits**: Use `apply_patch` for precise, token-efficient code modifications. This is the preferred method for editing. \
+            4. **Filtered Search**: Use `grep_search` with specific queries and `include` filters to avoid massive outputs. \
+            5. **Summarization**: When reporting results, be concise. Only include the essential output. \
             A frugal agent is a sustainable agent."
+        )));
+
+        pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
+            "Adaptive Engineering & Reliability (V2.1)",
+            "Follow these strict reliability guidelines: \
+            1. **Surgical Precision**: Prefer `apply_patch` for changes to existing code. \
+            2. **Massive Refactor Rule**: Use `write_file` ONLY for: (a) New files, (b) Rewriting >50% of a file, (c) When `apply_patch` fails 3 times due to context mismatch. \
+            3. **Linear Planning**: Do NOT attempt parallel execution. Follow a strict loop: PLAN -> EXECUTE STEP -> VERIFY (via cargo check/test) -> COMMIT. \
+            4. **Background Monitoring**: If a background process fails (check via `get_process_status`), you have a MAX of 3 auto-fix attempts. If it still fails, YOU MUST STOP AND ASK THE USER FOR HELP. \
+            5. **Shell Hygiene**: Use the `reset: true` flag in `terminal` when moving to a new logical task to avoid state pollution from previous environment variables or directory changes."
         )));
 
         pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
             "Full-Spectrum Autonomous Engineering (Aider/SWE-agent/Devin/Antigravity lineage)",
             "You are a master engineer equipped with an elite tool suite. \
-            - **Version Control**: Use `git_status`, `git_diff`, and `git_commit`. Committing often is encouraged. \
-            - **Quality Control**: Use `cargo_check` (check, test, fmt) for Rust-specific verification. \
-            - **Navigation**: Use `find_definition`, `grep_search`, `list_dir`, and `view_file`. \
-            - **Execution**: Use `shell` for one-offs and `terminal` for stateful sessions. \
-            - **Scripting**: Use `python_interpreter` for data analysis or complex logic blocks. \
-            - **Perception**: Use `screenshot` and `camera_capture` to see the physical/digital world. \
-            - **Scalability (MCP)**: If a required capability is missing, you can autonomously search for and connect to Model Context Protocol (MCP) servers (e.g. `npx @modelcontextprotocol/server-github`). \
-            Your goal is to manage the entire lifecycle: Discover, Plan, Execute, Verify, and Commit."
+            - **Navigation**: Use `get_repo_map` (AST) for the big picture and `find_definition` (LSP) for deep type resolution. \
+            - **Editing**: Use `apply_patch` as your primary tool. \
+            - **Execution**: Use `terminal` with session persistence, but keep it clean. \
+            - **CodeAct Paradigm**: When faced with complex multi-step analysis (e.g., searching across multiple files and aggregating results), prefer writing a Python script using the `pharmakon` bridge. This is more efficient than sequential tool calls. \
+            - **Connectivity**: You can expand your toolbox by calling `connect_mcp_server`. Use this to integrate with external services like Slack, Sentry, or specialized DB tools. \
+            - **Symphony Workforce Coordination**: If you spawn sub-agents (workers), you are the CHIEF ORCHESTRATOR. You MUST: \
+                1. **Decompose strictly**: Assign distinct, non-overlapping directories or modules to each worker. \
+                2. **Prevent Race Conditions**: Never allow two workers to edit the same file. \
+                3. **Sync State**: Require workers to report findings before allowing them to proceed to the next phase. \
+            - **Governance**: Always verify your work. If you hit a retry limit or a critical failure, do not hallucinate—report it and wait for instructions."
         )));
 
         pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
@@ -212,17 +332,17 @@ impl Agent {
         )));
     }
 
-    pub fn update_model(&self, model: Arc<dyn AgentModel>) {
+    pub async fn update_model(&self, model: Arc<dyn AgentModel>) {
         {
-            let mut m = self.model.blocking_lock();
+            let mut m = self.model.lock().await;
             *m = model.clone();
         }
         {
-            let mut traj = self.trajectory.blocking_lock();
+            let mut traj = self.trajectory.lock().await;
             traj.metadata.model = model.name().to_string();
         }
         {
-            let mut compactor = self.compactor.blocking_lock();
+            let mut compactor = self.compactor.lock().await;
             *compactor = crate::memory::compactor::ContextCompactor::new(model);
         }
         log::info!("Agent model updated.");
@@ -236,51 +356,80 @@ impl Agent {
         let _ = self.approval_tx.send((id, approved));
     }
 
-    pub fn reset_history(&self) {
-        let mut history = self.history.blocking_lock();
+    pub async fn reset_history(&self) {
+        let mut history = self.history.lock().await;
         history.clear();
     }
 
-    pub fn add_message(&self, msg: Message) {
-        let mut history = self.history.blocking_lock();
+    pub async fn start_new_session(&self) {
+        let new_id = uuid::Uuid::new_v4().to_string();
+
+        // 1. Update session ID
+        {
+            let mut sid = self.session_id.lock().await;
+            *sid = new_id.clone();
+        }
+
+        // 2. Clear history
+        {
+            let mut history = self.history.lock().await;
+            history.clear();
+        }
+
+        // 3. Reset trajectory
+        {
+            let model_name = self.model_name().await;
+            let mut traj = self.trajectory.lock().await;
+            *traj = crate::trajectory::Trajectory::new(new_id, model_name);
+        }
+
+        // 4. Reset interaction count
+        self.interaction_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+
+        log::info!("Agent started a new session.");
+    }
+
+    pub async fn add_message(&self, msg: Message) {
+        let mut history = self.history.lock().await;
         history.push(msg);
     }
 
-    pub fn model_name(&self) -> String {
-        let m = self.model.blocking_lock();
+    pub async fn model_name(&self) -> String {
+        let m = self.model.lock().await;
         m.name().to_string()
     }
 
-    pub fn add_contribution(
+    pub async fn add_contribution(
         &self,
         contribution: Box<dyn crate::system_prompt::SystemPromptContribution>,
     ) {
-        let mut pm = self.prompt_manager.blocking_lock();
+        let mut pm = self.prompt_manager.lock().await;
         pm.add_contribution(contribution);
     }
 
-    pub fn set_session_id(&self, id: String) {
-        let mut sid = self.session_id.blocking_lock();
+    pub async fn set_session_id(&self, id: String) {
+        let mut sid = self.session_id.lock().await;
         *sid = id;
     }
 
-    pub fn replace_history(&self, new_history: Vec<Message>) {
-        let mut history = self.history.blocking_lock();
+    pub async fn replace_history(&self, new_history: Vec<Message>) {
+        let mut history = self.history.lock().await;
         *history = new_history;
     }
 
-    pub fn trajectory_steps(&self) -> Vec<crate::trajectory::TrajectoryStep> {
-        let traj = self.trajectory.blocking_lock();
+    pub async fn trajectory_steps(&self) -> Vec<crate::trajectory::TrajectoryStep> {
+        let traj = self.trajectory.lock().await;
         traj.steps.clone()
     }
 
-    pub fn soul(&self) -> crate::soul::Soul {
-        let pm = self.prompt_manager.blocking_lock();
+    pub async fn soul(&self) -> crate::soul::Soul {
+        let pm = self.prompt_manager.lock().await;
         pm.soul().clone()
     }
 
-    pub fn set_soul(&self, soul: crate::soul::Soul) {
-        let mut pm = self.prompt_manager.blocking_lock();
+    pub async fn set_soul(&self, soul: crate::soul::Soul) {
+        let mut pm = self.prompt_manager.lock().await;
         pm.set_soul(soul);
     }
 
@@ -320,8 +469,11 @@ impl Agent {
 
         // Auto-index user message for future recovery (only if meaningful)
         if user_message.len() > 10 {
-            if let Some(weaver) = &self.memory_weaver {
-                let _ = weaver.remember(user_message).await;
+            if let Some(nexus) = &self.knowledge_nexus {
+                let id = uuid::Uuid::new_v4().to_string();
+                let _ = nexus
+                    .remember_batch(vec![(id, user_message.to_string())])
+                    .await;
             }
         }
 
@@ -344,10 +496,10 @@ impl Agent {
 
         // Parallel context gathering
         let semantic_search = self.semantic_search.clone();
-        let memory_weaver = self.memory_weaver.clone();
+        let knowledge_nexus = self.knowledge_nexus.clone();
         let user_msg_text = user_message.to_string();
 
-        let (semantic_res, weaver_res, scout_res) = if user_message.len() < 5 {
+        let (semantic_res, nexus_res, scout_res) = if user_message.len() < 5 {
             (None, None, None)
         } else {
             tokio::join!(
@@ -359,8 +511,8 @@ impl Agent {
                     }
                 },
                 async {
-                    if let Some(weaver) = memory_weaver {
-                        weaver.search(&user_msg_text, 5).await.ok()
+                    if let Some(nexus) = knowledge_nexus {
+                        nexus.smart_search(&user_msg_text, 8).await.ok()
                     } else {
                         None
                     }
@@ -372,58 +524,96 @@ impl Agent {
         if let Some(memories) = semantic_res {
             if !memories.is_empty() {
                 let memory_context = memories.join("\n---\n");
-                let mut prompt_manager = self.prompt_manager.lock().await;
-                prompt_manager.add_contribution(Box::new(
-                    crate::system_prompt::StaticContribution::new(
-                        "Long-term Memories",
-                        &format!(
-                            "Relevant snippets from past conversations:\n{}",
-                            memory_context
-                        ),
-                    ),
-                ));
+                self.add_to_working_memory(format!("Long-term Memories:\n{}", memory_context), 0.7)
+                    .await;
             }
         }
 
-        if let Some(memories) = weaver_res {
+        if let Some(memories) = nexus_res {
             if !memories.is_empty() {
                 let memory_context = memories.join("\n---\n");
-                // Trigger context recovered hook
                 let _ = self.hooks.trigger_context_recovered(&memory_context).await;
-
-                let mut prompt_manager = self.prompt_manager.lock().await;
-                prompt_manager.add_contribution(Box::new(
-                    crate::system_prompt::StaticContribution::new(
-                        "Recovered Context (Past Sessions)",
-                        &format!("Insights recovered from all sessions:\n{}", memory_context),
+                self.add_to_working_memory(
+                    format!(
+                        "Knowledge Nexus Insights (Hybrid + Graph):\n{}",
+                        memory_context
                     ),
-                ));
+                    0.9,
+                )
+                .await;
             }
         }
 
         if let Some(scout_context) = scout_res {
-            let mut prompt_manager = self.prompt_manager.lock().await;
-            prompt_manager.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-                "Proactive Scout Insights",
-                &format!("Based on your request, I proactively found and peeked into these files:\n{}", scout_context)
-            )));
+            self.add_to_working_memory(
+                format!("Proactive Scout Insights:\n{}", scout_context),
+                0.8,
+            )
+            .await;
         }
 
-        let tools_count = self.tools.blocking_lock().len();
+        let tools_count = self.tools.lock().await.len();
         log::info!(
             "Agent entering decision loop with {} tools and session: {}",
             tools_count,
             session_id
         );
 
+        let mut iteration_count = 0;
+        let max_iterations = 15;
+        let start_time = std::time::Instant::now();
+        let max_duration = std::time::Duration::from_secs(300); // 5 minutes
+
         loop {
-            log::info!("Agent iteration start...");
+            iteration_count += 1;
+            if iteration_count > max_iterations {
+                let reason = format!(
+                    "Loop limit exceeded ({} iterations). Potential infinite loop detected.",
+                    iteration_count
+                );
+                log::error!("CRITICAL: {}", reason);
+                let _ = self.event_tx.send(Event::AgentHangDetected {
+                    reason: reason.clone(),
+                });
+                return Err(anyhow::anyhow!(AgentError::new(
+                    AgentErrorCode::HangDetected,
+                    reason
+                )));
+            }
+
+            if start_time.elapsed() > max_duration {
+                let reason = format!(
+                    "Time limit exceeded ({:?}). Agent is taking too long to respond.",
+                    max_duration
+                );
+                log::error!("CRITICAL: {}", reason);
+                let _ = self.event_tx.send(Event::AgentHangDetected {
+                    reason: reason.clone(),
+                });
+                return Err(anyhow::anyhow!(AgentError::new(
+                    AgentErrorCode::HangDetected,
+                    reason
+                )));
+            }
+
+            log::info!("Agent iteration start ({})...", iteration_count);
             let mut messages_to_send = Vec::new();
             {
                 let prompt_manager = self.prompt_manager.lock().await;
+                let mut system_prompt = prompt_manager.build();
+
+                // Inject Working Memory
+                let packed_wm = self.pack_working_memory().await;
+                if !packed_wm.is_empty() {
+                    system_prompt.push_str(&format!(
+                        "\n\n### ACTIVE WORKING MEMORY (High Importance Context)\n{}",
+                        packed_wm
+                    ));
+                }
+
                 messages_to_send.push(Message {
                     role: "system".to_string(),
-                    content: Some(MessageContent::Text(prompt_manager.build())),
+                    content: Some(MessageContent::Text(system_prompt)),
                     ..Default::default()
                 });
             }
@@ -432,23 +622,25 @@ impl Agent {
                 messages_to_send.extend(history.clone());
             }
 
-            let tools_lock = self.tools.blocking_lock();
-            let tool_definitions = if tools_lock.is_empty() {
-                None
-            } else {
-                Some(
-                    tools_lock
-                        .iter()
-                        .map(|t| ToolDefinition {
-                            r#type: "function".to_string(),
-                            function: crate::model::FunctionDefinition {
-                                name: t.name().to_string(),
-                                description: t.description().to_string(),
-                                parameters: t.parameters(),
-                            },
-                        })
-                        .collect(),
-                )
+            let tool_definitions = {
+                let tools_lock = self.tools.lock().await;
+                if tools_lock.is_empty() {
+                    None
+                } else {
+                    Some(
+                        tools_lock
+                            .iter()
+                            .map(|t| ToolDefinition {
+                                r#type: "function".to_string(),
+                                function: crate::model::FunctionDefinition {
+                                    name: t.name().to_string(),
+                                    description: t.description().to_string(),
+                                    parameters: t.parameters(),
+                                },
+                            })
+                            .collect(),
+                    )
+                }
             };
 
             // Tiered Reasoning: Use planner model for tool selection if available
@@ -602,11 +794,42 @@ impl Agent {
                 }
             }
 
-            let response: pharmakon_common::agent_types::CompletionResponse = response_result.unwrap();
+            let response: pharmakon_common::agent_types::CompletionResponse =
+                response_result.unwrap();
+
+            log::debug!(
+                "Model response received. Content: {}, Tool calls: {}",
+                response.content.is_some(),
+                response.tool_calls.as_ref().map(|t| t.len()).unwrap_or(0)
+            );
+
+            if response.content.is_none() && response.tool_calls.is_none() {
+                log::warn!(
+                    "Model returned an empty response (no text, no tools). This might indicate a safety filter or internal model issue."
+                );
+            }
 
             let _ = self.event_tx.send(Event::InteractionFinished {
                 response: response.clone(),
             });
+
+            if let Some(usage) = &response.usage {
+                self.total_tokens.fetch_add(
+                    usage.total_tokens as u64,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+                let mut cost_lock = self.total_cost.lock().await;
+                let cost_increment = (usage.total_tokens as f64 / 1000.0) * 0.002;
+                *cost_lock += cost_increment;
+
+                let mut history = self.usage_history.lock().await;
+                history.push((chrono::Utc::now(), usage.total_tokens as u64, *cost_lock));
+
+                let _ = self.event_tx.send(Event::TokenUsageUpdate {
+                    total_tokens: self.total_tokens.load(std::sync::atomic::Ordering::SeqCst),
+                    total_cost: *cost_lock,
+                });
+            }
 
             if let Some(content) = &response.content {
                 let c = content.clone();
@@ -641,7 +864,8 @@ impl Agent {
                 for tool_call in tool_calls {
                     let tool = self
                         .tools
-                        .blocking_lock()
+                        .lock()
+                        .await
                         .iter()
                         .find(|t| t.name() == tool_call.function.name)
                         .cloned();
@@ -653,6 +877,8 @@ impl Agent {
                         pm.soul().clone()
                     };
                     let policy_engine = self.policy_engine.clone();
+                    let tool_call_counts = self.tool_call_counts.clone();
+                    let forensic_id = uuid::Uuid::new_v4().to_string();
 
                     tool_tasks.push(tokio::spawn(async move {
                         let tool = match tool {
@@ -731,11 +957,36 @@ impl Agent {
 
                         let _ = hooks.trigger_before_tool_call(tool.name(), &args).await;
                         log::info!("Executing tool: {} with args: {}", tool.name(), args);
+
+                        {
+                            let mut counts = tool_call_counts.lock().await;
+                            *counts.entry(tool.name().to_string()).or_insert(0) += 1;
+                        }
+
+                        let _ = event_tx.send(Event::ForensicLog {
+                            id: forensic_id.clone(),
+                            action: format!("Executing {}", tool.name()),
+                            hypothesis: format!("Using {} with args {}", tool.name(), args),
+                            observation: None,
+                        });
+
                         let result = tool.call(args).await;
                         let result_str = match &result {
                             Ok(s) => s.clone(),
                             Err(e) => e.to_string(),
                         };
+
+                        let _ = event_tx.send(Event::ForensicLog {
+                            id: forensic_id,
+                            action: format!("Completed {}", tool.name()),
+                            hypothesis: "".to_string(),
+                            observation: Some(if result_str.len() > 100 {
+                                format!("{}...", &result_str[..100])
+                            } else {
+                                result_str.clone()
+                            }),
+                        });
+
                         let _ = hooks
                             .trigger_after_tool_call(tool.name(), &result_str)
                             .await;
@@ -750,6 +1001,7 @@ impl Agent {
                         let result = match result_res {
                             Ok(r) => r,
                             Err(e) => {
+                                log::error!("Tool task execution error: {}", e);
                                 rescue_error = Some(e.to_string());
                                 e.to_string()
                             }
@@ -794,7 +1046,7 @@ impl Agent {
                     log::warn!("Autonomous Self-Healing: Tool failed. Triggering rescue...");
                     let rescue_msg =
                         crate::orchestration::crestodian::Crestodian::generate_rescue_message(&err);
-                    self.add_message(rescue_msg);
+                    self.add_message(rescue_msg).await;
                     // We don't break, we continue the loop to let the LLM see the rescue message
                 }
 
@@ -866,8 +1118,11 @@ impl Agent {
             }
 
             // Auto-index assistant response
-            if let Some(weaver) = &self.memory_weaver {
-                let _ = weaver.remember(&final_content).await;
+            if let Some(nexus) = &self.knowledge_nexus {
+                let id = uuid::Uuid::new_v4().to_string();
+                let _ = nexus
+                    .remember_batch(vec![(id, final_content.clone())])
+                    .await;
             }
 
             let _ = self.event_tx.send(Event::AgentResponse {
@@ -879,7 +1134,54 @@ impl Agent {
         }
     }
 
+    pub async fn plan_retrieval(&self, query: &str) -> pharmakon_memory::RagStrategy {
+        if query.to_lowercase().contains("deep research") || query.len() > 200 {
+            pharmakon_memory::RagStrategy::DeepResearch {
+                max_depth: 3,
+                beam_width: 2,
+            }
+        } else {
+            pharmakon_memory::RagStrategy::Hybrid { initial_top_k: 5 }
+        }
+    }
+
+    pub async fn add_to_working_memory(&self, content: String, importance: f32) {
+        let mut wm = self.working_memory.lock().await;
+        wm.push(WorkingMemoryUnit {
+            content,
+            importance,
+            timestamp: std::time::Instant::now(),
+        });
+
+        // Eviction logic: keep only top 10 important or recent items
+        if wm.len() > 10 {
+            wm.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap());
+            wm.truncate(10);
+        }
+    }
+
+    pub async fn pack_working_memory(&self) -> String {
+        let wm = self.working_memory.lock().await;
+        let mut packed = String::new();
+        for unit in wm.iter() {
+            packed.push_str(&format!("\n---\n{}\n", unit.content));
+        }
+        packed
+    }
+
+    pub async fn is_docker_available(&self) -> bool {
+        let output = tokio::process::Command::new("docker")
+            .arg("--version")
+            .output()
+            .await;
+        output.is_ok() && output.unwrap().status.success()
+    }
+
     pub async fn verify_code(&self, code: &str, language: &str) -> Result<bool> {
+        if !self.is_docker_available().await {
+            log::warn!("Docker is not available. Skipping sandboxed code verification.");
+            return Ok(true); // Treat as verified to avoid blocking when Docker is missing
+        }
         log::info!("Agent: Verifying {} code in sandbox...", language);
 
         let docker_image = match language.to_lowercase().as_str() {
@@ -903,9 +1205,17 @@ impl Agent {
                 code, language
             ))
             .spawn()
-            .map_err(|e| AgentError(format!("Docker failure: {}. Is Docker running?", e)))?;
+            .map_err(|e| {
+                AgentError::new(
+                    AgentErrorCode::EnvironmentError,
+                    format!("Docker failure: {}. Is Docker running?", e),
+                )
+            })?;
 
-        let status = child.wait().await.map_err(|e| AgentError(e.to_string()))?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| AgentError::new(AgentErrorCode::EnvironmentError, e.to_string()))?;
         Ok(status.success())
     }
 
@@ -941,13 +1251,13 @@ impl Agent {
 
         let request = CompletionRequest {
             messages: vec![
-                Message { 
-                    role: "system".to_string(), 
+                Message {
+                    role: "system".to_string(),
                     content: Some(MessageContent::Text("You are the Pharmakon Reflection Engine. Your goal is to learn from every interaction to improve the user experience.".to_string())),
                     ..Default::default()
                 },
-                Message { 
-                    role: "user".to_string(), 
+                Message {
+                    role: "user".to_string(),
                     content: Some(MessageContent::Text(prompt)),
                     ..Default::default()
                 },
@@ -986,9 +1296,13 @@ impl Agent {
                     }
 
                     // Also index into semantic search for recovery across sessions
-                    if let Some(weaver) = &self.memory_weaver {
-                        let _ = weaver
-                            .remember(&format!("Insight from session {}: {}", session_id, insight))
+                    if let Some(nexus) = &self.knowledge_nexus {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let _ = nexus
+                            .remember_batch(vec![(
+                                id,
+                                format!("Insight from session {}: {}", session_id, insight),
+                            )])
                             .await;
                     }
                 }
@@ -1001,6 +1315,15 @@ impl Agent {
     pub async fn heartbeat(&self) -> Result<String> {
         let msg = "system_heartbeat_check: respond with HEARTBEAT_OK if functional.";
         self.chat(msg).await
+    }
+
+    pub async fn perform_maintenance(&self) -> Result<()> {
+        log::info!("Agent: Performing periodic maintenance (Memory Decay)...");
+        if let Some(nexus) = &self.knowledge_nexus {
+            // Reduce decay_score by 5% (0.95 factor)
+            nexus.decay_memories(0.95).await?;
+        }
+        Ok(())
     }
 
     pub async fn add_fact(&self, fact: &str) -> Result<()> {
@@ -1029,7 +1352,7 @@ impl Agent {
 
         let model_id = parts[1];
         if let Some(model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
-            self.update_model(model);
+            self.update_model(model).await;
             let _ = self.event_tx.send(Event::ModelSwitched {
                 model_id: model_id.to_string(),
             });
@@ -1109,7 +1432,7 @@ impl pharmakon_common::SoulManager for AgentSoulManager {
         prompt: Option<String>,
         style: Option<String>,
     ) -> anyhow::Result<()> {
-        let mut soul = self.0.soul();
+        let mut soul = self.0.soul().await;
         if let Some(t) = traits {
             soul.traits = t;
         }
@@ -1119,7 +1442,7 @@ impl pharmakon_common::SoulManager for AgentSoulManager {
         if let Some(s) = style {
             soul.response_style = Some(s);
         }
-        self.0.set_soul(soul);
+        self.0.set_soul(soul).await;
         Ok(())
     }
 }

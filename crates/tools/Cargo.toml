@@ -27,3 +27,6 @@ nokhwa = { version = "0.10.4", features = ["input-native"] }
 image = "0.25.5"
 dirs = "6.0.0"
 serde = { workspace = true, features = ["derive"] }
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+ignore = "0.4.25"

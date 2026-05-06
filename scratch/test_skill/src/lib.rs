@@ -9,7 +9,8 @@ pub extern "C" fn alloc(size: usize) -> *mut u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn call(ptr: *mut u8, len: usize) -> u64 {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn call(ptr: *mut u8, len: usize) -> u64 {
     let input_bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
     let input_str = String::from_utf8_lossy(&input_bytes);
     let args: Value = serde_json::from_str(&input_str).unwrap_or(json!({}));

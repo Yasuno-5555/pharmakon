@@ -18,5 +18,6 @@ pub enum RagStrategy {
     InitialContext { top_k: usize },
     ToolCall,
     Hybrid { initial_top_k: usize },
+    DeepResearch { max_depth: u8, beam_width: usize },
     Disabled,
 }

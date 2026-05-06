@@ -244,7 +244,7 @@ async fn handle_socket(
                         // Status handled via HTTP
                     }
                     Request::ResetHistory => {
-                        agent_clone_inner.lock().await.reset_history();
+                        agent_clone_inner.lock().await.reset_history().await;
                     }
                     Request::InteractiveResponse {
                         element_id,
@@ -276,8 +276,7 @@ async fn handle_socket(
                     }
                     Request::GetSessions => {
                         let agent_lock = agent_clone_inner.lock().await;
-                        let sessions: Vec<String> = if let Some(store) = &agent_lock.session_store
-                        {
+                        let sessions: Vec<String> = if let Some(store) = &agent_lock.session_store {
                             store.list_sessions().await.unwrap_or_default()
                         } else {
                             vec!["default".to_string()]
@@ -285,9 +284,9 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
                     }
                     Request::SwitchSession { id } => {
-                        let agent_lock = agent_clone_inner.lock().await;
-                        agent_lock.set_session_id(id.clone());
-                        agent_lock.reset_history();
+                        let mut agent_lock = agent_clone_inner.lock().await;
+                        agent_lock.set_session_id(id.clone()).await;
+                        agent_lock.reset_history().await;
 
                         // Load history for the new session
                         let history = if let Some(store) = &agent_lock.session_store {
@@ -295,8 +294,7 @@ async fn handle_socket(
                         } else {
                             Vec::new()
                         };
-
-                        agent_lock.replace_history(history.clone());
+                        agent_lock.replace_history(history.clone()).await;
                         let _ = agent_lock
                             .event_tx
                             .send(Event::HistoryList { messages: history });
@@ -346,22 +344,84 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetGatewayStatus => {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let uptime = agent_lock.start_time.elapsed().as_secs();
+
+                        use sysinfo::System;
+                        let mut sys = System::new_all();
+                        sys.refresh_all();
+                        let memory_usage = sys.used_memory();
+
                         let event = Event::GatewayStatus {
-                            uptime: 3600,                    // Dummy
-                            connected_clients: 1,            // Dummy
-                            memory_usage: 128 * 1024 * 1024, // Dummy
+                            uptime,
+                            connected_clients: 1,
+                            memory_usage,
+                        };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetMcpStats => {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let counts = agent_lock.tool_call_counts.lock().await;
+                        let stats = counts
+                            .iter()
+                            .map(|(name, count)| pharmakon_common::McpStatEntry {
+                                name: name.clone(),
+                                call_count: *count,
+                            })
+                            .collect();
+                        let event = Event::McpStats { stats };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetTools => {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let tools_lock = agent_lock.tools.lock().await;
+                        let tools = tools_lock
+                            .iter()
+                            .map(|t| pharmakon_common::ToolInfo {
+                                name: t.name().to_string(),
+                                description: t.description().to_string(),
+                                parameters: t.parameters(),
+                            })
+                            .collect();
+                        let event = Event::ToolList { tools };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetUsageHistory => {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let history_lock = agent_lock.usage_history.lock().await;
+                        let history = history_lock
+                            .iter()
+                            .map(|(ts, tokens, cost)| pharmakon_common::UsageEntry {
+                                timestamp: ts.format("%H:%M").to_string(),
+                                tokens: *tokens,
+                                cost: *cost,
+                            })
+                            .collect();
+                        let event = Event::UsageHistory { history };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetResearchNotebook => {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let notebook = agent_lock.research_notebook.lock().await.clone();
+                        let event = Event::ResearchNotebookUpdate { notebook };
+                        let _ = agent_lock.event_tx.send(event);
+                    }
+                    Request::GetSettings => {
+                        // For now, return basic settings
+                        let event = Event::SettingsUpdate {
+                            settings: serde_json::json!({
+                                "model": "gemini-2.0-flash",
+                                "temperature": 0.7,
+                                "auto_approval": false,
+                                "max_tokens": 100000
+                            }),
                         };
                         let agent_lock = agent_clone_inner.lock().await;
                         let _ = agent_lock.event_tx.send(event);
                     }
-                    Request::GetMcpStats => {
-                        let event = Event::McpStats {
-                            stats: vec![pharmakon_common::McpToolStat {
-                                name: "brave_search".to_string(),
-                                avg_latency_ms: 450,
-                                call_count: 12,
-                            }],
-                        };
+                    Request::UpdateSettings { settings } => {
+                        log::info!("Settings updated: {:?}", settings);
+                        let event = Event::Action("Settings updated successfully".to_string());
                         let agent_lock = agent_clone_inner.lock().await;
                         let _ = agent_lock.event_tx.send(event);
                     }
@@ -399,7 +459,7 @@ async fn handle_socket(
                         if let Some(model) =
                             pharmakon_core::providers::registry::ModelRegistry::get_model(&model_id)
                         {
-                            agent_lock.update_model(model);
+                            agent_lock.update_model(model).await;
                             let _ = agent_lock.event_tx.send(Event::ModelSwitched { model_id });
                         } else {
                             let _ = agent_lock.event_tx.send(Event::Error {

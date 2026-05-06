@@ -118,17 +118,20 @@ async fn test_multi_agent_collaboration() {
         .await
         .add_tool(Arc::new(pharmakon_core::orchestration::TeamMessageTool {
             from: "Manager".to_string(),
-        }));
+        }))
+        .await;
     manager
         .lock()
         .await
-        .add_tool(Arc::new(pharmakon_core::orchestration::FinalAnswerTool));
+        .add_tool(Arc::new(pharmakon_core::orchestration::FinalAnswerTool))
+        .await;
     researcher
         .lock()
         .await
         .add_tool(Arc::new(pharmakon_core::orchestration::TeamMessageTool {
             from: "Researcher".to_string(),
-        }));
+        }))
+        .await;
 
     let mut supervisor = Supervisor::new(
         "Research latest AI trends".to_string(),

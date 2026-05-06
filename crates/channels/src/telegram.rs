@@ -65,7 +65,7 @@ impl Channel for TelegramChannel {
                     let mut last_id = last_chat_id.lock().await;
                     *last_id = Some(msg.chat.id);
                 }
-                
+
                 if let Some(text) = msg.text() {
                     log::info!("Telegram received message from {}: {}", msg.chat.id, text);
 
@@ -75,17 +75,24 @@ impl Channel for TelegramChannel {
                         let _ = bot.send_message(msg.chat.id, format!("✅ Tool call approved: {}", id)).await;
                         return Ok(());
                     }
-                    
+
                     if text.starts_with("/deny ") {
                         let id = text.trim_start_matches("/deny ").to_string();
                         agent.lock().await.approve(id.clone(), false);
                         let _ = bot.send_message(msg.chat.id, format!("❌ Tool call denied: {}", id)).await;
                         return Ok(());
                     }
-                    
+
+                    if text == "/new" {
+                        log::info!("Telegram: Resetting session as requested by user.");
+                        agent.lock().await.start_new_session().await;
+                        let _ = bot.send_message(msg.chat.id, "🔄 New session started. Previous context has been cleared.").await;
+                        return Ok(());
+                    }
+
                     let pairing_mgr = pharmakon_core::security::pairing::PairingManager::global();
                     let sender_id = msg.chat.id.to_string();
-                    
+
                     if !pairing_mgr.is_allowed("telegram", &sender_id) {
                         if text.starts_with("/") {
                              // Allow commands like /start?
@@ -134,16 +141,30 @@ impl Channel for TelegramChannel {
             log::info!("Telegram event listener started.");
 
             while let Ok(event) = event_rx.recv().await {
-                if let Event::ApprovalRequest { id, tool, args } = event {
-                    log::info!("Telegram received ApprovalRequest: {}", id);
-                    let chat_id_opt = {
-                        let last_id = last_chat_id.lock().await;
-                        *last_id
-                    };
+                match &event {
+                    Event::ApprovalRequest { id, tool, args } => {
+                        log::info!("Telegram received ApprovalRequest: {}", id);
+                        let chat_id_opt = {
+                            let last_id = last_chat_id.lock().await;
+                            *last_id
+                        };
 
-                    if let Some(chat_id) = chat_id_opt {
-                        let _ = bot_for_events.send_message(chat_id, format!("🛡️ **Tool Approval Required**\n\n**Tool:** `{}`\n**Args:** `{}`\n\nTo approve, send:\n`/approve {}`\n\nTo deny, send:\n`/deny {}`", tool, args, id, id)).await;
+                        if let Some(chat_id) = chat_id_opt {
+                            let _ = bot_for_events.send_message(chat_id, format!("🛡️ **Tool Approval Required**\n\n**Tool:** `{}`\n**Args:** `{}`\n\nTo approve, send:\n`/approve {}`\n\nTo deny, send:\n`/deny {}`", tool, args, id, id)).await;
+                        }
                     }
+                    Event::AgentHangDetected { reason } => {
+                        log::warn!("Telegram received HangDetected: {}", reason);
+                        let chat_id_opt = {
+                            let last_id = last_chat_id.lock().await;
+                            *last_id
+                        };
+
+                        if let Some(chat_id) = chat_id_opt {
+                            let _ = bot_for_events.send_message(chat_id, format!("🚨 **Watchdog Alert: Hang Detected**\n\n**Reason:** {}\n\nエージェントの暴走（無限ループ等）を検知したため、安全のためにプロセスを強制停止しました。コンテキストをクリアするために `/new` コマンドの実行をお勧めします。", reason)).await;
+                        }
+                    }
+                    _ => {}
                 }
             }
         });

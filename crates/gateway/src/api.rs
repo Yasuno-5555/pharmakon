@@ -1,6 +1,5 @@
 use axum::extract::State;
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use pharmakon_common::{Event, MessageContent};
 use pharmakon_core::agent::Agent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -33,7 +32,7 @@ pub async fn execute_tool(
     );
 
     let agent_lock = agent.lock().await;
-    let tools = agent_lock.tools.blocking_lock();
+    let tools = agent_lock.tools.lock().await;
     if let Some(tool) = tools.iter().find(|t| t.name() == req.name) {
         match tool.call(req.args).await {
             Ok(result) => (StatusCode::OK, Json(ExecuteToolResponse { result })).into_response(),
@@ -87,11 +86,11 @@ pub async fn get_state(
     )>,
 ) -> impl IntoResponse {
     let agent_lock = agent.lock().await;
-    let trajectory = agent_lock.trajectory.blocking_lock();
-    let history = agent_lock.history.blocking_lock();
+    let trajectory = agent_lock.trajectory.lock().await;
+    let history = agent_lock.history.lock().await;
 
     Json(json!({
-        "session_id": agent_lock.session_id.blocking_lock().clone(),
+        "session_id": agent_lock.session_id.lock().await.clone(),
         "trajectory_steps": trajectory.steps.len(),
         "history_messages": history.len(),
         "model": trajectory.metadata.model.clone(),

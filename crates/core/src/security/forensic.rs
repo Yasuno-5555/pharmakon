@@ -25,7 +25,7 @@ impl ForensicClient {
         let req_body = format!("{:?}", req.body()); // Simplified for now
 
         let res = self.client.execute(req).await?;
-        
+
         let status = res.status().as_u16();
         let res_text = "(Binary or Large body captured)"; // Full capture logic would go here
 

@@ -33,11 +33,11 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
       <div className="message-avatar">
         {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
       </div>
-      
+
       <div className="message-content">
         <AnimatePresence>
           {msg.thought && (
-            <motion.div 
+            <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -64,7 +64,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
             <span className="tool-args">{JSON.stringify(msg.toolCall.args)}</span>
           </div>
         )}
-        
+
         {msg.toolResult && (
           <div className="tool-result">
             <div className="tool-result-header">
@@ -107,12 +107,12 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
             {msg.images && msg.images.length > 0 && (
               <div className="message-images">
                 {msg.images.map((img, i) => (
-                  <motion.img 
-                    key={i} 
-                    src={img} 
+                  <motion.img
+                    key={i}
+                    src={img}
                     whileHover={{ scale: 1.05 }}
-                    className="chat-image" 
-                    alt="Multimodal content" 
+                    className="chat-image"
+                    alt="Multimodal content"
                   />
                 ))}
               </div>
@@ -125,9 +125,9 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
             {msg.interactive.components.map((comp: any, i: number) => {
               if (comp.type === 'Button') {
                 return (
-                  <button 
-                    key={i} 
-                    className={`btn-${comp.payload.style}`} 
+                  <button
+                    key={i}
+                    className={`btn-${comp.payload.style}`}
                     onClick={() => socket?.send(JSON.stringify({ type: 'InteractiveResponse', payload: { element_id: comp.payload.id, action: 'click' } }))}
                   >
                     {comp.payload.label}

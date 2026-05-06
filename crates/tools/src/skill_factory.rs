@@ -59,7 +59,7 @@ impl Tool for SkillFactoryTool {
         };
 
         if let Some(agent) = self.agent_ref.upgrade() {
-            agent.add_tool(Arc::new(dynamic_tool));
+            agent.add_tool(Arc::new(dynamic_tool)).await;
             Ok(format!(
                 "Successfully synthesized and installed new skill: '{}'. You can now call it like any other tool.",
                 name

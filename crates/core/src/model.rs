@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 pub use pharmakon_common::{
-    AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse, ContentPart,
-    FunctionCall, FunctionDefinition, Message, MessageContent, ToolCall, ToolDefinition, Usage,
+    AgentError, AgentErrorCode, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
+    ContentPart, FunctionCall, FunctionDefinition, Message, MessageContent, ToolCall,
+    ToolDefinition, Usage,
 };
 
 pub struct MockModel;

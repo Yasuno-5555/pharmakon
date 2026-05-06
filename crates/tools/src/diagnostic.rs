@@ -59,7 +59,7 @@ impl Tool for DiagnosticTool {
                     let summary = frames.iter().map(|f| {
                         format!("- At {}: Focused on Window '{}'", f.captured_at, f.window_title)
                     }).collect::<Vec<_>>().join("\n");
-                    
+
                     if summary.is_empty() {
                         Ok("No visual context captured yet.".to_string())
                     } else {

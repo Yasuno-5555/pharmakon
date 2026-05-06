@@ -101,7 +101,7 @@ async fn test_chat_calls_complete_when_tools_are_present() {
     let model = Arc::new(InspectableMockModel::new());
     let mut agent = setup_test_agent_with_model(model.clone()).await;
 
-    agent.add_tool(Arc::new(ShellTool));
+    agent.add_tool(Arc::new(ShellTool)).await;
 
     let _ = agent.chat("test message").await;
 

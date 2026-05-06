@@ -1,6 +1,6 @@
 use crate::model::{
-    AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse, ContentPart,
-    FunctionCall, MessageContent, ToolCall, Usage,
+    AgentError, AgentErrorCode, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
+    ContentPart, FunctionCall, MessageContent, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -217,25 +217,27 @@ impl GeminiModel {
             let mut parts = Vec::new();
 
             if let Some(ref content) = m.content {
-                match content {
-                    MessageContent::Text(t) => parts.push(GeminiPart {
-                        text: Some(t.clone()),
-                        inline_data: None,
-                        function_call: None,
-                        function_response: None,
-                        thought: None,
-                    }),
-                    MessageContent::Multimodal(p) => {
-                        for part in p {
-                            match part {
-                                ContentPart::Text { text } => parts.push(GeminiPart {
-                                    text: Some(text.clone()),
-                                    inline_data: None,
-                                    function_call: None,
-                                    function_response: None,
-                                    thought: None,
-                                }),
-                                _ => {}
+                if m.role != "tool" {
+                    match content {
+                        MessageContent::Text(t) => parts.push(GeminiPart {
+                            text: Some(t.clone()),
+                            inline_data: None,
+                            function_call: None,
+                            function_response: None,
+                            thought: None,
+                        }),
+                        MessageContent::Multimodal(p) => {
+                            for part in p {
+                                match part {
+                                    ContentPart::Text { text } => parts.push(GeminiPart {
+                                        text: Some(text.clone()),
+                                        inline_data: None,
+                                        function_call: None,
+                                        function_response: None,
+                                        thought: None,
+                                    }),
+                                    _ => {}
+                                }
                             }
                         }
                     }
@@ -319,26 +321,25 @@ impl GeminiModel {
                 } else {
                     "user"
                 };
-            } else {
-                if next_expected_role == "user" && content.role == "model" {
-                    // Insert a dummy user message to maintain alternation
-                    final_contents.push(GeminiContent {
-                        role: "user".to_string(),
-                        parts: vec![GeminiPart {
-                            text: Some("Continuing...".to_string()),
-                            inline_data: None,
-                            function_call: None,
-                            function_response: None,
-                            thought: None,
-                        }],
-                    });
-                    final_contents.push(content);
-                    next_expected_role = "user";
-                } else if next_expected_role == "model" && content.role == "user" {
-                    // Merge consecutive user messages if model was skipped
-                    if let Some(last) = final_contents.last_mut() {
-                        last.parts.extend(content.parts);
-                    }
+            } else if next_expected_role == "user" && content.role == "model" {
+                // If we got a model message but expected user (e.g. at start),
+                // prepend an empty user message instead of "Continuing..."
+                final_contents.push(GeminiContent {
+                    role: "user".to_string(),
+                    parts: vec![GeminiPart {
+                        text: Some("...".to_string()),
+                        inline_data: None,
+                        function_call: None,
+                        function_response: None,
+                        thought: None,
+                    }],
+                });
+                final_contents.push(content);
+                next_expected_role = "user";
+            } else if next_expected_role == "model" && content.role == "user" {
+                // Merge consecutive user messages if model was skipped
+                if let Some(last) = final_contents.last_mut() {
+                    last.parts.extend(content.parts);
                 }
             }
         }
@@ -473,10 +474,19 @@ impl AgentModel for GeminiModel {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             log::error!("Gemini API Error Status: {}, Body: {}", status, error_text);
-            return Err(AgentError(format!(
-                "Gemini API error ({}): {}",
-                status, error_text
-            )));
+
+            let code = match status.as_u16() {
+                429 => AgentErrorCode::RateLimit,
+                401 | 403 => AgentErrorCode::AuthenticationFailed,
+                400 => AgentErrorCode::InvalidRequest,
+                500..=599 => AgentErrorCode::ModelError,
+                _ => AgentErrorCode::NetworkError,
+            };
+
+            return Err(AgentError::new(
+                code,
+                format!("Gemini API error ({}): {}", status, error_text),
+            ));
         }
 
         let response_text = response
@@ -491,7 +501,10 @@ impl AgentModel for GeminiModel {
                 e,
                 response_text
             );
-            AgentError(e.to_string())
+            AgentError::new(
+                AgentErrorCode::InternalError,
+                format!("Failed to parse response: {}", e),
+            )
         })?;
 
         log::info!(
@@ -507,10 +520,12 @@ impl AgentModel for GeminiModel {
             );
         }
 
-        let candidate = gemini_resp
-            .candidates
-            .get(0)
-            .ok_or_else(|| AgentError("No candidates returned from Gemini".to_string()))?;
+        let candidate = gemini_resp.candidates.get(0).ok_or_else(|| {
+            AgentError::new(
+                AgentErrorCode::ModelError,
+                "No candidates returned from Gemini",
+            )
+        })?;
         log::info!("Candidate 0: finish_reason={:?}", candidate.finish_reason);
 
         let mut content = None;
@@ -711,10 +726,10 @@ impl AgentModel for GeminiModel {
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AgentError(format!(
-                "Gemini streaming API error: {}",
-                error_text
-            )));
+            return Err(AgentError::new(
+                AgentErrorCode::ModelError,
+                format!("Gemini streaming API error: {}", error_text),
+            ));
         }
 
         let byte_stream = response.bytes_stream();
@@ -737,15 +752,25 @@ impl AgentModel for GeminiModel {
                                         if let Some(parts) =
                                             first_candidate["content"]["parts"].as_array()
                                         {
+                                            let mut chunk_text = String::new();
                                             for part in parts {
                                                 if let Some(text) = part["text"].as_str() {
-                                                    if !text.is_empty() {
-                                                        return Some((
-                                                            Ok(text.to_string()),
-                                                            (byte_stream, buffer),
-                                                        ));
-                                                    }
+                                                    chunk_text.push_str(text);
                                                 }
+                                                if let Some(thought) = part["thought"].as_str() {
+                                                    // Wrap thought in tags for visibility
+                                                    chunk_text.push_str(&format!(
+                                                        "<think>{}</think>",
+                                                        thought
+                                                    ));
+                                                }
+                                            }
+
+                                            if !chunk_text.is_empty() {
+                                                return Some((
+                                                    Ok(chunk_text),
+                                                    (byte_stream, buffer),
+                                                ));
                                             }
                                         }
                                     }
@@ -760,7 +785,10 @@ impl AgentModel for GeminiModel {
                         Ok(None) => return None,
                         Err(e) => {
                             return Some((
-                                Err(AgentError(format!("Stream error: {}", e))),
+                                Err(AgentError::new(
+                                    AgentErrorCode::NetworkError,
+                                    format!("Stream error: {}", e),
+                                )),
                                 (byte_stream, buffer),
                             ));
                         }

@@ -2,6 +2,9 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub mod insight_synthesizer;
+pub mod tool;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TrajectoryStep {
     Thought {

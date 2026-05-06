@@ -261,30 +261,58 @@ async fn main() -> Result<()> {
             let cron_manager =
                 Arc::new(pharmakon_core::automation::cron::CronManager::new().await?);
 
-            let weaver_db_path = home.join(".pharmakon").join("memory_weaver.db");
-            let weaver = Arc::new(
-                pharmakon_memory::weaver::MemoryWeaver::new(weaver_db_path.to_str().unwrap())
-                    .await?,
+            let pharmakon_dir = home.join(".pharmakon");
+            if !pharmakon_dir.exists() {
+                std::fs::create_dir_all(&pharmakon_dir)?;
+            }
+
+            let nexus_db_path = pharmakon_dir.join("knowledge_nexus");
+            let graph_db_path = pharmakon_dir.join("knowledge_graph.db");
+            let nexus = Arc::new(
+                pharmakon_memory::weaver::KnowledgeNexus::new(
+                    nexus_db_path.to_str().unwrap(),
+                    graph_db_path.to_str().unwrap(),
+                )
+                .await?,
             );
             let fact_memory =
                 Arc::new(Mutex::new(pharmakon_memory::fact_memory::FactMemory::new()?));
 
             let mut agent = Agent::new(model_obj, "gateway".to_string())
                 .with_store(session_store.clone())
-                .with_memory_weaver(weaver)
+                .with_knowledge_nexus(nexus)
                 .with_fact_memory(fact_memory)
                 .with_fallback_models(config.default_agent.fallback_models.clone());
-            agent.set_soul(soul);
-            agent.add_tool(Arc::new(ShellTool));
-            agent.add_tool(Arc::new(FileReadTool));
-            agent.add_tool(Arc::new(WebFetchTool::new()));
-            agent.add_tool(Arc::new(BraveSearchTool::new("".to_string())));
+            agent.set_soul(soul).await;
+            agent.add_tool(Arc::new(ShellTool)).await;
+            agent.add_tool(Arc::new(FileReadTool)).await;
+            agent.add_tool(Arc::new(WebFetchTool::new())).await;
+            agent
+                .add_tool(Arc::new(BraveSearchTool::new("".to_string())))
+                .await;
+
+            // The agent needs to be Arc-ed to have setup_autonomous_tools called,
+            // then we unwrap it to be put into the Mutex for the gateway.
+            let agent_arc_for_setup = Arc::new(agent);
+            agent_arc_for_setup.setup_autonomous_tools().await;
+            let agent = match Arc::try_unwrap(agent_arc_for_setup) {
+                Ok(agent) => agent,
+                Err(_) => panic!("Failed to unwrap Arc<Agent>; should have been single owner"),
+            };
 
             let agent_arc = Arc::new(Mutex::new(agent));
-            // TODO: Figure out how to call setup_autonomous_tools on a Mutex-wrapped agent
 
-            let mut gateway =
-                pharmakon_gateway::Gateway::new(actual_port, agent_arc, cron_manager, config);
+            let mut gateway = pharmakon_gateway::Gateway::new(
+                actual_port,
+                agent_arc.clone(),
+                cron_manager,
+                config,
+            );
+
+            // Start Heartbeat Manager (Autonomous Maintenance & Checks)
+            let heartbeat =
+                pharmakon_core::automation::heartbeat::HeartbeatManager::new(agent_arc.clone(), 60); // 1 hour intervals
+            heartbeat.start().await;
 
             // Add channels automatically based on available secrets
             if let Ok(token) = secret_store.get_secret("TELEGRAM_BOT_TOKEN") {
@@ -345,25 +373,31 @@ async fn main() -> Result<()> {
             let model_obj = ModelRegistry::get_model(&model_id)
                 .expect("Selected model not available. Check your API keys.");
 
-            let weaver_db_path = home.join(".pharmakon").join("memory_weaver.db");
-            let weaver = Arc::new(
-                pharmakon_memory::weaver::MemoryWeaver::new(weaver_db_path.to_str().unwrap())
-                    .await?,
+            let nexus_db_path = home.join(".pharmakon").join("knowledge_nexus.db");
+            let graph_db_path = home.join(".pharmakon").join("knowledge_graph.db");
+            let nexus = Arc::new(
+                pharmakon_memory::weaver::KnowledgeNexus::new(
+                    nexus_db_path.to_str().unwrap(),
+                    graph_db_path.to_str().unwrap(),
+                )
+                .await?,
             );
             let fact_memory =
                 Arc::new(Mutex::new(pharmakon_memory::fact_memory::FactMemory::new()?));
 
             let mut agent = Agent::new(model_obj, session.clone())
                 .with_store(session_store.clone())
-                .with_memory_weaver(weaver)
+                .with_knowledge_nexus(nexus)
                 .with_fact_memory(fact_memory)
                 .with_fallback_models(config.default_agent.fallback_models.clone());
 
-            agent.set_soul(soul);
-            agent.add_tool(Arc::new(ShellTool));
-            agent.add_tool(Arc::new(FileReadTool));
-            agent.add_tool(Arc::new(WebFetchTool::new()));
-            agent.add_tool(Arc::new(BraveSearchTool::new("".to_string())));
+            agent.set_soul(soul).await;
+            agent.add_tool(Arc::new(ShellTool)).await;
+            agent.add_tool(Arc::new(FileReadTool)).await;
+            agent.add_tool(Arc::new(WebFetchTool::new())).await;
+            agent
+                .add_tool(Arc::new(BraveSearchTool::new("".to_string())))
+                .await;
 
             // Add SelfDiagnosticTool to satisfy agent's soul instructions
             struct SelfDiagnosticTool;
@@ -382,10 +416,10 @@ async fn main() -> Result<()> {
                     Ok("System: Healthy. CPU Usage: 15%. Memory: 4.2GB/32GB. Latency: 42ms. All sub-agents online.".to_string())
                 }
             }
-            agent.add_tool(Arc::new(SelfDiagnosticTool));
+            agent.add_tool(Arc::new(SelfDiagnosticTool)).await;
 
             let agent_arc = Arc::new(agent);
-            agent_arc.setup_autonomous_tools();
+            agent_arc.setup_autonomous_tools().await;
 
             match agent_arc.chat(&message).await {
                 Ok(response) => {

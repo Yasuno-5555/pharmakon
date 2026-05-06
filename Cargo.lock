@@ -8164,6 +8164,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "serde_json",
+ "sysinfo 0.38.4",
  "tokio",
  "tokio-cron-scheduler",
  "tower-http",
@@ -8261,6 +8262,7 @@ dependencies = [
  "dirs",
  "futures",
  "headless_chrome",
+ "ignore",
  "image 0.25.10",
  "lazy_static",
  "log",
@@ -8274,6 +8276,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tree-sitter",
+ "tree-sitter-rust",
  "uuid",
  "wasmtime",
 ]
@@ -11879,6 +11883,26 @@ dependencies = [
  "png 0.17.16",
  "thiserror 2.0.18",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "tree-sitter"
+version = "0.22.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df7cc499ceadd4dcdf7ec6d4cbc34ece92c3fa07821e287aedecd4416c516dca"
+dependencies = [
+ "cc",
+ "regex",
+]
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "277690f420bf90741dea984f3da038ace46c4fe6047cba57a66822226cde1c93"
+dependencies = [
+ "cc",
+ "tree-sitter",
 ]
 
 [[package]]

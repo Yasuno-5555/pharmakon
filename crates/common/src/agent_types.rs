@@ -4,6 +4,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AgentErrorCode {
+    RateLimit,
+    InvalidRequest,
+    AuthenticationFailed,
+    ContextExceeded,
+    ModelError,
+    ToolNotFound,
+    ToolExecutionFailed,
+    HangDetected,
+    NetworkError,
+    InternalError,
+    EnvironmentError,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentError(pub String);
 
@@ -16,12 +31,40 @@ impl std::fmt::Display for AgentError {
 impl std::error::Error for AgentError {}
 
 impl AgentError {
+    pub fn new(code: AgentErrorCode, message: impl Into<String>) -> Self {
+        Self(format!("[{:?}] {}", code, message.into()))
+    }
+
+    pub fn code(&self) -> AgentErrorCode {
+        if self.0.starts_with("[RateLimit]") {
+            AgentErrorCode::RateLimit
+        } else if self.0.starts_with("[InvalidRequest]") {
+            AgentErrorCode::InvalidRequest
+        } else if self.0.starts_with("[AuthenticationFailed]") {
+            AgentErrorCode::AuthenticationFailed
+        } else if self.0.starts_with("[ContextExceeded]") {
+            AgentErrorCode::ContextExceeded
+        } else if self.0.starts_with("[ModelError]") {
+            AgentErrorCode::ModelError
+        } else if self.0.starts_with("[ToolNotFound]") {
+            AgentErrorCode::ToolNotFound
+        } else if self.0.starts_with("[ToolExecutionFailed]") {
+            AgentErrorCode::ToolExecutionFailed
+        } else if self.0.starts_with("[HangDetected]") {
+            AgentErrorCode::HangDetected
+        } else if self.0.starts_with("[NetworkError]") {
+            AgentErrorCode::NetworkError
+        } else if self.0.starts_with("[EnvironmentError]") {
+            AgentErrorCode::EnvironmentError
+        } else if self.0.contains("429") || self.0.to_lowercase().contains("rate limit") {
+            AgentErrorCode::RateLimit
+        } else {
+            AgentErrorCode::InternalError
+        }
+    }
+
     pub fn is_rate_limit(&self) -> bool {
-        let msg = self.0.to_lowercase();
-        msg.contains("429")
-            || msg.contains("too many requests")
-            || msg.contains("quota")
-            || msg.contains("rate limit")
+        self.code() == AgentErrorCode::RateLimit
     }
 }
 
@@ -198,8 +241,9 @@ pub trait Tool: Send + Sync {
     }
 }
 
+#[async_trait]
 pub trait ToolRegistry: Send + Sync {
-    fn add_tool(&self, tool: Arc<dyn Tool>);
+    async fn add_tool(&self, tool: Arc<dyn Tool>);
 }
 
 #[async_trait]

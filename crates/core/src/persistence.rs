@@ -136,6 +136,18 @@ impl DbSessionStore {
         .execute(&pool)
         .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS research_cache (
+                url TEXT PRIMARY KEY,
+                summary TEXT NOT NULL,
+                depth TEXT NOT NULL,
+                metadata TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
         Ok(Self { pool })
     }
 
@@ -166,7 +178,7 @@ impl DbSessionStore {
 
     pub async fn load_history(&self, session_id: &str) -> Result<Vec<Message>> {
         let rows = sqlx::query_as::<_, MessageRow>(
-            "SELECT role, content, tool_calls, tool_call_id FROM messages 
+            "SELECT role, content, tool_calls, tool_call_id FROM messages
              WHERE session_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id)
@@ -211,8 +223,8 @@ impl DbSessionStore {
     pub async fn search_sessions(&self, query: &str) -> Result<Vec<String>> {
         let sql_query = format!("%{}%", query);
         let rows = sqlx::query_as::<_, (String,)>(
-            "SELECT DISTINCT session_id FROM messages 
-             WHERE session_id LIKE ? OR content LIKE ? 
+            "SELECT DISTINCT session_id FROM messages
+             WHERE session_id LIKE ? OR content LIKE ?
              ORDER BY created_at DESC",
         )
         .bind(&sql_query)
@@ -386,7 +398,7 @@ impl DbSessionStore {
         // Simple keyword search for now, will be replaced by vector search
         let search_query = format!("%{}%", query);
         let rows = sqlx::query_as::<_, (String, Option<String>, i32, String)>(
-            "SELECT content, source, importance, metadata FROM facts 
+            "SELECT content, source, importance, metadata FROM facts
              WHERE content LIKE ? OR source LIKE ? ORDER BY importance DESC, created_at DESC",
         )
         .bind(&search_query)
@@ -493,5 +505,61 @@ impl DbSessionStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+
+    pub async fn save_research_cache(
+        &self,
+        url: &str,
+        summary: &str,
+        depth: &str,
+        metadata: &Value,
+    ) -> Result<()> {
+        let metadata_json = serde_json::to_string(metadata)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO research_cache (url, summary, depth, metadata) VALUES (?, ?, ?, ?)"
+        )
+        .bind(url)
+        .bind(summary)
+        .bind(depth)
+        .bind(metadata_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_research_cache(&self, url: &str) -> Result<Option<(String, String, Value)>> {
+        let row = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT summary, depth, metadata FROM research_cache WHERE url = ?",
+        )
+        .bind(url)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some((summary, depth, meta)) = row {
+            let metadata = serde_json::from_str::<Value>(&meta).unwrap_or_default();
+            Ok(Some((summary, depth, metadata)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+#[async_trait::async_trait]
+impl pharmakon_common::ResearchPersistence for DbSessionStore {
+    async fn get_research_cache(
+        &self,
+        url: &str,
+    ) -> anyhow::Result<Option<(String, String, Value)>> {
+        self.get_research_cache(url).await
+    }
+
+    async fn save_research_cache(
+        &self,
+        url: &str,
+        content: &str,
+        depth: &str,
+        metadata: &Value,
+    ) -> anyhow::Result<()> {
+        self.save_research_cache(url, content, depth, metadata)
+            .await
     }
 }

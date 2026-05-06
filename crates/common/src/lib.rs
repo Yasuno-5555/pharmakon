@@ -230,9 +230,6 @@ pub enum Event {
     AgentInsight {
         insight: String,
     },
-    McpStats {
-        stats: Vec<McpToolStat>,
-    },
     VisionUpdate {
         frames: Vec<VisionFrameInfo>,
     },
@@ -248,13 +245,58 @@ pub enum Event {
     HistoryList {
         messages: Vec<Message>,
     },
+    AgentHangDetected {
+        reason: String,
+    },
+    SystemLog {
+        level: String,
+        message: String,
+    },
+    TokenUsageUpdate {
+        total_tokens: u64,
+        total_cost: f64,
+    },
+    ToolList {
+        tools: Vec<ToolInfo>,
+    },
+    UsageHistory {
+        history: Vec<UsageEntry>,
+    },
+    McpStats {
+        stats: Vec<McpStatEntry>,
+    },
+    ResearchNotebookUpdate {
+        notebook: ResearchNotebook,
+    },
+    SettingsUpdate {
+        settings: serde_json::Value,
+    },
+    ForensicLog {
+        id: String,
+        action: String,
+        hypothesis: String,
+        observation: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct McpToolStat {
+pub struct ToolInfo {
     pub name: String,
-    pub avg_latency_ms: u64,
-    pub call_count: u64,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UsageEntry {
+    pub timestamp: String,
+    pub tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct McpStatEntry {
+    pub name: String,
+    pub call_count: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -314,6 +356,13 @@ pub enum Request {
     SearchSessions {
         query: String,
     },
+    GetTools,
+    GetUsageHistory,
+    GetResearchNotebook,
+    GetSettings,
+    UpdateSettings {
+        settings: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -342,5 +391,78 @@ pub trait SoulManager: Send + Sync {
         traits: Option<Vec<String>>,
         prompt: Option<String>,
         style: Option<String>,
+    ) -> anyhow::Result<()>;
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ResearchDepth {
+    Skim,    // Title + Snippet (~100 tokens)
+    Summary, // Extracted key points (~300 tokens)
+    Deep,    // Full text / RAG blocks (~2000+ tokens)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Fact {
+    pub content: String,
+    pub source_url: String,
+    pub confidence: f32,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ResearchNotebook {
+    pub current_goal: String,
+    pub verified_facts: Vec<Fact>,
+    pub pending_questions: Vec<String>,
+    pub visited_urls: HashMap<String, ResearchDepth>,
+    pub dead_ends: Vec<String>,
+    pub research_tree: HashMap<String, Vec<String>>, // Query -> List of URLs
+}
+
+impl ResearchNotebook {
+    pub fn new(goal: &str) -> Self {
+        Self {
+            current_goal: goal.to_string(),
+            ..Default::default()
+        }
+    }
+
+    pub fn to_summary_string(&self) -> String {
+        let mut s = format!("## Research Goal: {}\n\n", self.current_goal);
+
+        s.push_str("### Verified Facts:\n");
+        for fact in &self.verified_facts {
+            s.push_str(&format!(
+                "- {} (Source: {})\n",
+                fact.content, fact.source_url
+            ));
+        }
+
+        s.push_str("\n### Pending Questions:\n");
+        for q in &self.pending_questions {
+            s.push_str(&format!("- {}\n", q));
+        }
+
+        s.push_str("\n### Dead Ends:\n");
+        for d in &self.dead_ends {
+            s.push_str(&format!("- {}\n", d));
+        }
+
+        s
+    }
+}
+
+#[async_trait]
+pub trait ResearchPersistence: Send + Sync {
+    async fn get_research_cache(
+        &self,
+        url: &str,
+    ) -> anyhow::Result<Option<(String, String, serde_json::Value)>>;
+    async fn save_research_cache(
+        &self,
+        url: &str,
+        content: &str,
+        depth: &str,
+        metadata: &serde_json::Value,
     ) -> anyhow::Result<()>;
 }
