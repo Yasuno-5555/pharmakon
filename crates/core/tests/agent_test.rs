@@ -53,7 +53,7 @@ async fn test_agent_chat_basic() {
 
     let response = agent.chat("hello agent").await.unwrap();
     assert!(response.contains("AI assistant"));
-    assert_eq!(agent.history.len(), 2); // User + Assistant
+    assert_eq!(agent.history.lock().await.len(), 2); // User + Assistant
 }
 
 #[tokio::test]
@@ -62,8 +62,8 @@ async fn test_agent_reset_history() {
     let mut agent = Agent::new(model, "test-session".to_string());
 
     agent.chat("msg 1").await.unwrap();
-    assert_eq!(agent.history.len(), 2);
+    assert_eq!(agent.history.lock().await.len(), 2);
 
-    agent.reset_history();
-    assert_eq!(agent.history.len(), 0);
+    agent.reset_history().await;
+    assert_eq!(agent.history.lock().await.len(), 0);
 }

@@ -138,6 +138,7 @@ impl AgentModel for AnthropicModel {
                             function: FunctionCall {
                                 name: part["name"].as_str().unwrap_or_default().to_string(),
                                 arguments: part["input"].to_string(),
+                                thought_signature: None,
                             },
                         });
                     }

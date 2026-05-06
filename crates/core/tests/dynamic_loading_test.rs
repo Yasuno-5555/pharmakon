@@ -60,7 +60,7 @@ async fn test_dynamic_agent_loading() {
     );
     let default_model = create_default_model();
 
-    let mut router = AgentRouter::new(default_model, store, config, None);
+    let mut router = AgentRouter::new(default_model, store, config, None, None);
 
     // 3. Test the Gemini agent
     let gemini_agent_handle = router
@@ -71,14 +71,14 @@ async fn test_dynamic_agent_loading() {
 
     // Check model
     assert!(
-        gemini_agent.model.name().contains("gemini-2.5-flash"),
+        gemini_agent.model.lock().await.name().contains("gemini-2.5-flash"),
         "Gemini agent should have the specified Gemini model. Found: {}",
-        gemini_agent.model.name()
+        gemini_agent.model.lock().await.name()
     );
 
     // Check tools
-    let gemini_tools: Vec<String> = gemini_agent
-        .tools
+    let gemini_tools_guard = gemini_agent.tools.lock().await;
+    let gemini_tools: Vec<String> = gemini_tools_guard
         .iter()
         .map(|t| t.name().to_string())
         .collect();
@@ -104,14 +104,14 @@ async fn test_dynamic_agent_loading() {
 
     // Check model (should be the default model)
     assert!(
-        openai_agent.model.name().contains("gemini-2.5-flash"),
+        openai_agent.model.lock().await.name().contains("gemini-2.5-flash"),
         "OpenAI agent should fall back to the default Gemini model. Found: {}",
-        openai_agent.model.name()
+        openai_agent.model.lock().await.name()
     );
 
     // Check tools
-    let openai_tools: Vec<String> = openai_agent
-        .tools
+    let openai_tools_guard = openai_agent.tools.lock().await;
+    let openai_tools: Vec<String> = openai_tools_guard
         .iter()
         .map(|t| t.name().to_string())
         .collect();

@@ -1,3 +1,4 @@
+use pharmakon_common::ToolRegistry;
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{
     AgentModel, AgentResult, CompletionRequest, CompletionResponse, FunctionCall, MessageContent,
@@ -57,6 +58,7 @@ impl AgentModel for ParallelMockModel {
                         function: FunctionCall {
                             name: "get_weather".to_string(),
                             arguments: json!({ "location": "Tokyo" }).to_string(),
+                            thought_signature: None,
                         },
                     },
                     ToolCall {
@@ -65,6 +67,7 @@ impl AgentModel for ParallelMockModel {
                         function: FunctionCall {
                             name: "get_weather".to_string(),
                             arguments: json!({ "location": "Osaka" }).to_string(),
+                            thought_signature: None,
                         },
                     },
                 ]),
@@ -137,6 +140,7 @@ async fn test_parallel_tool_execution() {
     // Check history for parallel tool calls
     // It should have: User, Assistant (2 calls), Tool (Tokyo), Tool (Osaka), Assistant (Final)
     // Wait, since we join_all, the order of tool results might vary, but they should both be there.
-    let tool_results: Vec<_> = agent.history.iter().filter(|m| m.role == "tool").collect();
+    let history = agent.history.lock().await;
+    let tool_results: Vec<_> = history.iter().filter(|m| m.role == "tool").collect();
     assert_eq!(tool_results.len(), 2);
 }

@@ -13,7 +13,7 @@ async fn setup_test_router(config: Config) -> AgentRouter {
     );
     let default_model = Arc::new(MockModel);
 
-    AgentRouter::new(default_model, store, config, None)
+    AgentRouter::new(default_model, store, config, None, None)
 }
 
 #[tokio::test]
@@ -34,7 +34,7 @@ async fn test_router_fallback_to_default_model() {
 
     // The agent's model should be the default MockModel, not the non-existent one.
     assert_eq!(
-        agent.model.name(),
+        agent.model.lock().await.name(),
         "mock-model",
         "Model should fall back to default"
     );
@@ -62,7 +62,7 @@ async fn test_router_tool_instantiation_failure() {
 
     // No tools should have been added because they all failed to instantiate.
     assert!(
-        agent.tools.is_empty(),
+        agent.tools.lock().await.is_empty(),
         "No tools should be added if instantiation fails"
     );
 }

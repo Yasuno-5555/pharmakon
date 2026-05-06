@@ -369,7 +369,11 @@ async fn main() -> Result<()> {
                 }
             }
 
-            let model_id = format!("{}/{}", actual_provider, actual_model);
+            let model_id = if actual_model.contains('/') {
+                actual_model.clone()
+            } else {
+                format!("{}/{}", actual_provider, actual_model)
+            };
             let model_obj = ModelRegistry::get_model(&model_id)
                 .expect("Selected model not available. Check your API keys.");
 

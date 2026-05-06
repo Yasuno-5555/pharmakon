@@ -1,3 +1,4 @@
+use pharmakon_common::ToolRegistry;
 use async_trait::async_trait;
 use pharmakon_common::Config;
 use pharmakon_core::agent::Agent;
@@ -65,7 +66,7 @@ async fn setup_test_agent_with_model(
 
     // Use model, store, and config directly
     let router = Box::leak(Box::new(tokio::sync::Mutex::new(
-        pharmakon_core::agent_router::AgentRouter::new(model, store, config, None),
+        pharmakon_core::agent_router::AgentRouter::new(model, store, config, None, None),
     )));
 
     let agent_handle = router

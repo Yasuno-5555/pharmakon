@@ -159,6 +159,8 @@ pub struct ToolCall {
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

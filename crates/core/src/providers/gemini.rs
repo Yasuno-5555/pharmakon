@@ -88,6 +88,7 @@ struct GeminiFunction {
 struct GeminiContent {
     #[serde(skip_serializing_if = "String::is_empty")]
     role: String,
+    #[serde(default)]
     parts: Vec<GeminiPart>,
 }
 
@@ -127,6 +128,8 @@ struct GeminiInlineData {
 struct GeminiFunctionCall {
     name: String,
     args: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thought_signature: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -254,6 +257,7 @@ impl GeminiModel {
                             args: serde_json::from_str(&tc.function.arguments).unwrap_or_else(
                                 |_| serde_json::json!({ "raw_args": tc.function.arguments }),
                             ),
+                            thought_signature: tc.function.thought_signature.clone(),
                         }),
                         function_response: None,
                         thought: None,
@@ -575,6 +579,7 @@ impl AgentModel for GeminiModel {
                     function: FunctionCall {
                         name: fc.name.clone(),
                         arguments: fc.args.to_string(),
+                        thought_signature: fc.thought_signature.clone(),
                     },
                 });
             }
@@ -706,7 +711,7 @@ impl AgentModel for GeminiModel {
         };
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+            "https://generativelanguage.googleapis.com/v1/models/{}:streamGenerateContent?alt=sse",
             self.model_id
         );
         log::debug!("Gemini Streaming API URL: {}", url);

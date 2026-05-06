@@ -11,9 +11,10 @@ async fn test_agent_basic_chat() {
 
     assert!(response.contains("Mock stream response"));
     // History should have user message and assistant message
-    assert_eq!(agent.history.len(), 2);
-    assert_eq!(agent.history[0].role, "user");
-    assert_eq!(agent.history[1].role, "assistant");
+    let history = agent.history.lock().await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
 }
 
 #[tokio::test]
@@ -22,8 +23,8 @@ async fn test_agent_history_reset() {
     let mut agent = Agent::new(model, "test-session".to_string());
 
     agent.chat("Message 1").await.unwrap();
-    assert_eq!(agent.history.len(), 2);
+    assert_eq!(agent.history.lock().await.len(), 2);
 
-    agent.reset_history();
-    assert_eq!(agent.history.len(), 0);
+    agent.reset_history().await;
+    assert_eq!(agent.history.lock().await.len(), 0);
 }

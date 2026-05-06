@@ -1,3 +1,4 @@
+use pharmakon_common::ToolRegistry;
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{
     AgentModel, AgentResult, CompletionRequest, CompletionResponse, FunctionCall, MessageContent,
@@ -35,6 +36,7 @@ impl AgentModel for MultiAgentMockModel {
                             "message": "Find latest AI trends for 2024."
                         })
                         .to_string(),
+                        thought_signature: None,
                     },
                 }]),
                 usage: None,
@@ -54,6 +56,7 @@ impl AgentModel for MultiAgentMockModel {
                             "message": "AI trends found: Generative AI is the main focus."
                         })
                         .to_string(),
+                        thought_signature: None,
                     },
                 }]),
                 usage: None,
@@ -72,6 +75,7 @@ impl AgentModel for MultiAgentMockModel {
                             "answer": "The top AI trend for 2024 is Generative AI."
                         })
                         .to_string(),
+                        thought_signature: None,
                     },
                 }]),
                 usage: None,

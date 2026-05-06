@@ -72,6 +72,7 @@ impl AgentModel for GroqModel {
                                 .as_str()
                                 .unwrap_or_default()
                                 .to_string(),
+                            thought_signature: None,
                         },
                     })
                     .collect(),

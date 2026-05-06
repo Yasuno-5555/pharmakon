@@ -242,6 +242,7 @@ impl AgentModel for OpenAIModel {
                         function: FunctionCall {
                             name: c.function.name.clone(),
                             arguments: c.function.arguments.clone(),
+                            thought_signature: None,
                         },
                     })
                     .collect()
