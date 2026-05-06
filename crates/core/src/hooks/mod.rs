@@ -81,6 +81,30 @@ impl HookRegistry {
         Ok(())
     }
 
+    pub async fn trigger_before_tool_call(&self, tool_name: &str, args: &Value) -> Result<()> {
+        let hooks = self.hooks.lock().await;
+        for hook in hooks.iter() {
+            hook.before_tool_call(tool_name, args).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn trigger_after_tool_call(&self, tool_name: &str, result: &str) -> Result<()> {
+        let hooks = self.hooks.lock().await;
+        for hook in hooks.iter() {
+            hook.after_tool_call(tool_name, result).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn trigger_context_recovered(&self, context: &str) -> Result<()> {
+        let hooks = self.hooks.lock().await;
+        for hook in hooks.iter() {
+            hook.on_context_recovered(context).await?;
+        }
+        Ok(())
+    }
+
     pub async fn trigger_message_received(&self, message: &Message) -> Result<()> {
         let hooks = self.hooks.lock().await;
         for hook in hooks.iter() {

@@ -1,8 +1,4 @@
-use crate::agent::Agent;
-use crate::model::Message;
-use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use pharmakon_common::{Message, MessageContent};
 
 pub struct Crestodian;
 
@@ -22,7 +18,7 @@ impl Crestodian {
 
         Message {
             role: "system".to_string(),
-            content: Some(::pharmakon_common::MessageContent::Text(rescue_prompt)),
+            content: Some(MessageContent::Text(rescue_prompt)),
             ..Default::default()
         }
     }

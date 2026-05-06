@@ -43,12 +43,21 @@ impl AgentSpawner for SwarmManager {
             )
         };
 
+        let mut sub_agent_tools = {
+            let t = tools.lock().await;
+            t.clone()
+        };
+
         // Remove tools that might be dangerous for sub-agents or cause infinite recursion
-        tools.retain(|t| t.name() != "spawn_sub_agent" && t.name() != "run_shell_command");
+        sub_agent_tools.retain(|t| t.name() != "spawn_sub_agent" && t.name() != "run_shell_command");
 
         let session_id = format!("swarm-depth{}-{}", depth, rand::random::<u32>());
 
-        let mut sub_agent = Agent::new(model, session_id.clone());
+        let inner_model = {
+            let m = model.lock().await;
+            (*m).clone()
+        };
+        let mut sub_agent = Agent::new(inner_model, session_id.clone());
         if let Some(store) = session_store {
             sub_agent = sub_agent.with_store(store);
         }
@@ -60,7 +69,7 @@ impl AgentSpawner for SwarmManager {
         }
 
         sub_agent.fact_memory = fact_memory;
-        sub_agent.tools = tools;
+        sub_agent.tools = Arc::new(Mutex::new(sub_agent_tools));
 
         // Apply specialized Soul based on role
         let mut soul = crate::soul::Soul::default_soul();

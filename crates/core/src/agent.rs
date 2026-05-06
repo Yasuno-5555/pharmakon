@@ -492,7 +492,7 @@ impl Agent {
                 response_result = if tools_count == 0 {
                     // For streaming, we don't currently do automatic fallback inside the stream,
                     // but we can catch initial setup errors.
-                    match target_model.stream_complete(request.clone()).await {
+                    match target_model.as_ref().stream_complete(request.clone()).await {
                         Ok(mut stream) => {
                             let mut full_content = String::new();
                             use futures::StreamExt;
@@ -535,7 +535,7 @@ impl Agent {
                         Err(e) => Err(anyhow::Error::new(e)),
                     }
                 } else {
-                    match target_model.complete(request.clone()).await {
+                    match target_model.as_ref().complete(request.clone()).await {
                         Ok(res) => {
                             self.health_monitor.record_success(start.elapsed());
                             Ok(res)
@@ -958,7 +958,7 @@ impl Agent {
             (*m).clone()
         };
 
-        if let Ok(response) = target_model.complete(request).await {
+        if let Ok(response) = target_model.as_ref().complete(request).await {
             if let Some(content) = response.content {
                 let insight = content.to_string();
                 if !insight.contains("NO_INSIGHT") {
