@@ -1,16 +1,16 @@
 use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool};
-use pharmakon_memory::FactMemory;
+use pharmakon_memory::BeliefSystem;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct FactTool {
-    memory: Arc<Mutex<FactMemory>>,
+    memory: Arc<Mutex<BeliefSystem>>,
 }
 
 impl FactTool {
-    pub fn new(memory: Arc<Mutex<FactMemory>>) -> Self {
+    pub fn new(memory: Arc<Mutex<BeliefSystem>>) -> Self {
         Self { memory }
     }
 }
@@ -18,18 +18,18 @@ impl FactTool {
 #[async_trait]
 impl Tool for FactTool {
     fn name(&self) -> &str {
-        "manage_facts"
+        "manage_beliefs"
     }
     fn description(&self) -> &str {
-        "Store or retrieve facts about the user to remember them across sessions."
+        "Store or retrieve beliefs about the user or system to remember them across sessions."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "action": { "type": "string", "enum": ["set", "get_all"] },
-                "key": { "type": "string", "description": "The key of the fact (e.g., 'user_birthday')" },
-                "value": { "type": "string", "description": "The value of the fact" }
+                "action": { "type": "string", "enum": ["add", "get_all"] },
+                "claim": { "type": "string", "description": "The fact or belief to store" },
+                "confidence": { "type": "number", "description": "Confidence level (0.0 to 1.0)" }
             },
             "required": ["action"]
         })
@@ -42,27 +42,26 @@ impl Tool for FactTool {
         let mut memory = self.memory.lock().await;
 
         match action {
-            "set" => {
-                let key = args["key"]
+            "add" => {
+                let claim = args["claim"]
                     .as_str()
-                    .ok_or_else(|| AgentError("Missing key".to_string()))?;
-                let value = args["value"]
-                    .as_str()
-                    .ok_or_else(|| AgentError("Missing value".to_string()))?;
+                    .ok_or_else(|| AgentError("Missing claim".to_string()))?;
+                let confidence = args["confidence"].as_f64().unwrap_or(0.9) as f32;
+                
                 memory
-                    .set_fact(key, value, 1.0)
+                    .add_belief(claim, confidence, "user_interaction")
                     .map_err(|e| AgentError(e.to_string()))?;
-                Ok(format!("Fact '{}' saved.", key))
+                Ok(format!("Belief recorded: {}", claim))
             }
             "get_all" => {
-                let facts = memory.all_facts();
-                let output = facts
+                let beliefs = memory.all_beliefs();
+                let output = beliefs
                     .iter()
-                    .map(|f| format!("{}: {}", f.key, f.value))
+                    .map(|b| format!("[{:.2}] {}", b.confidence, b.claim))
                     .collect::<Vec<_>>()
                     .join("\n");
                 Ok(if output.is_empty() {
-                    "No facts found.".to_string()
+                    "No beliefs found.".to_string()
                 } else {
                     output
                 })

@@ -7,6 +7,11 @@
 
 ## 🚀 Key Features
 
+- **Autonomous Engineering OS**: Self-reflecting agent that learns from its own task trajectories and updates its own architectural rules (`PHARMAKON.md`).
+- **Unified Patching**: Precision code modification using standard unified diffs instead of full-file writes.
+- **Task Orchestration**: Advanced task tracking with dependency management and Mermaid-based visualization.
+- **Cost-Aware Routing**: Intent-based tool selection with token usage estimation and cost modeling.
+- **Epistemic Memory**: Contradiction-aware belief systems (Knowledge Nexus) with automated GC.
 - **Multi-Agent Teams**: Orchestrate specialized agents using the `Supervisor` for complex task decomposition.
 - **Dynamic Model Loading**: Load and switch LLM providers (OpenAI, Gemini, Anthropic, Ollama, etc.) on the fly with automatic fallback support.
 - **Blazing Fast Gateway**: Built with Axum and Tokio for high-concurrency event handling.

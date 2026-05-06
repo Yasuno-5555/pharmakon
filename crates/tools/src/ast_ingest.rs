@@ -107,9 +107,23 @@ impl Tool for ASTKnowledgeIngestTool {
         let code = fs::read_to_string(path)
             .map_err(|e| AgentError(format!("Failed to read file: {}", e)))?;
 
-        let blocks = self
-            .extract_blocks(&code)
-            .map_err(|e| AgentError(format!("AST extraction failed: {}", e)))?;
+        let blocks = match path.extension().and_then(|s| s.to_str()) {
+            Some("rs") => self
+                .extract_blocks(&code)
+                .map_err(|e| AgentError(format!("AST extraction failed: {}", e)))?,
+            _ => {
+                // Fallback for non-Rust files: Paragraph-based chunking
+                code.split("\n\n")
+                    .enumerate()
+                    .map(|(i, chunk)| KnowledgeBlock {
+                        name: format!("chunk_{}", i),
+                        kind: "text_block".to_string(),
+                        content: chunk.to_string(),
+                        range: 0..0, // Range not easily calculated here
+                    })
+                    .collect()
+            }
+        };
 
         let mut nexus_entries = Vec::new();
         let mut report = format!("Ingested {} blocks from {}:\n", blocks.len(), path_str);
@@ -117,7 +131,7 @@ impl Tool for ASTKnowledgeIngestTool {
         for block in blocks {
             let id = format!("{}:{}#{}", path_str, block.name, block.kind);
 
-            // 1. Vector Entry
+            // 1. Vector Entry (handled via remember_batch sync)
             nexus_entries.push((id.clone(), block.content.clone()));
 
             // 2. Graph Entry
@@ -127,8 +141,13 @@ impl Tool for ASTKnowledgeIngestTool {
                 .add_node(pharmakon_memory::graph::Node {
                     id: id.clone(),
                     label: format!("{}: {}", block.kind, block.name),
+                    node_type: format!("code_{}", block.kind),
+                    content: block.content.clone(),
                     summary: Some(format!("{} definition in {}", block.kind, path_str)),
                     embedding_id: Some(id.clone()),
+                    embedding_status: "PENDING".to_string(),
+                    access_count: 0,
+                    last_access_time: chrono::Utc::now().timestamp(),
                     properties: json!({
                         "file": path_str,
                         "kind": block.kind,
@@ -148,6 +167,7 @@ impl Tool for ASTKnowledgeIngestTool {
                     to_id: id.clone(),
                     relation: "contains".to_string(),
                     weight: 1.0,
+                    metadata: json!({}),
                 })
                 .await;
 
@@ -161,8 +181,13 @@ impl Tool for ASTKnowledgeIngestTool {
             .add_node(pharmakon_memory::graph::Node {
                 id: path_str.to_string(),
                 label: format!("file: {}", path_str),
+                node_type: "file".to_string(),
+                content: path_str.to_string(),
                 summary: Some(format!("Source file: {}", path_str)),
                 embedding_id: None,
+                embedding_status: "COMPLETED".to_string(), // File names don't necessarily need embedding
+                access_count: 0,
+                last_access_time: chrono::Utc::now().timestamp(),
                 properties: json!({"type": "file"}),
             })
             .await;

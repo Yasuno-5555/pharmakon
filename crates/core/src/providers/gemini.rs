@@ -147,13 +147,15 @@ struct GeminiResponse {
 
 #[derive(Deserialize)]
 struct Candidate {
-    content: GeminiContent,
+    content: Option<GeminiContent>,
     #[allow(dead_code)]
     #[serde(rename = "finish_reason", alias = "finishReason")]
     finish_reason: Option<String>,
     #[allow(dead_code)]
     #[serde(rename = "safety_ratings", alias = "safetyRatings")]
     safety_ratings: Option<Vec<SafetyRating>>,
+    #[serde(rename = "grounding_metadata", alias = "groundingMetadata")]
+    grounding_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -382,26 +384,17 @@ impl AgentModel for GeminiModel {
                     });
                 }
 
-                if tools.iter().any(|t| t.function.name == "google_search") && !has_other_functions
-                {
-                    if self.model_id.contains("1.5") {
-                        gemini_tools.push(GeminiTool {
-                            function_declarations: None,
-                            google_search: None,
-                            google_search_retrieval: Some(serde_json::json!({
-                                "dynamic_retrieval_config": {
-                                    "mode": "MODE_DYNAMIC",
-                                    "dynamic_threshold": 0.3
-                                }
-                            })),
-                        });
-                    } else {
-                        gemini_tools.push(GeminiTool {
-                            function_declarations: None,
-                            google_search: Some(serde_json::json!({})),
-                            google_search_retrieval: None,
-                        });
-                    }
+                if tools.iter().any(|t| t.function.name == "google_search" || t.function.name == "gemini_search") {
+                    gemini_tools.push(GeminiTool {
+                        function_declarations: None,
+                        google_search: None,
+                        google_search_retrieval: Some(serde_json::json!({
+                            "dynamic_retrieval_config": {
+                                "mode": "MODE_DYNAMIC",
+                                "dynamic_threshold": 0.3
+                            }
+                        })),
+                    });
                 }
 
                 gemini_tools
@@ -535,21 +528,31 @@ impl AgentModel for GeminiModel {
         let mut content = None;
         let mut tool_calls = Vec::new();
 
-        for (i, part) in candidate.content.parts.iter().enumerate() {
-            log::info!(
-                "Processing part {}: text={}, function_call={}, function_response={}, inline_data={}",
-                i,
-                part.text.is_some(),
-                part.function_call.is_some(),
-                part.function_response.is_some(),
-                part.inline_data.is_some()
-            );
+        if let Some(cand_content) = &candidate.content {
+            if cand_content.parts.is_empty() {
+                 log::warn!("Gemini returned a candidate with no parts. Finish reason: {:?}", candidate.finish_reason);
+                 if let Some(reason) = &candidate.finish_reason {
+                     content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
+                 }
+            }
+
+            for (i, part) in cand_content.parts.iter().enumerate() {
+                log::info!(
+                    "Processing part {}: text={}, function_call={}, function_response={}, inline_data={}",
+                    i,
+                    part.text.is_some(),
+                    part.function_call.is_some(),
+                    part.function_response.is_some(),
+                    part.inline_data.is_some()
+                );
 
             if let Some(ref t) = part.text {
-                if content.is_none() {
-                    content = Some(MessageContent::Text(t.clone()));
-                } else if let Some(MessageContent::Text(ref mut existing)) = content {
-                    existing.push_str(t);
+                if !t.is_empty() {
+                    if content.is_none() {
+                        content = Some(MessageContent::Text(t.clone()));
+                    } else if let Some(MessageContent::Text(ref mut existing)) = content {
+                        existing.push_str(t);
+                    }
                 }
             }
             if let Some(ref th) = part.thought {
@@ -582,6 +585,7 @@ impl AgentModel for GeminiModel {
                         thought_signature: fc.thought_signature.clone(),
                     },
                 });
+            }
             }
         }
 
@@ -754,29 +758,25 @@ impl AgentModel for GeminiModel {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                                 if let Some(candidates) = json["candidates"].as_array() {
                                     if let Some(first_candidate) = candidates.get(0) {
-                                        if let Some(parts) =
-                                            first_candidate["content"]["parts"].as_array()
-                                        {
-                                            let mut chunk_text = String::new();
-                                            for part in parts {
+                                        let parts = first_candidate["content"]["parts"].as_array();
+                                        let mut chunk_text = String::new();
+                                        
+                                        if let Some(parts_vec) = parts {
+                                            for part in parts_vec {
                                                 if let Some(text) = part["text"].as_str() {
                                                     chunk_text.push_str(text);
                                                 }
                                                 if let Some(thought) = part["thought"].as_str() {
-                                                    // Wrap thought in tags for visibility
-                                                    chunk_text.push_str(&format!(
-                                                        "<think>{}</think>",
-                                                        thought
-                                                    ));
+                                                    chunk_text.push_str(&format!("<think>{}</think>", thought));
                                                 }
                                             }
+                                        }
 
-                                            if !chunk_text.is_empty() {
-                                                return Some((
-                                                    Ok(chunk_text),
-                                                    (byte_stream, buffer),
-                                                ));
-                                            }
+                                        if !chunk_text.is_empty() {
+                                            return Some((
+                                                Ok(chunk_text),
+                                                (byte_stream, buffer),
+                                            ));
                                         }
                                     }
                                 }

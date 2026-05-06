@@ -30,3 +30,4 @@ serde = { workspace = true, features = ["derive"] }
 tree-sitter = "0.22"
 tree-sitter-rust = "0.21"
 ignore = "0.4.25"
+diffy.workspace = true

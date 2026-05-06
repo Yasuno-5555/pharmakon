@@ -243,7 +243,8 @@ impl Tool for ViewFileTool {
             "properties": {
                 "path": { "type": "string", "description": "Path to file" },
                 "start_line": { "type": "integer", "default": 1 },
-                "end_line": { "type": "integer" }
+                "end_line": { "type": "integer" },
+                "view_skeleton": { "type": "boolean", "default": false, "description": "Only show signatures (structs/functions) to save tokens" }
             },
             "required": ["path"]
         })
@@ -260,13 +261,16 @@ impl Tool for ViewFileTool {
         let start = args["start_line"].as_u64().unwrap_or(1) as usize;
         let mut end = args["end_line"].as_u64().unwrap_or(start as u64 + 100) as usize;
 
-        // Token Safety: Limit to 500 lines max
-        if end > start + 500 {
-            end = start + 500;
-        }
+        let view_skeleton = args["view_skeleton"].as_bool().unwrap_or(false);
 
         let content =
             fs::read_to_string(path).map_err(|e| AgentError(format!("Read failed: {}", e)))?;
+
+        if view_skeleton {
+            let skeleton = pharmakon_common::CodeUtils::skeletonize_code(&content);
+            return Ok(format!("### Skeleton: {} (Full file: {} lines)\n\n{}\n\n[Note: This is a structural skeleton. Use view_file without view_skeleton to see full implementations.]", path, content.lines().count(), skeleton));
+        }
+
         let lines: Vec<&str> = content.lines().collect();
         let total = lines.len();
 

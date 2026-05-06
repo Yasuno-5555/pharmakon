@@ -72,7 +72,7 @@ impl AgentSpawner for SwarmManager {
             sub_agent = sub_agent.with_store(store);
         }
         if let Some(nexus) = knowledge_nexus {
-            sub_agent = sub_agent.with_knowledge_nexus(nexus);
+            sub_agent = sub_agent.with_knowledge_nexus(nexus).with_isolated_knowledge();
         }
         if let Some(search) = semantic_search {
             sub_agent = sub_agent.with_semantic_search(search);
@@ -92,14 +92,23 @@ impl AgentSpawner for SwarmManager {
 
         tokio::spawn(async move {
             log::info!("Sub-agent {} starting task...", session_id_clone);
-            let mut agent_lock = sub_agent_arc.lock().await;
-            match agent_lock.chat(&task_clone).await {
-                Ok(response) => {
+            let response = {
+                let mut agent_lock = sub_agent_arc.lock().await;
+                agent_lock.chat(&task_clone).await
+            };
+
+            match response {
+                Ok(res) => {
                     log::info!(
                         "Sub-agent {} completed task. Response snippet: {:.100}",
                         session_id_clone,
-                        response
+                        res
                     );
+                    // Commit isolated knowledge back to global store upon success
+                    let agent_lock = sub_agent_arc.lock().await;
+                    if let Err(e) = agent_lock.commit_knowledge().await {
+                        log::error!("Sub-agent {} failed to commit knowledge: {}", session_id_clone, e);
+                    }
                 }
                 Err(e) => {
                     log::error!("Sub-agent {} failed: {}", session_id_clone, e);

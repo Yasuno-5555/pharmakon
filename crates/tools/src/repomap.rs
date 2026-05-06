@@ -7,6 +7,12 @@ use tree_sitter::{Parser, Query, QueryCursor};
 
 pub struct RepoMapTool;
 
+impl RepoMapTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 #[async_trait]
 impl Tool for RepoMapTool {
     fn name(&self) -> &str {
@@ -37,18 +43,16 @@ impl Tool for RepoMapTool {
             .git_ignore(true)
             .build();
 
-        for result in walker {
-            if let Ok(entry) = result {
-                let p = entry.path();
-                if p.is_file() && p.extension().map_or(false, |ext| ext == "rs") {
-                    if let Ok(symbols) = self.extract_symbols(p) {
-                        if !symbols.is_empty() {
-                            report.push_str(&format!("#### {}\n", p.display()));
-                            for sym in symbols {
-                                report.push_str(&format!("- {}\n", sym));
-                            }
-                            report.push_str("\n");
+        for entry in walker.flatten() {
+            let p = entry.path();
+            if p.is_file() && p.extension().is_some_and(|ext| ext == "rs") {
+                if let Ok(symbols) = self.extract_symbols(p) {
+                    if !symbols.is_empty() {
+                        report.push_str(&format!("#### {}\n", p.display()));
+                        for sym in symbols {
+                            report.push_str(&format!("- {}\n", sym));
                         }
+                        report.push('\n');
                     }
                 }
             }

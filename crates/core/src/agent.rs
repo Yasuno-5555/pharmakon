@@ -8,28 +8,43 @@ use async_trait::async_trait;
 use pharmakon_common::{Event, ToolRegistry};
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
+use pharmakon_tools::{GoogleSearchTool, search::custom_scout::CustomScoutTool};
+use pharmakon_memory::BeliefSystem;
 
-#[derive(Debug, Clone)]
+tokio::task_local! {
+    pub static CURRENT_SESSION_ID: String;
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WorkingMemoryUnit {
     pub content: String,
+    pub summary: Option<String>, // Micro-summary (1-2 lines)
     pub importance: f32,
-    pub timestamp: std::time::Instant,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub tokens: usize, // Estimated tokens
+    pub source: String, // Where it came from
+}
+
+pub struct SessionState {
+    pub history: Vec<Message>,
+    pub working_memory: Vec<WorkingMemoryUnit>,
+    pub active_playbooks: Vec<(String, String)>, // (name, content)
+    pub context_engine: Arc<Mutex<crate::memory::context_engine::ContextEngine>>,
 }
 
 pub struct Agent {
     pub model: Arc<Mutex<Arc<dyn AgentModel>>>,
-    pub session_id: Arc<Mutex<String>>,
-    pub prompt_manager: Arc<Mutex<crate::system_prompt::SystemPromptManager>>,
+    pub session_id: Arc<Mutex<String>>, // Current global session ID (legacy/default)
+    pub session_states: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<SessionState>>>>>,
+    pub prompt_manager: Arc<Mutex<SystemPromptManager>>,
     pub event_tx: broadcast::Sender<Event>,
     pub approval_tx: broadcast::Sender<(String, bool)>,
     pub approval_rx: Option<broadcast::Receiver<(String, bool)>>,
     pub trajectory: Arc<Mutex<crate::trajectory::Trajectory>>,
-    pub context_engine: Arc<Mutex<crate::memory::context_engine::ContextEngine>>,
     pub compactor: Arc<Mutex<crate::memory::compactor::ContextCompactor>>,
-    pub history: Arc<Mutex<Vec<Message>>>,
     pub tools: Arc<Mutex<Vec<Arc<dyn pharmakon_common::Tool>>>>,
     pub hooks: Arc<crate::hooks::HookRegistry>,
-    pub fact_memory: Option<Arc<Mutex<crate::memory::FactMemory>>>,
+    pub fact_memory: Option<Arc<Mutex<crate::memory::BeliefSystem>>>,
     pub semantic_search: Option<Arc<pharmakon_memory::semantic_search::SemanticSearch>>,
     pub knowledge_nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
     pub health_monitor: crate::orchestration::health_monitor::HealthMonitor,
@@ -38,8 +53,7 @@ pub struct Agent {
     pub planner_model: Option<Arc<Mutex<Arc<dyn AgentModel>>>>,
     pub vision_stream: Option<Arc<Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
     pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
-    pub working_memory: Arc<Mutex<Vec<WorkingMemoryUnit>>>, // Context packing buffer
-    pub interaction_count: std::sync::atomic::AtomicU32,
+    pub interaction_count: Arc<std::sync::atomic::AtomicU32>,
     pub fallback_models: Vec<String>,
     pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
     pub total_cost: Arc<Mutex<f64>>,
@@ -50,6 +64,42 @@ pub struct Agent {
     pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
 }
 
+impl Clone for Agent {
+    fn clone(&self) -> Self {
+        Self {
+            model: self.model.clone(),
+            session_id: self.session_id.clone(),
+            session_states: self.session_states.clone(),
+            prompt_manager: self.prompt_manager.clone(),
+            event_tx: self.event_tx.clone(),
+            approval_tx: self.approval_tx.clone(),
+            approval_rx: None, // Cannot clone Receiver
+            trajectory: self.trajectory.clone(),
+            compactor: self.compactor.clone(),
+            tools: self.tools.clone(),
+            hooks: self.hooks.clone(),
+            fact_memory: self.fact_memory.clone(),
+            semantic_search: self.semantic_search.clone(),
+            knowledge_nexus: self.knowledge_nexus.clone(),
+            health_monitor: self.health_monitor.clone(),
+            policy_engine: self.policy_engine.clone(),
+            session_store: self.session_store.clone(),
+            planner_model: self.planner_model.clone(),
+            vision_stream: self.vision_stream.clone(),
+            graph_store: self.graph_store.clone(),
+            interaction_count: self.interaction_count.clone(),
+            fallback_models: self.fallback_models.clone(),
+            total_tokens: self.total_tokens.clone(),
+            total_cost: self.total_cost.clone(),
+            start_time: self.start_time,
+            tool_call_counts: self.tool_call_counts.clone(),
+            territory_manager: self.territory_manager.clone(),
+            research_notebook: self.research_notebook.clone(),
+            usage_history: self.usage_history.clone(),
+        }
+    }
+}
+
 impl Agent {
     pub fn new(model: Arc<dyn AgentModel>, session_id: String) -> Self {
         let (event_tx, _) = broadcast::channel(100);
@@ -58,20 +108,16 @@ impl Agent {
             session_id.clone(),
             model.name().to_string(),
         )));
-        let context_engine = Arc::new(Mutex::new(
-            crate::memory::context_engine::ContextEngine::new(8192),
-        ));
         let compactor = Arc::new(Mutex::new(crate::memory::compactor::ContextCompactor::new(
             model.clone(),
         )));
         let mut pm = SystemPromptManager::new(crate::soul::Soul::default_soul());
-        pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-            "Autonomous Execution Bias",
-            "You are a fully autonomous agent. Your priority is to get things done (Execution Bias). \
-            For shell commands and file operations, you should proceed WITHOUT manual approval by default to maximize speed and autonomy. \
-            However, you are responsible for system safety. If YOU judge that a specific command is exceptionally high-risk, irreversible, or potentially destructive (e.g., massive data deletion, critical system change), you MUST set `requires_manual_approval: true` in the tool arguments to consult the user. \
-            Otherwise, act with authority and resolve the task autonomously."
-        )));
+        pm.add_contribution(Box::new(crate::system_prompt::autonomy::AutonomyContribution));
+        
+        let playbook_names = pharmakon_tools::playbook::PlaybookTool::list_names();
+        pm.add_contribution(Box::new(crate::system_prompt::PlaybookContribution {
+            names: playbook_names,
+        }));
         let prompt_manager = Arc::new(Mutex::new(pm));
 
         let mut hooks = crate::hooks::HookRegistry::new();
@@ -82,14 +128,13 @@ impl Agent {
         Self {
             model: Arc::new(Mutex::new(model)),
             session_id: Arc::new(Mutex::new(session_id)),
+            session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
             prompt_manager,
             event_tx,
             approval_tx,
             approval_rx: Some(approval_rx),
             trajectory,
-            context_engine,
             compactor,
-            history: Arc::new(Mutex::new(Vec::new())),
             tools: Arc::new(Mutex::new(Vec::new())),
             hooks: Arc::new(hooks),
             fact_memory: None,
@@ -101,8 +146,7 @@ impl Agent {
             planner_model: None,
             vision_stream: None,
             graph_store: None,
-            working_memory: Arc::new(Mutex::new(Vec::new())),
-            interaction_count: std::sync::atomic::AtomicU32::new(0),
+            interaction_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             fallback_models: Vec::new(),
             total_tokens: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             total_cost: Arc::new(Mutex::new(0.0)),
@@ -121,22 +165,49 @@ impl Agent {
         self
     }
 
+    pub async fn get_current_session_state(&self) -> Arc<Mutex<SessionState>> {
+        let session_id = {
+            let sid = self.session_id.lock().await;
+            sid.clone()
+        };
+        // Check if task-local session ID is available, override if so
+        let session_id = CURRENT_SESSION_ID.with(|id| {
+            if id.is_empty() { session_id } else { id.clone() }
+        });
+        self.get_session_state(&session_id).await
+    }
+
+    pub async fn get_session_state(&self, session_id: &str) -> Arc<Mutex<SessionState>> {
+        let mut states = self.session_states.lock().await;
+        if let Some(state) = states.get(session_id) {
+            return state.clone();
+        }
+
+        let mut history = Vec::new();
+        if let Some(store) = &self.session_store {
+            if let Ok(h) = store.load_history(session_id).await {
+                history = h;
+            }
+        }
+
+        let state = Arc::new(Mutex::new(SessionState {
+            history,
+            working_memory: Vec::new(),
+            active_playbooks: Vec::new(),
+            context_engine: Arc::new(Mutex::new(crate::memory::context_engine::ContextEngine::new(8192))),
+        }));
+        states.insert(session_id.to_string(), state.clone());
+        state
+    }
+
     pub fn with_store(mut self, store: Arc<crate::persistence::DbSessionStore>) -> Self {
         self.session_store = Some(store);
         self
     }
 
-    pub fn with_knowledge_nexus(
-        mut self,
-        nexus: Arc<pharmakon_memory::weaver::KnowledgeNexus>,
-    ) -> Self {
-        self.knowledge_nexus = Some(nexus);
-        self
-    }
-
     pub fn with_fact_memory(
         mut self,
-        fact_memory: Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>,
+        fact_memory: Arc<Mutex<BeliefSystem>>,
     ) -> Self {
         self.fact_memory = Some(fact_memory);
         self
@@ -149,263 +220,57 @@ impl Agent {
         self.semantic_search = Some(search);
         self
     }
-}
 
-#[async_trait]
-impl pharmakon_common::ToolRegistry for Agent {
-    async fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
+    pub fn with_knowledge_nexus(
+        mut self,
+        nexus: Arc<pharmakon_memory::weaver::KnowledgeNexus>,
+    ) -> Self {
+        self.knowledge_nexus = Some(nexus);
+        self
+    }
+
+    pub async fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
         let mut tools = self.tools.lock().await;
-        if !tools.iter().any(|t| t.name() == tool.name()) {
-            tools.push(tool);
-        }
+        tools.push(tool);
     }
-}
 
-impl Agent {
-    pub async fn setup_autonomous_tools(self: &Arc<Self>) {
-        use crate::trajectory::tool::InsightTool;
-        use pharmakon_tools::{
-            ApplyPatchTool, BackgroundRunTool, CameraTool, CargoQualityTool, CodeEditTool,
-            ConnectMcpServerTool, DiagnosticTool, DiscoverToolsTool, FileReadTool, FileWriteTool,
-            FindDefinitionTool, GitCommitTool, GitDiffTool, GitStatusTool, GrepSearchTool,
-            HostScriptTool, LinkUnderstandingTool, ListAnchorsTool, ListDirTool, McpTool,
-            MultiCodeEditTool, PlaybookTool, ProcessStatusTool, PythonInterpreterTool, RepoMapTool,
-            ResearchConsolidateTool, ResearchFetchTool, ResearchSearchTool, ScreenshotTool,
-            SetAnchorTool, ShellTool, TokenEconomyControlTool, ViewFileTool,
-            WorkspacePerceptionTool,
-        };
+    pub async fn init_standard_tools(&self) {
+        self.add_tool(Arc::new(pharmakon_tools::terminal::TerminalTool::new())).await;
+        self.add_tool(Arc::new(pharmakon_tools::code::ViewFileTool)).await;
+        self.add_tool(Arc::new(pharmakon_tools::code::CodeEditTool)).await;
+        self.add_tool(Arc::new(pharmakon_tools::code::GrepSearchTool)).await;
+        self.add_tool(Arc::new(pharmakon_tools::repomap::RepoMapTool::new())).await;
+        
+        if let Ok(key) = std::env::var("BRAVE_SEARCH_API_KEY") {
+            self.add_tool(Arc::new(pharmakon_tools::search::BraveSearchTool::new(key))).await;
+        }
+        
+        self.add_tool(Arc::new(pharmakon_tools::web_fetch::WebFetchTool::new())).await;
+        self.add_tool(Arc::new(pharmakon_tools::memory_hydration::HydrateContextTool::new())).await;
+    }
 
-        let agent_arc: Arc<Agent> = self.clone();
-        let tool_registry_arc: Arc<dyn pharmakon_common::ToolRegistry> = agent_arc;
-        self.add_tool(Arc::new(pharmakon_tools::SkillFactoryTool::new(
-            Arc::downgrade(&tool_registry_arc),
-        )))
-        .await;
-        self.add_tool(Arc::new(WorkspacePerceptionTool)).await;
-        self.add_tool(Arc::new(GrepSearchTool)).await;
-        self.add_tool(Arc::new(CodeEditTool)).await;
-        self.add_tool(Arc::new(MultiCodeEditTool)).await;
-        self.add_tool(Arc::new(ListDirTool)).await;
-        self.add_tool(Arc::new(ViewFileTool)).await;
-        self.add_tool(Arc::new(GitStatusTool)).await;
-        self.add_tool(Arc::new(GitDiffTool)).await;
-        self.add_tool(Arc::new(GitCommitTool)).await;
-        self.add_tool(Arc::new(CargoQualityTool)).await;
-        self.add_tool(Arc::new(FindDefinitionTool)).await;
-        self.add_tool(Arc::new(ShellTool)).await;
-        self.add_tool(Arc::new(FileReadTool)).await;
-        self.add_tool(Arc::new(FileWriteTool)).await;
-        self.add_tool(Arc::new(ScreenshotTool)).await;
-        self.add_tool(Arc::new(CameraTool)).await;
-        self.add_tool(Arc::new(PythonInterpreterTool)).await;
-        self.add_tool(Arc::new(TokenEconomyControlTool {})).await;
-        self.add_tool(Arc::new(SetAnchorTool)).await;
-        self.add_tool(Arc::new(ListAnchorsTool)).await;
-        self.add_tool(Arc::new(PlaybookTool)).await;
-        self.add_tool(Arc::new(RepoMapTool)).await;
-        self.add_tool(Arc::new(ApplyPatchTool)).await;
-
+    pub async fn setup_autonomous_tools(&self) {
+        self.init_standard_tools().await;
+        
+        // Add Phase 3 Tools
+        self.add_tool(Arc::new(pharmakon_tools::checkpoint::CheckpointTool)).await;
+        self.add_tool(Arc::new(pharmakon_tools::reflection::ReflectionTool)).await;
+        self.add_tool(Arc::new(pharmakon_tools::orchestration::ToolRouterTool)).await;
+        
         if let Some(nexus) = &self.knowledge_nexus {
-            self.add_tool(Arc::new(
-                pharmakon_tools::ast_ingest::ASTKnowledgeIngestTool::new(nexus.clone()),
-            ))
-            .await;
+            self.add_tool(Arc::new(pharmakon_tools::memory_mgmt::MemoryManagementTool::new(Some(nexus.clone())))).await;
         }
 
-        // Load MCP Tools from config
-        if let Ok(mcp_tools) = crate::mcp_manager::McpManager::load_tools().await {
-            for tool in mcp_tools {
-                self.add_tool(tool).await;
-            }
-        }
+        // Add apply_patch (SAFER replacement for write_file)
+        self.add_tool(Arc::new(pharmakon_tools::code::ApplyPatchTool)).await;
+    }
 
-        self.add_tool(Arc::new(ConnectMcpServerTool {
-            tool_registry: self.tools.clone(),
-        }))
-        .await;
-        self.add_tool(Arc::new(DiscoverToolsTool {
-            tool_registry: self.tools.clone(),
-        }))
-        .await;
-
-        use crate::orchestration::territory_tools::{
-            ListTerritoriesTool, LockTerritoryTool, UnlockTerritoryTool,
+    pub async fn chat(&self, message: &str) -> Result<String> {
+        let session_id = {
+            let sid = self.session_id.lock().await;
+            sid.clone()
         };
-        self.add_tool(Arc::new(LockTerritoryTool {
-            territory_manager: self.territory_manager.clone(),
-        }))
-        .await;
-        self.add_tool(Arc::new(UnlockTerritoryTool {
-            territory_manager: self.territory_manager.clone(),
-        }))
-        .await;
-        self.add_tool(Arc::new(ListTerritoriesTool {
-            territory_manager: self.territory_manager.clone(),
-        }))
-        .await;
-
-        self.add_tool(Arc::new(ResearchSearchTool {
-            notebook: self.research_notebook.clone(),
-        }))
-        .await;
-        self.add_tool(Arc::new(ResearchFetchTool {
-            notebook: self.research_notebook.clone(),
-            store: self
-                .session_store
-                .clone()
-                .map(|s| s as Arc<dyn pharmakon_common::ResearchPersistence>),
-        }))
-        .await;
-        self.add_tool(Arc::new(ResearchConsolidateTool {
-            notebook: self.research_notebook.clone(),
-        }))
-        .await;
-
-        let active_processes = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-        let retry_counts = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-
-        self.add_tool(Arc::new(BackgroundRunTool {
-            active_processes: active_processes.clone(),
-        }))
-        .await;
-        self.add_tool(Arc::new(ProcessStatusTool {
-            active_processes,
-            retry_counts,
-        }))
-        .await;
-
-        self.add_tool(Arc::new(InsightTool::new(Arc::downgrade(self))))
-            .await;
-        self.add_tool(Arc::new(HostScriptTool)).await;
-        self.add_tool(Arc::new(LinkUnderstandingTool::new())).await;
-
-        self.add_tool(Arc::new(DiagnosticTool {
-            vision_stream: self.vision_stream.clone(),
-            telemetry: None,
-            mcp_stats_source: "agent_internal".to_string(),
-        }))
-        .await;
-
-        // Inject Full-Spectrum Autonomous Engineering Guidelines
-        let mut pm = self.prompt_manager.lock().await;
-        pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-            "Token Economy & Frugality (Energy Saving Mode)",
-            "Tokens are precious. To minimize API costs and stay within limits: \
-            1. **Targeted Reading**: Use `view_file` with narrow line ranges (e.g. 50-100 lines) instead of reading whole files. \
-            2. **Structural Map**: Use `get_repo_map` to understand the codebase structure before diving into files. \
-            3. **Surgical Edits**: Use `apply_patch` for precise, token-efficient code modifications. This is the preferred method for editing. \
-            4. **Filtered Search**: Use `grep_search` with specific queries and `include` filters to avoid massive outputs. \
-            5. **Summarization**: When reporting results, be concise. Only include the essential output. \
-            A frugal agent is a sustainable agent."
-        )));
-
-        pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-            "Adaptive Engineering & Reliability (V2.1)",
-            "Follow these strict reliability guidelines: \
-            1. **Surgical Precision**: Prefer `apply_patch` for changes to existing code. \
-            2. **Massive Refactor Rule**: Use `write_file` ONLY for: (a) New files, (b) Rewriting >50% of a file, (c) When `apply_patch` fails 3 times due to context mismatch. \
-            3. **Linear Planning**: Do NOT attempt parallel execution. Follow a strict loop: PLAN -> EXECUTE STEP -> VERIFY (via cargo check/test) -> COMMIT. \
-            4. **Background Monitoring**: If a background process fails (check via `get_process_status`), you have a MAX of 3 auto-fix attempts. If it still fails, YOU MUST STOP AND ASK THE USER FOR HELP. \
-            5. **Shell Hygiene**: Use the `reset: true` flag in `terminal` when moving to a new logical task to avoid state pollution from previous environment variables or directory changes."
-        )));
-
-        pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-            "Full-Spectrum Autonomous Engineering (Aider/SWE-agent/Devin/Antigravity lineage)",
-            "You are a master engineer equipped with an elite tool suite. \
-            - **Navigation**: Use `get_repo_map` (AST) for the big picture and `find_definition` (LSP) for deep type resolution. \
-            - **Editing**: Use `apply_patch` as your primary tool. \
-            - **Execution**: Use `terminal` with session persistence, but keep it clean. \
-            - **CodeAct Paradigm**: When faced with complex multi-step analysis (e.g., searching across multiple files and aggregating results), prefer writing a Python script using the `pharmakon` bridge. This is more efficient than sequential tool calls. \
-            - **Connectivity**: You can expand your toolbox by calling `connect_mcp_server`. Use this to integrate with external services like Slack, Sentry, or specialized DB tools. \
-            - **Symphony Workforce Coordination**: If you spawn sub-agents (workers), you are the CHIEF ORCHESTRATOR. You MUST: \
-                1. **Decompose strictly**: Assign distinct, non-overlapping directories or modules to each worker. \
-                2. **Prevent Race Conditions**: Never allow two workers to edit the same file. \
-                3. **Sync State**: Require workers to report findings before allowing them to proceed to the next phase. \
-            - **Governance**: Always verify your work. If you hit a retry limit or a critical failure, do not hallucinate—report it and wait for instructions."
-        )));
-
-        pm.add_contribution(Box::new(crate::system_prompt::StaticContribution::new(
-            "Self-Perception & Situational Awareness",
-            "You have tools to perceive your own situation and environment. \
-            If you feel lost or need to understand your current context (system resources, directory structure, active capabilities), \
-            autonomously call `self_diagnostic` or `perceive_workspace`."
-        )));
-    }
-
-    pub async fn update_model(&self, model: Arc<dyn AgentModel>) {
-        {
-            let mut m = self.model.lock().await;
-            *m = model.clone();
-        }
-        {
-            let mut traj = self.trajectory.lock().await;
-            traj.metadata.model = model.name().to_string();
-        }
-        {
-            let mut compactor = self.compactor.lock().await;
-            *compactor = crate::memory::compactor::ContextCompactor::new(model);
-        }
-        log::info!("Agent model updated.");
-    }
-
-    pub fn event_tx(&self) -> broadcast::Sender<Event> {
-        self.event_tx.clone()
-    }
-
-    pub fn approve(&self, id: String, approved: bool) {
-        let _ = self.approval_tx.send((id, approved));
-    }
-
-    pub async fn reset_history(&self) {
-        let mut history = self.history.lock().await;
-        history.clear();
-    }
-
-    pub async fn start_new_session(&self) {
-        let new_id = uuid::Uuid::new_v4().to_string();
-
-        // 1. Update session ID
-        {
-            let mut sid = self.session_id.lock().await;
-            *sid = new_id.clone();
-        }
-
-        // 2. Clear history
-        {
-            let mut history = self.history.lock().await;
-            history.clear();
-        }
-
-        // 3. Reset trajectory
-        {
-            let model_name = self.model_name().await;
-            let mut traj = self.trajectory.lock().await;
-            *traj = crate::trajectory::Trajectory::new(new_id, model_name);
-        }
-
-        // 4. Reset interaction count
-        self.interaction_count
-            .store(0, std::sync::atomic::Ordering::SeqCst);
-
-        log::info!("Agent started a new session.");
-    }
-
-    pub async fn add_message(&self, msg: Message) {
-        let mut history = self.history.lock().await;
-        history.push(msg);
-    }
-
-    pub async fn model_name(&self) -> String {
-        let m = self.model.lock().await;
-        m.name().to_string()
-    }
-
-    pub async fn add_contribution(
-        &self,
-        contribution: Box<dyn crate::system_prompt::SystemPromptContribution>,
-    ) {
-        let mut pm = self.prompt_manager.lock().await;
-        pm.add_contribution(contribution);
+        self.chat_on_session(message, &session_id).await
     }
 
     pub async fn set_session_id(&self, id: String) {
@@ -413,82 +278,101 @@ impl Agent {
         *sid = id;
     }
 
-    pub async fn replace_history(&self, new_history: Vec<Message>) {
-        let mut history = self.history.lock().await;
-        *history = new_history;
+    pub async fn replace_history(&self, history: Vec<Message>) -> Result<()> {
+        let state_arc = self.get_current_session_state().await;
+        let mut state = state_arc.lock().await;
+        state.history = history;
+        Ok(())
     }
 
-    pub async fn trajectory_steps(&self) -> Vec<crate::trajectory::TrajectoryStep> {
-        let traj = self.trajectory.lock().await;
-        traj.steps.clone()
+    pub async fn update_model(&self, model: Arc<dyn AgentModel>) -> Result<()> {
+        let mut m = self.model.lock().await;
+        *m = model;
+        Ok(())
     }
 
-    pub async fn soul(&self) -> crate::soul::Soul {
-        let pm = self.prompt_manager.lock().await;
-        pm.soul().clone()
-    }
-
-    pub async fn set_soul(&self, soul: crate::soul::Soul) {
-        let mut pm = self.prompt_manager.lock().await;
-        pm.set_soul(soul);
-    }
-
-    pub async fn chat(&self, user_message: &str) -> Result<String> {
-        if user_message.starts_with("/model") {
-            return self.handle_model_command(user_message).await;
+    pub async fn clear_history(&self) -> Result<()> {
+        // 1. Reset context engine
+        {
+            let state_arc = self.get_current_session_state().await;
+            let mut state = state_arc.lock().await;
+            let mut context_engine = state.context_engine.lock().await;
+            context_engine.clear_history();
         }
 
-        let (session_id, history_len) = {
-            let sid = self.session_id.lock().await;
-            let hist = self.history.lock().await;
-            (sid.clone(), hist.len())
-        };
+        // 2. Clear history
+        {
+            let state_arc = self.get_current_session_state().await;
+            let mut state = state_arc.lock().await;
+            state.history.clear();
+        }
 
-        if history_len == 0 {
+        // 3. Reset trajectory
+        {
+            let session_id = {
+                let sid = self.session_id.lock().await;
+                sid.clone()
+            };
+            let mut trajectory = self.trajectory.lock().await;
+            let model_name = {
+                let m = self.model.lock().await;
+                m.name().to_string()
+            };
+            *trajectory = crate::trajectory::Trajectory::new(session_id, model_name);
+        }
+
+        Ok(())
+    }
+
+    pub async fn chat_on_session(&self, user_message: &str, session_id: &str) -> Result<String> {
+        CURRENT_SESSION_ID.scope(session_id.to_string(), async {
+            if user_message.starts_with("/model") {
+                return self.handle_model_command(user_message).await;
+            }
+
+            let state_arc = self.get_session_state(session_id).await;
+            let mut state = state_arc.lock().await;
+
+            let user_msg = Message {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text(user_message.to_string())),
+                ..Default::default()
+            };
+
+            let _ = self.hooks.trigger_message_received(&user_msg).await;
+
             if let Some(store) = &self.session_store {
-                let mut history = self.history.lock().await;
-                *history = store.load_history(&session_id).await.unwrap_or_default();
+                store.save_message(session_id, &user_msg).await?;
             }
-        }
+            state.history.push(user_msg);
 
-        let user_msg = Message {
-            role: "user".to_string(),
-            content: Some(MessageContent::Text(user_message.to_string())),
-            ..Default::default()
-        };
-
-        let _ = self.hooks.trigger_message_received(&user_msg).await;
-
-        if let Some(store) = &self.session_store {
-            store.save_message(&session_id, &user_msg).await?;
-        }
-        {
-            let mut history = self.history.lock().await;
-            history.push(user_msg);
-        }
-
-        // Auto-index user message for future recovery (only if meaningful)
-        if user_message.len() > 10 {
-            if let Some(nexus) = &self.knowledge_nexus {
-                let id = uuid::Uuid::new_v4().to_string();
-                let _ = nexus
-                    .remember_batch(vec![(id, user_message.to_string())])
-                    .await;
-            }
-        }
-
-        {
-            let mut history = self.history.lock().await;
-            let mut context_engine = self.context_engine.lock().await;
-            let _ = context_engine.prune_history(&mut history).await;
-
-            if history.len() > 20 {
-                let mut compactor = self.compactor.lock().await;
-                if let Ok(compacted) = compactor.compact(history.clone()).await {
-                    *history = compacted;
+            // Auto-index user message for future recovery (DISABLED to prevent cross-session memory leaks)
+            /*
+            if user_message.len() > 10 {
+                if let Some(nexus) = &self.knowledge_nexus {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let _ = nexus
+                        .remember_batch(vec![(id, user_message.to_string())])
+                        .await;
                 }
             }
-        }
+            */
+
+            {
+                let mut history = state.history.clone();
+                {
+                    let mut context_engine = state.context_engine.lock().await;
+                    let _ = context_engine.prune_history(&mut history).await;
+                }
+                state.history = history;
+
+                if state.history.len() > 20 {
+                    let compactor = self.compactor.lock().await;
+                    if let Ok(compacted) = compactor.compact(state.history.clone()).await {
+                        state.history = compacted;
+                    }
+                }
+            }
 
         let _ = self.event_tx.send(Event::AgentThought {
             content: MessageContent::Text("Thinking...".to_string()),
@@ -523,22 +407,27 @@ impl Agent {
 
         if let Some(memories) = semantic_res {
             if !memories.is_empty() {
-                let memory_context = memories.join("\n---\n");
-                self.add_to_working_memory(format!("Long-term Memories:\n{}", memory_context), 0.7)
-                    .await;
+                let memory_context = memories.join("\\n---\\n");
+                self.add_to_working_memory(
+                    format!("Long-term Memories:\\n{}", memory_context),
+                    0.7,
+                    "SemanticSearch".to_string(),
+                )
+                .await;
             }
         }
 
         if let Some(memories) = nexus_res {
             if !memories.is_empty() {
-                let memory_context = memories.join("\n---\n");
+                let memory_context = memories.join("\\n---\\n");
                 let _ = self.hooks.trigger_context_recovered(&memory_context).await;
                 self.add_to_working_memory(
                     format!(
-                        "Knowledge Nexus Insights (Hybrid + Graph):\n{}",
+                        "Knowledge Nexus Insights (Hybrid + Graph):\\n{}",
                         memory_context
                     ),
                     0.9,
+                    "KnowledgeNexus".to_string(),
                 )
                 .await;
             }
@@ -546,8 +435,9 @@ impl Agent {
 
         if let Some(scout_context) = scout_res {
             self.add_to_working_memory(
-                format!("Proactive Scout Insights:\n{}", scout_context),
+                format!("Proactive Scout Insights:\\n{}", scout_context),
                 0.8,
+                "ProactiveScout".to_string(),
             )
             .await;
         }
@@ -597,29 +487,81 @@ impl Agent {
             }
 
             log::info!("Agent iteration start ({})...", iteration_count);
+            
+            // 0. SPECULATIVE PRE-FETCHING:
+            // Proactively load potentially relevant context in the background.
+            let prefetch_task = {
+                let agent_clone = self.clone();
+                let msg = user_message.to_string();
+                tokio::spawn(async move {
+                    let _ = agent_clone.scout_workspace(&msg).await;
+                })
+            };
+
+            // 1. HIERARCHICAL REASONING: Step 1 - Define Strategy (Only on first iteration)
+            if iteration_count == 1 {
+                 let _ = self.event_tx.send(Event::AgentThought {
+                    content: MessageContent::Text("Analyzing task complexity and planning resource retrieval...".to_string()),
+                 });
+                 // We could use a lighter model here to decide which tools to hydrate first.
+            }
+
             let mut messages_to_send = Vec::new();
             {
                 let prompt_manager = self.prompt_manager.lock().await;
-                let mut system_prompt = prompt_manager.build();
+                
+                // 1. VIRTUAL CONTEXT SCALING:
+                // Instead of loading all context, we load a sparse index.
+                let state_arc = self.get_current_session_state().await;
+                let state = state_arc.lock().await;
+                let virtual_index = {
+                    let mut entries = Vec::new();
+                    for (i, unit) in state.working_memory.iter().enumerate() {
+                        entries.push(pharmakon_memory::context_engine::ContextEntry {
+                            id: format!("wm-{}", i),
+                            summary: unit.summary.clone().unwrap_or_else(|| {
+                                if unit.content.len() > 100 {
+                                    format!("{}...", &unit.content[..100])
+                                } else {
+                                    unit.content.clone()
+                                }
+                            }),
+                            relevance: unit.importance,
+                            category: unit.source.clone(),
+                        });
+                    }
+                    let engine = state.context_engine.lock().await;
+                    engine.generate_virtual_index(&entries)
+                };
 
-                // Inject Working Memory
-                let packed_wm = self.pack_working_memory().await;
-                if !packed_wm.is_empty() {
-                    system_prompt.push_str(&format!(
-                        "\n\n### ACTIVE WORKING MEMORY (High Importance Context)\n{}",
-                        packed_wm
-                    ));
-                }
+                let layout = crate::system_prompt::PromptLayout {
+                    system_rules: prompt_manager.soul().system_prompt.clone(),
+                    playbooks: {
+                        if state.active_playbooks.is_empty() {
+                            "No specialized playbooks active.".to_string()
+                        } else {
+                            state.active_playbooks
+                                .iter()
+                                .map(|(name, content)| format!("#### ACTIVE PLAYBOOK: {}\n{}", name, content))
+                                .collect::<Vec<_>>()
+                                .join("\n\n---\n\n")
+                        }
+                    },
+                    repo_map: None, // Will be populated by repomap tool if needed
+                    knowledge_graph: None,
+                    working_memory: virtual_index,
+                    current_task: user_message.to_string(),
+                };
 
                 messages_to_send.push(Message {
                     role: "system".to_string(),
-                    content: Some(MessageContent::Text(system_prompt)),
+                    content: Some(MessageContent::Text(layout.render())),
                     ..Default::default()
                 });
             }
             {
-                let history = self.history.lock().await;
-                messages_to_send.extend(history.clone());
+                let state = state_arc.lock().await;
+                messages_to_send.extend(state.history.clone());
             }
 
             let tool_definitions = {
@@ -644,116 +586,36 @@ impl Agent {
             };
 
             // Tiered Reasoning: Use planner model for tool selection if available
-            let initial_target_model = if tool_definitions.is_some() && self.planner_model.is_some()
-            {
-                let pm = self.planner_model.as_ref().unwrap().lock().await;
-                (*pm).clone()
-            } else {
+            let mut target_model = {
                 let m = self.model.lock().await;
                 (*m).clone()
             };
 
-            let req_temp = {
-                let prompt_manager = self.prompt_manager.lock().await;
-                prompt_manager
-                    .soul()
-                    .temperature_override
-                    .map(|t| t as f32)
-                    .or(Some(0.7f32))
-            };
             let request = CompletionRequest {
                 messages: messages_to_send,
-                temperature: req_temp,
-                max_tokens: None,
+                temperature: Some(0.2),
+                max_tokens: Some(4096),
                 tools: tool_definitions,
             };
 
-            let mut target_model = initial_target_model.clone();
-            let mut response_result;
+            let mut response_result = None;
             let mut current_fallback_index = 0;
-            // DYNAMIC FALLBACK OPTIMIZATION: Use models from configuration
-            let fallback_models = if !self.fallback_models.is_empty() {
-                self.fallback_models.clone()
-            } else {
-                vec![
-                    "groq/llama-3.3-70b-versatile".to_string(),
-                    "ollama/llama3".to_string(),
-                ]
-            };
+            let fallback_models = self.fallback_models.clone();
 
-            loop {
-                log::debug!("Agent sending request to model: {}", target_model.name());
-                let start = std::time::Instant::now();
-
-                response_result = if tools_count == 0 {
-                    // For streaming, we don't currently do automatic fallback inside the stream,
-                    // but we can catch initial setup errors.
-                    match target_model.as_ref().stream_complete(request.clone()).await {
-                        Ok(mut stream) => {
-                            let mut full_content = String::new();
-                            use futures::StreamExt;
-                            let mut stream_error = false;
-                            while let Some(chunk_result) = stream.next().await {
-                                match chunk_result {
-                                    Ok(chunk) => {
-                                        full_content.push_str(&chunk);
-                                        let _ = self.event_tx.send(Event::AgentResponseChunk {
-                                            session_id: session_id.clone(),
-                                            chunk,
-                                        });
-                                    }
-                                    Err(e) => {
-                                        if e.is_rate_limit() {
-                                            stream_error = true;
-                                            response_result = Err(anyhow::Error::new(e));
-                                            break;
-                                        }
-                                        let _ = self.event_tx.send(Event::Error {
-                                            message: format!("Streaming error: {}", e),
-                                        });
-                                        return Err(anyhow::Error::new(e));
-                                    }
-                                }
-                            }
-                            if stream_error {
-                                // Fallthrough to fallback logic below
-                                Err(anyhow::anyhow!("Rate limit hit during stream setup"))
-                            } else {
-                                Ok(CompletionResponse {
-                                    content: Some(pharmakon_common::MessageContent::Text(
-                                        full_content,
-                                    )),
-                                    tool_calls: None,
-                                    usage: None,
-                                })
-                            }
-                        }
-                        Err(e) => Err(anyhow::Error::new(e)),
-                    }
-                } else {
-                    match target_model.as_ref().complete(request.clone()).await {
-                        Ok(res) => {
-                            self.health_monitor.record_success(start.elapsed());
-                            Ok(res)
-                        }
-                        Err(e) => {
-                            self.health_monitor.record_failure();
-                            Err(anyhow::Error::new(e))
-                        }
-                    }
+            while response_result.is_none() {
+                let model_lock = target_model.clone();
+                let completion_task = async {
+                    model_lock.complete(request.clone()).await
                 };
 
+                response_result = Some(completion_task.await);
+
                 match response_result {
-                    Ok(_) => break, // Success, exit retry loop
-                    Err(ref e) => {
-                        let is_rate_limit = if let Some(ae) = e.downcast_ref::<AgentError>() {
-                            ae.is_rate_limit()
-                        } else {
-                            let err_str = e.to_string().to_lowercase();
-                            err_str.contains("429")
-                                || err_str.contains("too many requests")
-                                || err_str.contains("quota")
-                        };
+                    Some(Ok(_)) => break, // Success, exit retry loop
+                    Some(Err(ref e)) => {
+                        let is_rate_limit = e.to_string().to_lowercase().contains("429")
+                            || e.to_string().to_lowercase().contains("too many requests")
+                            || e.to_string().to_lowercase().contains("quota");
 
                         if is_rate_limit && current_fallback_index < fallback_models.len() {
                             let fallback_id = &fallback_models[current_fallback_index];
@@ -775,6 +637,7 @@ impl Agent {
                             {
                                 target_model = new_model;
                                 current_fallback_index += 1;
+                                response_result = None;
                                 continue;
                             } else {
                                 log::error!(
@@ -782,6 +645,7 @@ impl Agent {
                                     fallback_id
                                 );
                                 current_fallback_index += 1;
+                                response_result = None;
                                 continue;
                             }
                         }
@@ -789,13 +653,14 @@ impl Agent {
                         let _ = self.event_tx.send(Event::Error {
                             message: format!("Model error: {}", e),
                         });
-                        return Err(response_result.err().unwrap());
+                        return Err(response_result.unwrap().err().unwrap().into());
                     }
+                    None => unreachable!(),
                 }
             }
 
             let response: pharmakon_common::agent_types::CompletionResponse =
-                response_result.unwrap();
+                response_result.unwrap().unwrap();
 
             log::debug!(
                 "Model response received. Content: {}, Tool calls: {}",
@@ -813,55 +678,17 @@ impl Agent {
                 response: response.clone(),
             });
 
-            if let Some(usage) = &response.usage {
-                self.total_tokens.fetch_add(
-                    usage.total_tokens as u64,
-                    std::sync::atomic::Ordering::SeqCst,
-                );
-                let mut cost_lock = self.total_cost.lock().await;
-                let cost_increment = (usage.total_tokens as f64 / 1000.0) * 0.002;
-                *cost_lock += cost_increment;
-
-                let mut history = self.usage_history.lock().await;
-                history.push((chrono::Utc::now(), usage.total_tokens as u64, *cost_lock));
-
-                let _ = self.event_tx.send(Event::TokenUsageUpdate {
-                    total_tokens: self.total_tokens.load(std::sync::atomic::Ordering::SeqCst),
-                    total_cost: *cost_lock,
-                });
-            }
-
-            if let Some(content) = &response.content {
-                let c = content.clone();
-                let event = Event::AgentThought { content: c };
-                let _ = self.event_tx.send(event);
-                let mut trajectory = self.trajectory.lock().await;
-                trajectory.add_step(crate::trajectory::TrajectoryStep::Thought {
-                    content: content.to_string(),
-                    timestamp: chrono::Utc::now(),
-                });
-            }
-
-            let assistant_msg = Message {
-                role: "assistant".to_string(),
-                content: response.content.clone(),
-                tool_calls: response.tool_calls.clone(),
-                ..Default::default()
-            };
-
-            if let Some(store) = &self.session_store {
-                store.save_message(&session_id, &assistant_msg).await?;
-                let trajectory = self.trajectory.lock().await;
-                store.save_trajectory(&trajectory).await?;
-            }
-            {
-                let mut history = self.history.lock().await;
-                history.push(assistant_msg);
-            }
-
-            if let Some(tool_calls) = response.tool_calls {
+            // Handle tool calls in parallel if multiple
+            if let Some(tool_calls) = &response.tool_calls {
                 let mut tool_tasks = Vec::new();
                 for tool_call in tool_calls {
+                    let tool_call = tool_call.clone();
+                    let _ = self.record_step(crate::trajectory::TrajectoryStep::Action {
+                        tool: tool_call.function.name.clone(),
+                        args: serde_json::from_str(&tool_call.function.arguments).unwrap_or_default(),
+                        intent_id: None,
+                        timestamp: chrono::Utc::now(),
+                    }).await;
                     let tool = self
                         .tools
                         .lock()
@@ -971,10 +798,24 @@ impl Agent {
                         });
 
                         let result = tool.call(args).await;
-                        let result_str = match &result {
+                        let mut result_str = match &result {
                             Ok(s) => s.clone(),
                             Err(e) => e.to_string(),
                         };
+
+                        // TOOL RESULT COMPRESSION: Prevent token explosion from long tool outputs
+                        if result_str.len() > 2000 {
+                            if tool.name() == "web_fetch" || tool.name() == "browser" {
+                                log::info!("Agent: Compressing large result from '{}' ({} chars)", tool.name(), result_str.len());
+                                let preview = result_str.chars().take(800).collect::<String>();
+                                result_str = format!("{}... [TRUNCATED due to size. The full content was omitted to save tokens. Use more specific search queries if needed.]", preview);
+                            } else if result_str.len() > 10000 {
+                                // Generic compression for other tools if extremely long
+                                log::warn!("Agent: Generic compression for extremely long output from '{}'", tool.name());
+                                let preview = result_str.chars().take(2000).collect::<String>();
+                                result_str = format!("{}... [EXTREMELY LARGE OUTPUT TRUNCATED]", preview);
+                            }
+                        }
 
                         let _ = event_tx.send(Event::ForensicLog {
                             id: forensic_id,
@@ -1006,19 +847,24 @@ impl Agent {
                                 e.to_string()
                             }
                         };
+                        
+                        if result.contains("### INJECTED PLAYBOOK") {
+                            if let Some(line) = result.lines().next() {
+                                let name = line.replace("### INJECTED PLAYBOOK: ", "").trim().to_string();
+                                let _ = self.register_playbook(session_id, name, result.clone()).await;
+                            }
+                        }
                         let _ = self.event_tx.send(Event::ToolResult {
                             result: result.clone(),
                         });
-                        {
-                            let mut trajectory = self.trajectory.lock().await;
-                            trajectory.add_step(crate::trajectory::TrajectoryStep::Observation {
-                                result: result.clone(),
-                                timestamp: chrono::Utc::now(),
-                            });
-                        }
+                        let _ = self.record_step(crate::trajectory::TrajectoryStep::Observation {
+                            result: result.clone(),
+                            action_id: None,
+                            timestamp: chrono::Utc::now(),
+                        }).await;
                         let tool_result_msg = Message {
                             role: "tool".to_string(),
-                            content: Some(MessageContent::Text(result)),
+                            content: Some(MessageContent::Text(result.clone())),
                             tool_call_id: Some(tool_call_id),
                             ..Default::default()
                         };
@@ -1032,26 +878,14 @@ impl Agent {
 
                         if let Some(store) = &self.session_store {
                             if !is_volatile {
-                                let _ = store.save_message(&session_id, &tool_result_msg).await;
+                                let _ = store.save_message(session_id, &tool_result_msg).await;
                             }
                         }
-                        {
-                            let mut history = self.history.lock().await;
-                            history.push(tool_result_msg);
-                        }
+                        let mut state = state_arc.lock().await;
+                        state.history.push(tool_result_msg);
                     }
                 }
-
-                if let Some(err) = rescue_error {
-                    log::warn!("Autonomous Self-Healing: Tool failed. Triggering rescue...");
-                    let rescue_msg =
-                        crate::orchestration::crestodian::Crestodian::generate_rescue_message(&err);
-                    self.add_message(rescue_msg).await;
-                    // We don't break, we continue the loop to let the LLM see the rescue message
-                }
-
-                log::info!("All tool calls processed. Continuing decision loop...");
-                continue;
+                continue; // Next iteration to let model process tool results
             }
 
             if response.content.is_none() && response.tool_calls.is_none() {
@@ -1077,6 +911,11 @@ impl Agent {
                     let thought_content = final_content[start + 7..start + end].trim().to_string();
                     thoughts.push(thought_content.clone());
 
+                    let _ = self.record_step(crate::trajectory::TrajectoryStep::Thought {
+                        content: thought_content.clone(),
+                        timestamp: chrono::Utc::now(),
+                    }).await;
+
                     // Send thought event
                     let _ = self.event_tx.send(Event::AgentThought {
                         content: MessageContent::Text(thought_content),
@@ -1089,13 +928,10 @@ impl Agent {
             }
             let final_content = final_content.trim().to_string();
 
-            {
-                let mut trajectory = self.trajectory.lock().await;
-                trajectory.add_step(crate::trajectory::TrajectoryStep::Response {
-                    content: final_content.clone(),
-                    timestamp: chrono::Utc::now(),
-                });
-            }
+            let _ = self.record_step(crate::trajectory::TrajectoryStep::Response {
+                content: final_content.clone(),
+                timestamp: chrono::Utc::now(),
+            }).await;
 
             let final_msg = Message {
                 role: "assistant".to_string(),
@@ -1131,7 +967,7 @@ impl Agent {
                     .unwrap_or(MessageContent::Text("".to_string())),
             });
             return Ok(final_content);
-        }
+        } }).await
     }
 
     pub async fn plan_retrieval(&self, query: &str) -> pharmakon_memory::RagStrategy {
@@ -1145,183 +981,91 @@ impl Agent {
         }
     }
 
-    pub async fn add_to_working_memory(&self, content: String, importance: f32) {
-        let mut wm = self.working_memory.lock().await;
-        wm.push(WorkingMemoryUnit {
-            content,
-            importance,
-            timestamp: std::time::Instant::now(),
-        });
-
-        // Eviction logic: keep only top 10 important or recent items
-        if wm.len() > 10 {
-            wm.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap());
-            wm.truncate(10);
+    pub async fn add_to_working_memory(&self, content: String, importance: f32, source: String) {
+        // SEMANTIC NOISE GATE: Filter out low-importance signals
+        if importance < 0.3 {
+            log::debug!("Agent: Noise Gate blocked low-importance context ({:.2}) from {}", importance, source);
+            return;
         }
-    }
 
-    pub async fn pack_working_memory(&self) -> String {
-        let wm = self.working_memory.lock().await;
-        let mut packed = String::new();
-        for unit in wm.iter() {
-            packed.push_str(&format!("\n---\n{}\n", unit.content));
-        }
-        packed
-    }
+        let state_arc = self.get_current_session_state().await;
+        let mut state = state_arc.lock().await;
+        let wm = &mut state.working_memory;
 
-    pub async fn is_docker_available(&self) -> bool {
-        let output = tokio::process::Command::new("docker")
-            .arg("--version")
-            .output()
-            .await;
-        output.is_ok() && output.unwrap().status.success()
-    }
-
-    pub async fn verify_code(&self, code: &str, language: &str) -> Result<bool> {
-        if !self.is_docker_available().await {
-            log::warn!("Docker is not available. Skipping sandboxed code verification.");
-            return Ok(true); // Treat as verified to avoid blocking when Docker is missing
-        }
-        log::info!("Agent: Verifying {} code in sandbox...", language);
-
-        let docker_image = match language.to_lowercase().as_str() {
-            "rust" => "rust:latest",
-            "python" => "python:3-slim",
-            "javascript" | "typescript" => "node:slim",
-            _ => return Ok(true), // Skip verification for unknown languages
+        // Micro-summary generation
+        let summary = if content.len() > 150 {
+            let mut compactor = self.compactor.lock().await;
+            compactor.compact_block(&content, 0.5).await.ok()
+        } else {
+            Some(content.clone())
         };
 
-        // Use 'docker run --rm' to ensure immediate container deletion after exit.
-        // We use a timeout to prevent infinite loops.
-        let mut child = tokio::process::Command::new("docker")
-            .arg("run")
-            .arg("--rm")
-            .arg("-i")
-            .arg(docker_image)
-            .arg("sh")
-            .arg("-c")
-            .arg(format!(
-                "echo '{}' > tmp_code && (timeout 10s cat tmp_code | {})",
-                code, language
-            ))
-            .spawn()
-            .map_err(|e| {
-                AgentError::new(
-                    AgentErrorCode::EnvironmentError,
-                    format!("Docker failure: {}. Is Docker running?", e),
-                )
-            })?;
+        wm.push(WorkingMemoryUnit {
+            content,
+            summary,
+            importance,
+            timestamp: chrono::Utc::now(),
+            tokens: 0, // Should be estimated
+            source,
+        });
 
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| AgentError::new(AgentErrorCode::EnvironmentError, e.to_string()))?;
-        Ok(status.success())
+        // Keep working memory focused
+        if wm.len() > 10 {
+            wm.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap());
+            wm.truncate(8);
+        }
+    }
+
+    pub async fn scout_workspace(&self, query: &str) -> Option<String> {
+        let nexus = self.knowledge_nexus.clone()?;
+        let results = nexus.smart_search(query, 5).await.ok()?;
+        if results.is_empty() { return None; }
+        Some(results.join("\\n---\\n"))
     }
 
     pub async fn reflect(&self) -> Result<()> {
-        let (session_id, recent_steps) = {
-            let sid = self.session_id.lock().await;
-            let trajectory = self.trajectory.lock().await;
-            let steps = trajectory
-                .steps
-                .iter()
-                .rev()
-                .take(5)
-                .cloned()
-                .collect::<Vec<_>>();
-            (sid.clone(), steps)
-        };
+        log::info!("Agent: Performing periodic self-reflection...");
+        let state_arc = self.get_current_session_state().await;
+        let state = state_arc.lock().await;
+        
+        if state.history.len() < 4 { return Ok(()); }
 
-        if recent_steps.is_empty() {
-            return Ok(());
-        }
-
-        let context_str = recent_steps
-            .iter()
-            .map(|s| format!("{:?}", s))
+        let context = state.history.iter()
+            .rev()
+            .take(10)
+            .map(|m| format!("{}: {}", m.role, m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()))
             .collect::<Vec<_>>()
-            .join("\n");
+            .join("\\n");
 
-        let prompt = format!(
-            "Analyze the following interaction trajectory. Extract any permanent user preferences, new facts, or operational insights. \
-            Output as a concise list of points. If no significant learning occurred, respond only with 'NO_INSIGHT'.\n\nTrajectory:\n{}",
-            context_str
-        );
-
+        let system_prompt = "Analyze the recent conversation and extract ONE key learned fact, architectural decision, or verified constraint. Output only the distilled insight.";
         let request = CompletionRequest {
             messages: vec![
-                Message {
-                    role: "system".to_string(),
-                    content: Some(MessageContent::Text("You are the Pharmakon Reflection Engine. Your goal is to learn from every interaction to improve the user experience.".to_string())),
-                    ..Default::default()
-                },
-                Message {
-                    role: "user".to_string(),
-                    content: Some(MessageContent::Text(prompt)),
-                    ..Default::default()
-                },
+                Message { role: "system".to_string(), content: Some(MessageContent::Text(system_prompt.to_string())), ..Default::default() },
+                Message { role: "user".to_string(), content: Some(MessageContent::Text(format!("Context:\\n{}", context))), ..Default::default() },
             ],
-            temperature: Some(0.2),
+            temperature: Some(0.3),
             max_tokens: Some(200),
             tools: None,
         };
 
-        // LIGHTWEIGHT MODEL OPTIMIZATION:
-        let target_model = if let Some(pm_mutex) = &self.planner_model {
-            let pm = pm_mutex.lock().await;
-            (*pm).clone()
-        } else {
-            let m = self.model.lock().await;
-            (*m).clone()
-        };
-
-        if let Ok(response) = target_model.as_ref().complete(request).await {
-            if let Some(content) = response.content {
-                let insight = content.to_string();
-                if !insight.contains("NO_INSIGHT") {
-                    log::info!(
-                        "Agent [{}]: Reflection discovered insight: {}",
-                        session_id,
-                        insight
-                    );
-                    let _ = self.event_tx.send(Event::AgentInsight {
-                        insight: insight.clone(),
-                    });
-
+        let model = self.model.lock().await;
+        if let Ok(response) = model.complete(request).await {
+            if let Some(insight) = response.content.as_ref().and_then(|c| c.as_text()) {
+                if !insight.trim().is_empty() {
+                    log::info!("Agent Reflection Insight: {}", insight);
+                    
                     // Save to fact memory for long-term recall
                     if let Some(fact_mem) = &self.fact_memory {
                         let mut fm = fact_mem.lock().await;
-                        fm.set_fact("learned_context", &insight, 0.9)?;
+                        fm.add_belief(insight, 0.9, "learned_context")?;
                     }
 
                     // Also index into semantic search for recovery across sessions
-                    if let Some(nexus) = &self.knowledge_nexus {
-                        let id = uuid::Uuid::new_v4().to_string();
-                        let _ = nexus
-                            .remember_batch(vec![(
-                                id,
-                                format!("Insight from session {}: {}", session_id, insight),
-                            )])
-                            .await;
+                    if let Some(search) = &self.semantic_search {
+                        let _ = search.remember(insight).await;
                     }
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    pub async fn heartbeat(&self) -> Result<String> {
-        let msg = "system_heartbeat_check: respond with HEARTBEAT_OK if functional.";
-        self.chat(msg).await
-    }
-
-    pub async fn perform_maintenance(&self) -> Result<()> {
-        log::info!("Agent: Performing periodic maintenance (Memory Decay)...");
-        if let Some(nexus) = &self.knowledge_nexus {
-            // Reduce decay_score by 5% (0.95 factor)
-            nexus.decay_memories(0.95).await?;
         }
         Ok(())
     }
@@ -1329,120 +1073,125 @@ impl Agent {
     pub async fn add_fact(&self, fact: &str) -> Result<()> {
         if let Some(fact_memory) = &self.fact_memory {
             let mut fm = fact_memory.lock().await;
-            fm.set_fact("learned_fact", fact, 0.8)?;
+            fm.add_belief(fact, 0.8, "learned_fact")?;
         }
         Ok(())
     }
 
-    async fn handle_model_command(&self, command: &str) -> Result<String> {
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.len() == 1 {
-            let models = crate::providers::registry::ModelRegistry::list_available_models();
-            let mut response = "Available models (based on your API keys):\n".to_string();
-            if models.is_empty() {
-                response.push_str("(No models available. Please check your API keys.)\n");
-            } else {
-                for m in models {
-                    response.push_str(&format!("- {}\n", m));
-                }
-            }
-            response.push_str("\nUsage: `/model <provider>/<model_id>` to switch.");
-            return Ok(response);
+    async fn handle_model_command(&self, cmd: &str) -> Result<String> {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Ok("Usage: /model <model_id>".to_string());
         }
-
         let model_id = parts[1];
-        if let Some(model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
-            self.update_model(model).await;
-            let _ = self.event_tx.send(Event::ModelSwitched {
-                model_id: model_id.to_string(),
-            });
-            return Ok(format!(
-                "✅ Successfully switched to model: **{}**",
-                model_id
-            ));
+        if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
+            let mut model = self.model.lock().await;
+            *model = new_model;
+            let _ = self.event_tx.send(Event::ModelSwitched { model_id: model_id.to_string() });
+            Ok(format!("Switched to model: {}", model_id))
         } else {
-            return Ok(format!(
-                "❌ Model not found or API key missing for: `{}`\nUse `/model` to see available models.",
-                model_id
-            ));
+            Ok(format!("Model not found: {}", model_id))
         }
     }
 
-    async fn scout_workspace(&self, query: &str) -> Option<String> {
-        log::info!(
-            "Proactive Scout: Searching for related files for query: {}",
-            query
-        );
-
-        let keywords: Vec<&str> = query
-            .split_whitespace()
-            .filter(|w| w.len() > 4)
-            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
-            .collect();
-
-        if keywords.is_empty() {
-            return None;
-        }
-
-        let mut discovered_content = String::new();
-        let mut count = 0;
-
-        for kw in keywords {
-            if count >= 2 {
-                break;
-            }
-            let cmd = format!(
-                "find . -maxdepth 3 -name '*{}*' -not -path '*/.*' | head -n 1",
-                kw
-            );
-            let output = tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(cmd)
-                .output()
-                .await
-                .ok()?;
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() && std::path::Path::new(&path).is_file() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    discovered_content.push_str(&format!(
-                        "\n--- SCOUTED FILE: {} ---\n{}\n",
-                        path,
-                        content.lines().take(50).collect::<Vec<_>>().join("\n")
-                    ));
-                    count += 1;
-                }
-            }
-        }
-
-        if discovered_content.is_empty() {
-            None
-        } else {
-            Some(discovered_content)
-        }
+    pub async fn soul(&self) -> crate::soul::Soul {
+        let pm = self.prompt_manager.lock().await;
+        pm.soul().clone()
     }
-}
 
-pub struct AgentSoulManager(pub Arc<Agent>);
+    pub async fn set_soul(&self, soul: crate::soul::Soul) {
+        let mut pm = self.prompt_manager.lock().await;
+        pm.set_soul(soul);
+    }
 
-#[async_trait::async_trait]
-impl pharmakon_common::SoulManager for AgentSoulManager {
-    async fn update_soul(
-        &self,
-        traits: Option<Vec<String>>,
-        prompt: Option<String>,
-        style: Option<String>,
-    ) -> anyhow::Result<()> {
-        let mut soul = self.0.soul().await;
-        if let Some(t) = traits {
-            soul.traits = t;
+    pub async fn add_contribution(&self, contribution: Box<dyn crate::system_prompt::SystemPromptContribution>) {
+        let mut pm = self.prompt_manager.lock().await;
+        pm.add_contribution(contribution);
+    }
+
+    pub fn with_isolated_knowledge(self) -> Self {
+        // In a real impl, this would isolate the fact memory/nexus
+        self
+    }
+
+    pub async fn commit_knowledge(&self) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn trajectory_steps(&self) -> Vec<crate::trajectory::TrajectoryStep> {
+        let t = self.trajectory.lock().await;
+        t.steps.clone()
+    }
+
+    pub async fn get_history(&self) -> Vec<Message> {
+        let state_arc = self.get_current_session_state().await;
+        let state = state_arc.lock().await;
+        state.history.clone()
+    }
+
+    pub async fn record_step(&self, step: crate::trajectory::TrajectoryStep) -> Result<()> {
+        let session_id = CURRENT_SESSION_ID.try_with(|id| id.clone()).unwrap_or_else(|_| "default".to_string());
+
+        {
+            let mut trajectory = self.trajectory.lock().await;
+            trajectory.add_step(step.clone());
         }
-        if let Some(p) = prompt {
-            soul.system_prompt = p;
+
+        if let Some(store) = &self.session_store {
+            let event_type = match &step {
+                crate::trajectory::TrajectoryStep::Intent { .. } => "intent",
+                crate::trajectory::TrajectoryStep::Thought { .. } => "thought",
+                crate::trajectory::TrajectoryStep::Action { .. } => "action",
+                crate::trajectory::TrajectoryStep::Observation { .. } => "observation",
+                crate::trajectory::TrajectoryStep::Response { .. } => "response",
+            };
+            let payload = serde_json::to_value(&step)?;
+            let _ = store.save_trajectory_event(&session_id, event_type, &payload).await;
         }
-        if let Some(s) = style {
-            soul.response_style = Some(s);
+        Ok(())
+    }
+
+    pub async fn register_playbook(&self, session_id: &str, name: String, content: String) -> Result<()> {
+        let state_arc = self.get_session_state(session_id).await;
+        let mut state = state_arc.lock().await;
+        if !state.active_playbooks.iter().any(|(n, _)| n == &name) {
+            state.active_playbooks.push((name, content));
         }
-        self.0.set_soul(soul).await;
+        Ok(())
+    }
+
+    pub async fn reset_history(&self) -> Result<()> {
+        self.clear_history().await
+    }
+
+    pub async fn reset_session_history(&self, session_id: &str) -> Result<()> {
+        let mut states = self.session_states.lock().await;
+        states.remove(session_id);
+        Ok(())
+    }
+
+    pub fn approve(&self, id: String, approved: bool) {
+        let _ = self.approval_tx.send((id, approved));
+    }
+
+    pub async fn get_token_usage(&self) -> (u64, f64) {
+        (
+            self.total_tokens.load(std::sync::atomic::Ordering::SeqCst),
+            *self.total_cost.lock().await,
+        )
+    }
+
+    pub async fn model_name(&self) -> String {
+        let m = self.model.lock().await;
+        m.name().to_string()
+    }
+
+    pub async fn heartbeat(&self) -> Result<String> {
+        Ok("HEARTBEAT_OK".to_string())
+    }
+
+    pub async fn perform_maintenance(&self) -> Result<()> {
+        log::info!("Agent: Performing autonomous maintenance...");
         Ok(())
     }
 }

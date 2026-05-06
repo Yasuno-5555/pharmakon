@@ -417,14 +417,30 @@ pub struct ResearchNotebook {
     pub visited_urls: HashMap<String, ResearchDepth>,
     pub dead_ends: Vec<String>,
     pub research_tree: HashMap<String, Vec<String>>, // Query -> List of URLs
+    pub step_count: u32,
+    pub max_steps: u32,
+    pub last_information_gain: f32,
+    pub min_information_gain: f32,
 }
 
 impl ResearchNotebook {
     pub fn new(goal: &str) -> Self {
         Self {
             current_goal: goal.to_string(),
+            max_steps: 10,
+            min_information_gain: 0.1,
             ..Default::default()
         }
+    }
+
+    pub fn should_stop(&self) -> bool {
+        if self.step_count >= self.max_steps {
+            return true;
+        }
+        if self.step_count > 2 && self.last_information_gain < self.min_information_gain {
+            return true;
+        }
+        false
     }
 
     pub fn to_summary_string(&self) -> String {
@@ -465,4 +481,40 @@ pub trait ResearchPersistence: Send + Sync {
         depth: &str,
         metadata: &serde_json::Value,
     ) -> anyhow::Result<()>;
+}
+
+pub struct CodeUtils;
+
+impl CodeUtils {
+    pub fn skeletonize_code(code: &str) -> String {
+        let mut skeleton = String::new();
+        let mut in_body = 0;
+        let mut brace_count = 0;
+        for line in code.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() { continue; }
+
+            if in_body == 0 {
+                skeleton.push_str(line);
+                if trimmed.ends_with('{') || trimmed.contains('{') {
+                    skeleton.push_str(" { ... }\n");
+                    in_body = 1;
+                    brace_count = trimmed.chars().filter(|&c| c == '{').count() as i32 - trimmed.chars().filter(|&c| c == '}').count() as i32;
+                    if brace_count <= 0 { in_body = 0; }
+                } else {
+                    skeleton.push('\n');
+                }
+            } else {
+                brace_count += trimmed.chars().filter(|&c| c == '{').count() as i32 - trimmed.chars().filter(|&c| c == '}').count() as i32;
+                if brace_count <= 0 {
+                    in_body = 0;
+                }
+            }
+        }
+        if skeleton.is_empty() {
+            code.to_string()
+        } else {
+            skeleton
+        }
+    }
 }

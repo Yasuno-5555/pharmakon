@@ -45,6 +45,7 @@ lancedb = "0.27"
 arrow = "57"
 petgraph = "0.7"
 xcap = "0.0.10"
+diffy = "0.4"
 
 
 pharmakon-common = { path = "crates/common" }

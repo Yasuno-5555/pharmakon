@@ -131,3 +131,12 @@ impl Tool for ParallelSwarmTool {
         Ok(report)
     }
 }
+
+pub struct NoopSpawner;
+
+#[async_trait]
+impl AgentSpawner for NoopSpawner {
+    async fn spawn(&self, _task: &str, _soul: Option<String>, _depth: u8) -> anyhow::Result<String> {
+        anyhow::bail!("Sub-agent spawning is not enabled in this context. Use direct tool calls instead.")
+    }
+}

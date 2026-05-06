@@ -62,8 +62,9 @@ impl Hook for TokenEconomyHook {
                     if *total > limit {
                         log::warn!("🚨 TOKEN BUDGET EXCEEDED! ({} > {})", *total, limit);
                         // Inject a strong warning for the next turn
-                        let mut history = ctx.agent.history.lock().await;
-                        history.push(Message {
+                        let state_arc = ctx.agent.get_current_session_state().await;
+                        let mut state = state_arc.lock().await;
+                        state.history.push(Message {
                             role: "system".to_string(),
                             content: Some(MessageContent::Text(format!(
                                 "CRITICAL: You have exceeded your token budget ({} / {}). \
@@ -75,8 +76,9 @@ impl Hook for TokenEconomyHook {
                         });
                     } else if u.total_tokens > 2000 {
                         // Single message was expensive
-                        let mut history = ctx.agent.history.lock().await;
-                        history.push(Message {
+                        let state_arc = ctx.agent.get_current_session_state().await;
+                        let mut state = state_arc.lock().await;
+                        state.history.push(Message {
                             role: "system".to_string(),
                             content: Some(MessageContent::Text(
                                 "WARNING: Your last response was quite large. Please prioritize precision and brevity in future turns to save tokens."
@@ -88,15 +90,20 @@ impl Hook for TokenEconomyHook {
                 }
 
                 // Also trigger compaction if history is long
-                let len = ctx.agent.history.lock().await.len();
+                let state_arc = ctx.agent.get_current_session_state().await;
+                let len = {
+                    let state = state_arc.lock().await;
+                    state.history.len()
+                };
                 if len > 15 {
                     let agent = ctx.agent.clone();
                     tokio::spawn(async move {
-                        let mut history_lock = agent.history.lock().await;
+                        let state_arc = agent.get_current_session_state().await;
+                        let mut state = state_arc.lock().await;
                         let compactor = agent.compactor.lock().await;
-                        let _ = compactor.compact(history_lock.clone()).await.map(|new_h| {
-                            *history_lock = new_h;
-                        });
+                        if let Ok(new_h) = compactor.compact(state.history.clone()).await {
+                             state.history = new_h;
+                        }
                     });
                 }
             }

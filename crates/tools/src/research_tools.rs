@@ -96,18 +96,18 @@ impl Tool for ResearchFetchTool {
         };
 
         // Check cache
-        if let Some(store) = &self.store {
-            if let Ok(Some((summary, cached_depth, _))) = store.get_research_cache(url).await {
-                // If cached depth is equal or deeper than requested, return cache
-                if (cached_depth == "deep")
-                    || (cached_depth == "summary" && depth_str != "deep")
-                    || (cached_depth == "skim" && depth_str == "skim")
-                {
-                    return Ok(format!(
-                        "(CACHE HIT) Fetched '{}' at {} depth:\n\n{}",
-                        url, cached_depth, summary
-                    ));
-                }
+        if let Some(store) = &self.store
+            && let Ok(Some((summary, cached_depth, _))) = store.get_research_cache(url).await
+        {
+            // If cached depth is equal or deeper than requested, return cache
+            if (cached_depth == "deep")
+                || (cached_depth == "summary" && depth_str != "deep")
+                || (cached_depth == "skim" && depth_str == "skim")
+            {
+                return Ok(format!(
+                    "(CACHE HIT) Fetched '{}' at {} depth:\n\n{}",
+                    url, cached_depth, summary
+                ));
             }
         }
 

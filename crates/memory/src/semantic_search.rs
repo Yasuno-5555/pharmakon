@@ -25,7 +25,7 @@ impl SemanticSearch {
             .embedding_model
             .generate_embedding(text)
             .await
-            .map_err(|e| anyhow::Error::new(e))?;
+            .map_err(anyhow::Error::new)?;
         let id = rand::random::<u64>();
         self.vector_store.add_memory(id, vector, text).await
     }
@@ -41,7 +41,7 @@ impl SemanticSearch {
             .embedding_model
             .generate_embedding(query)
             .await
-            .map_err(|e| anyhow::Error::new(e))?;
+            .map_err(anyhow::Error::new)?;
         self.vector_store.search_memory(vector, limit).await
     }
 

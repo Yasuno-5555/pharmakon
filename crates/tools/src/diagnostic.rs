@@ -9,6 +9,8 @@ pub struct DiagnosticTool {
     pub vision_stream: Option<Arc<Mutex<VisionRingBuffer>>>,
     pub telemetry: Option<Arc<Mutex<pharmakon_common::telemetry::SystemTelemetry>>>,
     pub mcp_stats_source: String,
+    pub total_tokens: Option<Arc<std::sync::atomic::AtomicU64>>,
+    pub total_cost: Option<Arc<Mutex<f64>>>,
 }
 
 #[async_trait]
@@ -110,6 +112,19 @@ impl Tool for DiagnosticTool {
                 } else {
                     Ok("PC Telemetry not initialized.".to_string())
                 }
+            },
+            "token_usage" => {
+                let tokens = self.total_tokens.as_ref().map(|t| t.load(std::sync::atomic::Ordering::SeqCst)).unwrap_or(0);
+                let cost = if let Some(c) = &self.total_cost {
+                    *c.lock().await
+                } else {
+                    0.0
+                };
+                Ok(json!({
+                    "total_tokens_consumed": tokens,
+                    "estimated_cost_usd": format!("${:.4}", cost),
+                    "status": "Tracking Active"
+                }).to_string())
             },
             _ => Err(AgentError("Unknown diagnostic aspect".to_string()))
         }

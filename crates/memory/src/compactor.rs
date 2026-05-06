@@ -12,6 +12,7 @@ impl ContextCompactor {
     }
 
     pub async fn compact(&self, history: Vec<Message>) -> Result<Vec<Message>> {
+        // ... (existing code remains same) ...
         if history.len() < 10 {
             return Ok(history);
         }
@@ -27,7 +28,9 @@ impl ContextCompactor {
         let middle_part = &history[1..len - 5];
 
         let mut summary_prompt =
-            String::from("Summarize the following part of a conversation concisely:\n\n");
+            String::from("Compress the following conversation into a HIGH-DENSITY semantic summary. \
+                          Focus on key facts, user preferences, current goals, and finalized decisions. \
+                          Use a structural format if possible. Avoid conversational filler.\n\n");
         for msg in middle_part {
             let role = &msg.role;
             let content = match &msg.content {
@@ -37,7 +40,7 @@ impl ContextCompactor {
             summary_prompt.push_str(role);
             summary_prompt.push_str(": ");
             summary_prompt.push_str(&content);
-            summary_prompt.push_str("\n");
+            summary_prompt.push('\n');
         }
 
         let summary_res = self
@@ -53,7 +56,7 @@ impl ContextCompactor {
                 tools: None,
             })
             .await
-            .map_err(|e| anyhow::Error::new(e))?;
+            .map_err(anyhow::Error::new)?;
 
         let summary = match summary_res.content {
             Some(c) => c.to_string(),
@@ -72,5 +75,29 @@ impl ContextCompactor {
         new_history.extend(history[len - 5..].to_vec());
 
         Ok(new_history)
+    }
+
+    /// Sparse Encoding: Compresses a large block of text into a high-density structural summary.
+    pub async fn compact_block(&self, content: &str, target_density: f32) -> Result<String> {
+        let prompt = format!(
+            "REDUCE the following content to a HIGH-DENSITY structural representation (Sparse Encoding). \
+            Identify key symbols, inputs, outputs, risks, and core logic. Use a key-value style. \
+            Target Compression Ratio: {:.1}:1. \n\nCONTENT:\n{}",
+            1.0 / target_density.max(0.1),
+            content
+        );
+
+        let res = self.model.complete(CompletionRequest {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text(prompt)),
+                ..Default::default()
+            }],
+            temperature: Some(0.2),
+            max_tokens: None,
+            tools: None,
+        }).await.map_err(anyhow::Error::new)?;
+
+        Ok(res.content.map(|c| c.to_string()).unwrap_or_else(|| "[Compression failed]".to_string()))
     }
 }

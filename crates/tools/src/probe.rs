@@ -10,6 +10,12 @@ impl EnvironmentProbeTool {
     }
 }
 
+impl Default for EnvironmentProbeTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Tool for EnvironmentProbeTool {
     fn name(&self) -> &str {

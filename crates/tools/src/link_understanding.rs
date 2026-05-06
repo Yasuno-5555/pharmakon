@@ -3,15 +3,18 @@ use pharmakon_common::{AgentError, AgentResult, Tool};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 pub struct LinkUnderstandingTool {
     client: Client,
+    pub model: Option<Arc<dyn pharmakon_common::AgentModel>>,
 }
 
 impl LinkUnderstandingTool {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
+            model: None,
         }
     }
 }

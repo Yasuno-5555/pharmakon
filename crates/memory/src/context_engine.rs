@@ -2,7 +2,16 @@ use anyhow::Result;
 use pharmakon_common::Message;
 use tiktoken_rs::cl100k_base;
 
-/// ContextEngine manages the agent's conversation history to stay within token limits.
+/// A single entry in the virtual context index.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ContextEntry {
+    pub id: String,
+    pub summary: String,
+    pub relevance: f32,
+    pub category: String,
+}
+
+/// ContextEngine manages the agent's conversation history and virtual context scaling.
 pub struct ContextEngine {
     max_tokens: usize,
     pinned_indices: Vec<usize>,
@@ -14,6 +23,33 @@ impl ContextEngine {
             max_tokens,
             pinned_indices: Vec::new(),
         }
+    }
+
+    pub fn clear_history(&mut self) {
+        self.pinned_indices.clear();
+    }
+
+    /// Semantic Noise Gate: Filters entries based on a relevance threshold (0.0 - 1.0).
+    pub fn filter_noise(&self, entries: Vec<ContextEntry>, threshold: f32) -> Vec<ContextEntry> {
+        entries
+            .into_iter()
+            .filter(|e| e.relevance >= threshold)
+            .collect()
+    }
+
+    /// Virtual Context Indexing: Generates a lightweight index of available information.
+    /// This index allows the agent to "see" what is available without loading the full content.
+    pub fn generate_virtual_index(&self, entries: &[ContextEntry]) -> String {
+        let mut index = String::from("### Virtual Context Index\n");
+        index.push_str("Available information slots (use tools to hydrate details):\n\n");
+        
+        for entry in entries {
+            index.push_str(&format!(
+                "- [{}] id: `{}` | relevance: {:.2} | summary: {}\n",
+                entry.category, entry.id, entry.relevance, entry.summary
+            ));
+        }
+        index
     }
 
     pub fn pin_message(&mut self, index: usize) {

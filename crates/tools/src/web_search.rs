@@ -92,3 +92,60 @@ impl Tool for BraveSearchTool {
         }
     }
 }
+pub struct GoogleSearchTool;
+
+#[async_trait]
+impl Tool for GoogleSearchTool {
+    fn name(&self) -> &str {
+        "google_search"
+    }
+    fn description(&self) -> &str {
+        "Search Google for high-precision results using the Google Custom Search API. Best for broad technical queries."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "The search query" },
+                "count": { "type": "integer", "default": 5 }
+            },
+            "required": ["query"]
+        })
+    }
+
+    async fn call(&self, args: Value) -> AgentResult<String> {
+        let query = args["query"].as_str().ok_or_else(|| AgentError("Missing query".to_string()))?;
+        let secret_store = SecretStore::new();
+        let api_key = secret_store.get_secret("GOOGLE_SEARCH_API_KEY").or_else(|_| std::env::var("GOOGLE_SEARCH_API_KEY"))
+            .map_err(|_| AgentError("GOOGLE_SEARCH_API_KEY not found.".to_string()))?;
+        let cx = secret_store.get_secret("GOOGLE_SEARCH_CX").or_else(|_| std::env::var("GOOGLE_SEARCH_CX"))
+            .map_err(|_| AgentError("GOOGLE_SEARCH_CX (Custom Search Engine ID) not found.".to_string()))?;
+
+        let client = reqwest::Client::new();
+        let url = "https://www.googleapis.com/customsearch/v1";
+        let response = client.get(url)
+            .query(&[("key", api_key.as_str()), ("cx", cx.as_str()), ("q", query)])
+            .send().await.map_err(|e| AgentError(e.to_string()))?;
+
+        if !response.status().is_success() {
+             return Err(AgentError(format!("Google API error: {}", response.status())));
+        }
+
+        let body: Value = response.json().await.map_err(|e| AgentError(e.to_string()))?;
+        let mut results = Vec::new();
+        if let Some(items) = body.get("items").and_then(|i| i.as_array()) {
+            for item in items {
+                let title = item["title"].as_str().unwrap_or("No Title");
+                let link = item["link"].as_str().unwrap_or("");
+                let snippet = item["snippet"].as_str().unwrap_or("");
+                results.push(format!("### {}\nURL: {}\nSnippet: {}\n", title, link, snippet));
+            }
+        }
+
+        if results.is_empty() {
+            Ok("No Google results found.".to_string())
+        } else {
+            Ok(results.join("\n"))
+        }
+    }
+}

@@ -54,6 +54,9 @@ impl InitiativeEngineWorker {
                         };
                         context_summary.push_str(&format!("Observation: {}\n", truncated));
                     }
+                    crate::trajectory::TrajectoryStep::Intent { goal, .. } => {
+                        context_summary.push_str(&format!("Intent: {}\n", goal));
+                    }
                 }
             }
 

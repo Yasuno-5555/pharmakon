@@ -19,6 +19,12 @@ struct TerminalSession {
     stderr_reader: BufReader<tokio::process::ChildStderr>,
 }
 
+impl Default for TerminalTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalTool {
     pub fn new() -> Self {
         Self {
@@ -214,6 +220,12 @@ impl BackgroundRunTool {
         Self {
             active_processes: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
+    }
+}
+
+impl Default for BackgroundRunTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

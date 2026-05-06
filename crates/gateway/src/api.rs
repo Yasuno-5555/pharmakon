@@ -87,12 +87,13 @@ pub async fn get_state(
 ) -> impl IntoResponse {
     let agent_lock = agent.lock().await;
     let trajectory = agent_lock.trajectory.lock().await;
-    let history = agent_lock.history.lock().await;
+    let state_arc = agent_lock.get_current_session_state().await;
+    let state = state_arc.lock().await;
 
     Json(json!({
         "session_id": agent_lock.session_id.lock().await.clone(),
         "trajectory_steps": trajectory.steps.len(),
-        "history_messages": history.len(),
+        "history_messages": state.history.len(),
         "model": trajectory.metadata.model.clone(),
     }))
 }

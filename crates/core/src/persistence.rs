@@ -77,6 +77,18 @@ impl DbSessionStore {
         .await?;
 
         sqlx::query(
+            "CREATE TABLE IF NOT EXISTS trajectory_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS trajectories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -456,6 +468,48 @@ struct MessageRow {
 }
 
 impl DbSessionStore {
+    pub async fn save_trajectory_event(
+        &self,
+        session_id: &str,
+        event_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<()> {
+        let payload_json = serde_json::to_string(payload)?;
+        sqlx::query(
+            "INSERT INTO trajectory_events (session_id, event_type, payload)
+             VALUES (?, ?, ?)",
+        )
+        .bind(session_id)
+        .bind(event_type)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn load_trajectory_events(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::trajectory::TrajectoryStep>> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT event_type, payload FROM trajectory_events
+             WHERE session_id = ? ORDER BY timestamp ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut steps = Vec::new();
+        for (event_type, payload) in rows {
+            // We need to reconstruct TrajectoryStep. 
+            // Since TrajectoryStep is an enum with #[serde(tag = "type")], 
+            // the payload must match that structure.
+            let step: crate::trajectory::TrajectoryStep = serde_json::from_str(&payload)?;
+            steps.push(step);
+        }
+        Ok(steps)
+    }
+
     pub async fn save_trajectory(&self, trajectory: &Trajectory) -> Result<()> {
         let steps_json = serde_json::to_string(&trajectory.steps)?;
         sqlx::query("INSERT INTO trajectories (session_id, steps_json, model) VALUES (?, ?, ?)")

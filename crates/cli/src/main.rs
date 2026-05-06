@@ -276,7 +276,7 @@ async fn main() -> Result<()> {
                 .await?,
             );
             let fact_memory =
-                Arc::new(Mutex::new(pharmakon_memory::fact_memory::FactMemory::new()?));
+                Arc::new(Mutex::new(pharmakon_memory::fact_memory::BeliefSystem::new()?));
 
             let mut agent = Agent::new(model_obj, "gateway".to_string())
                 .with_store(session_store.clone())
@@ -387,7 +387,7 @@ async fn main() -> Result<()> {
                 .await?,
             );
             let fact_memory =
-                Arc::new(Mutex::new(pharmakon_memory::fact_memory::FactMemory::new()?));
+                Arc::new(Mutex::new(pharmakon_memory::fact_memory::BeliefSystem::new()?));
 
             let mut agent = Agent::new(model_obj, session.clone())
                 .with_store(session_store.clone())

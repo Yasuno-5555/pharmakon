@@ -11,6 +11,7 @@ pub struct TelegramChannel {
     pub token: String,
     pub bot: Bot,
     pub last_chat_id: Arc<Mutex<Option<ChatId>>>,
+    pub chat_sessions: Arc<Mutex<std::collections::HashMap<ChatId, String>>>,
 }
 
 impl TelegramChannel {
@@ -20,6 +21,7 @@ impl TelegramChannel {
             token,
             bot,
             last_chat_id: Arc::new(Mutex::new(None)),
+            chat_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -60,11 +62,18 @@ impl Channel for TelegramChannel {
         }
 
         let handler = dptree::entry()
-            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Mutex<Agent>>, last_chat_id: Arc<Mutex<Option<ChatId>>>| async move {
+            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Mutex<Agent>>, last_chat_id: Arc<Mutex<Option<ChatId>>>, chat_sessions: Arc<Mutex<std::collections::HashMap<ChatId, String>>>| async move {
                 {
                     let mut last_id = last_chat_id.lock().await;
                     *last_id = Some(msg.chat.id);
                 }
+
+                let session_id = {
+                    let mut sessions = chat_sessions.lock().await;
+                    sessions.entry(msg.chat.id)
+                        .or_insert_with(|| format!("telegram-{}", msg.chat.id))
+                        .clone()
+                };
 
                 if let Some(text) = msg.text() {
                     log::info!("Telegram received message from {}: {}", msg.chat.id, text);
@@ -83,10 +92,27 @@ impl Channel for TelegramChannel {
                         return Ok(());
                     }
 
+                    // Auto-index user message for future recovery (DISABLED to prevent cross-session memory leaks)
+                    /*
+                    if user_message.len() > 10 {
+                        if let Some(nexus) = &self.knowledge_nexus {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            let _ = nexus
+                                .remember_batch(vec![(id, user_message.to_string())])
+                                .await;
+                        }
+                    }
+                    */
+
                     if text == "/new" {
                         log::info!("Telegram: Resetting session as requested by user.");
-                        agent.lock().await.start_new_session().await;
-                        let _ = bot.send_message(msg.chat.id, "🔄 New session started. Previous context has been cleared.").await;
+                        let new_id = uuid::Uuid::new_v4().to_string();
+                        {
+                            let mut sessions = chat_sessions.lock().await;
+                            sessions.insert(msg.chat.id, new_id.clone());
+                        }
+                        agent.lock().await.reset_session_history(&session_id).await;
+                        let _ = bot.send_message(msg.chat.id, "🔄 New session started. Previous context has been cleared for this chat.").await;
                         return Ok(());
                     }
 
@@ -108,7 +134,7 @@ impl Channel for TelegramChannel {
                     let text_owned = text.to_string();
                     tokio::spawn(async move {
                         let agent_lock = agent_spawn.lock().await;
-                        match agent_lock.chat(&text_owned).await {
+                        match agent_lock.chat_on_session(&text_owned, &session_id).await {
                             Ok(response) => {
                                 log::info!("Telegram sending response to {}: {}", chat_id, response);
                                 match bot.send_message(chat_id, response).await {
@@ -127,7 +153,7 @@ impl Channel for TelegramChannel {
             }));
 
         let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
-            .dependencies(dptree::deps![agent.clone(), self.last_chat_id.clone()])
+            .dependencies(dptree::deps![agent.clone(), self.last_chat_id.clone(), self.chat_sessions.clone()])
             .enable_ctrlc_handler()
             .build();
 
@@ -136,7 +162,7 @@ impl Channel for TelegramChannel {
         let agent_for_events = agent.clone();
         let last_chat_id = self.last_chat_id.clone();
         tokio::spawn(async move {
-            let event_tx = agent_for_events.lock().await.event_tx();
+            let event_tx = agent_for_events.lock().await.event_tx.clone();
             let mut event_rx = event_tx.subscribe();
             log::info!("Telegram event listener started.");
 

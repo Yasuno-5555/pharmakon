@@ -13,6 +13,7 @@ log.workspace = true
 teloxide.workspace = true
 serenity.workspace = true
 slack-morphism.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

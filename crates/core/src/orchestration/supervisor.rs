@@ -50,11 +50,12 @@ impl Supervisor {
             // Check if the agent wants to talk to someone else
             let next_target = {
                 let agent = agent_arc.lock().await;
-                let history = agent.history.lock().await;
+                let state_arc = agent.get_current_session_state().await;
+                let state = state_arc.lock().await;
                 let mut target = None;
 
                 // Scan history in reverse to find routing tool calls from the last turn
-                for msg in history.iter().rev() {
+                for msg in state.history.iter().rev() {
                     if let Some(tool_calls) = &msg.tool_calls {
                         for tc in tool_calls {
                             if tc.function.name == "send_message" {

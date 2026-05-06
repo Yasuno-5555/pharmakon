@@ -3,8 +3,15 @@ use pharmakon_common::{AgentError, AgentResult, Tool};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct PlaybookTool;
+
+impl PlaybookTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 impl PlaybookTool {
     fn apply_variables(content: &str, variables: &Value) -> String {
@@ -41,6 +48,31 @@ impl PlaybookTool {
                 "1. Reproduce the bug with a minimal test case.\n2. Use `diagnostic` tools to trace the failure.\n3. Use `Knowledge Nexus` to find related logic blocks that might be affected.\n4. Set `semantic_anchors` at suspected logic points.\n5. Fix the bug and verify with the reproduction test.",
             ),
         ]
+    }
+
+    pub fn list_names() -> Vec<String> {
+        let mut names = Vec::new();
+        for (name, _) in Self::get_builtin_playbooks() {
+            names.push(name.to_string());
+        }
+
+        let recipes_dir = std::path::PathBuf::from(".pharmakon/recipes");
+        if recipes_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&recipes_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                            let name_str = name.to_string();
+                            if !names.contains(&name_str) {
+                                names.push(name_str);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        names
     }
 }
 

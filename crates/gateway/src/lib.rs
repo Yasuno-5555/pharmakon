@@ -445,7 +445,10 @@ async fn handle_socket(
                         let agent_lock = agent_clone_inner.lock().await;
                         if let Some(graph) = &agent_lock.graph_store {
                             if let Ok(relations) = graph.query_relations(&query).await {
-                                let _ = agent_lock.event_tx.send(Event::GraphUpdate { relations });
+                                let relations_str = relations.into_iter()
+                                    .map(|(n, e)| format!("{} -> {} ({})", e.from_id, n.label, e.relation))
+                                    .collect();
+                                let _ = agent_lock.event_tx.send(Event::GraphUpdate { relations: relations_str });
                             }
                         }
                     }

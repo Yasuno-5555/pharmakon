@@ -8,6 +8,14 @@ pub struct DiscoverToolsTool {
     pub tool_registry: Arc<Mutex<Vec<Arc<dyn Tool>>>>,
 }
 
+impl DiscoverToolsTool {
+    pub fn new() -> Self {
+        Self {
+            tool_registry: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
 #[async_trait]
 impl Tool for DiscoverToolsTool {
     fn name(&self) -> &str {

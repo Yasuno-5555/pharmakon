@@ -16,7 +16,7 @@ pub struct AgentRouter {
     store: Arc<DbSessionStore>,
     config: Config,
     nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
-    fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>>,
+    fact_memory: Option<Arc<Mutex<pharmakon_memory::BeliefSystem>>>,
 }
 
 impl AgentRouter {
@@ -25,7 +25,7 @@ impl AgentRouter {
         store: Arc<DbSessionStore>,
         config: Config,
         nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
-        fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>>,
+        fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::BeliefSystem>>>,
     ) -> Self {
         Self {
             agents: HashMap::new(),
@@ -105,9 +105,12 @@ impl AgentRouter {
                     store: Some(
                         self.store.clone() as Arc<dyn pharmakon_common::CommitmentPersistence>
                     ),
-                    soul_manager: None, // TODO: Initialize SoulManager if needed
-                    event_tx: None,     // TODO: Initialize Event broadcaster if needed
+                    soul_manager: None,
+                    event_tx: None,
                     nexus: self.nexus.clone(),
+                    vision_stream: None,
+                    total_tokens: None,
+                    total_cost: None,
                 };
 
                 for tool_name in allowed_tools {

@@ -8,6 +8,7 @@ struct HealthStats {
     last_latency: Duration,
 }
 
+#[derive(Clone)]
 pub struct HealthMonitor {
     stats: Arc<Mutex<HealthStats>>,
     threshold: f32, // failure rate threshold (0.0 to 1.0)

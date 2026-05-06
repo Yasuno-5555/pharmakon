@@ -5,6 +5,12 @@ use std::process::Command;
 
 pub struct WorkspacePerceptionTool;
 
+impl WorkspacePerceptionTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 #[async_trait]
 impl Tool for WorkspacePerceptionTool {
     fn name(&self) -> &str {

@@ -10,8 +10,14 @@ pub struct WebFetchTool {
 impl WebFetchTool {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: reqwest::Client::new(),
         }
+    }
+}
+
+impl Default for WebFetchTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
