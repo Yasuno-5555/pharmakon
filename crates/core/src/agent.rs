@@ -27,6 +27,8 @@ pub struct Agent {
     pub planner_model: Option<Arc<dyn AgentModel>>,
     pub vision_stream: Option<Arc<Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
     pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
+    pub interaction_count: u32,
+    pub fallback_models: Vec<String>,
 }
 
 impl Agent {
@@ -60,7 +62,14 @@ impl Agent {
             planner_model: None,
             vision_stream: None,
             graph_store: None,
+            interaction_count: 0,
+            fallback_models: Vec::new(),
         }
+    }
+
+    pub fn with_fallback_models(mut self, models: Vec<String>) -> Self {
+        self.fallback_models = models;
+        self
     }
 
     pub fn with_store(mut self, store: Arc<crate::persistence::DbSessionStore>) -> Self {
@@ -70,6 +79,11 @@ impl Agent {
 
     pub fn with_memory_weaver(mut self, weaver: Arc<pharmakon_memory::weaver::MemoryWeaver>) -> Self {
         self.memory_weaver = Some(weaver);
+        self
+    }
+
+    pub fn with_fact_memory(mut self, fact_memory: Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>) -> Self {
+        self.fact_memory = Some(fact_memory);
         self
     }
 
@@ -88,7 +102,16 @@ impl Agent {
     }
 
     pub fn add_tool(&mut self, tool: Arc<dyn pharmakon_common::Tool>) {
-        self.tools.push(tool);
+        if !self.tools.iter().any(|t| t.name() == tool.name()) {
+            self.tools.push(tool);
+        }
+    }
+
+    pub fn update_model(&mut self, model: Arc<dyn AgentModel>) {
+        self.model = model.clone();
+        self.trajectory.metadata.model = model.name().to_string();
+        self.compactor = crate::memory::compactor::ContextCompactor::new(model);
+        log::info!("Agent model updated to: {}", self.model.name());
     }
 
     pub fn reset_history(&mut self) {
@@ -130,23 +153,29 @@ impl Agent {
             }
         }
 
+        let _ = self.event_tx.send(Event::AgentThought { content: MessageContent::Text("Thinking...".to_string()) });
+
         // Parallel context gathering
         let semantic_search = self.semantic_search.clone();
         let memory_weaver = self.memory_weaver.clone();
         let user_msg_text = user_message.to_string();
         
-        let (semantic_res, weaver_res) = tokio::join!(
-            async {
-                if let Some(search) = semantic_search {
-                    search.search_with_limit(&user_msg_text, 3).await.ok()
-                } else { None }
-            },
-            async {
-                if let Some(weaver) = memory_weaver {
-                    weaver.search(&user_msg_text, 5).await.ok()
-                } else { None }
-            }
-        );
+        let (semantic_res, weaver_res) = if user_message.len() < 5 {
+            (None, None)
+        } else {
+            tokio::join!(
+                async {
+                    if let Some(search) = semantic_search {
+                        search.search_with_limit(&user_msg_text, 3).await.ok()
+                    } else { None }
+                },
+                async {
+                    if let Some(weaver) = memory_weaver {
+                        weaver.search(&user_msg_text, 5).await.ok()
+                    } else { None }
+                }
+            )
+        };
 
         if let Some(memories) = semantic_res {
             if !memories.is_empty() {
@@ -196,10 +225,10 @@ impl Agent {
             };
 
             // Tiered Reasoning: Use planner model for tool selection if available
-            let target_model = if tool_definitions.is_some() && self.planner_model.is_some() {
-                self.planner_model.as_ref().unwrap()
+            let initial_target_model = if tool_definitions.is_some() && self.planner_model.is_some() {
+                self.planner_model.clone().unwrap()
             } else {
-                &self.model
+                self.model.clone()
             };
 
             let req_temp = self.prompt_manager.soul().temperature_override.map(|t| t as f32).or(Some(0.7f32));
@@ -210,37 +239,107 @@ impl Agent {
                 tools: tool_definitions,
             };
 
-            log::debug!("Agent sending request to model: {}", target_model.name());
-            let start = std::time::Instant::now();
-            let response = if self.tools.is_empty() {
-                let mut stream = target_model.stream_complete(request).await?;
-                let mut full_content = String::new();
-                use futures::StreamExt;
-                while let Some(chunk_result) = stream.next().await {
-                    let chunk = chunk_result?;
-                    full_content.push_str(&chunk);
-                    let _ = self.event_tx.send(pharmakon_common::Event::AgentThoughtChunk { 
-                        session_id: self.session_id.clone(), 
-                        chunk 
-                    });
-                }
-                CompletionResponse {
-                    content: Some(pharmakon_common::MessageContent::Text(full_content)),
-                    tool_calls: None,
-                    usage: None,
-                }
+            let mut target_model = initial_target_model.clone();
+            let mut response_result;
+            let mut current_fallback_index = 0;
+            // DYNAMIC FALLBACK OPTIMIZATION: Use models from configuration
+            let fallback_models = if !self.fallback_models.is_empty() {
+                self.fallback_models.clone()
             } else {
-                match self.model.complete(request).await {
-                    Ok(res) => {
-                        self.health_monitor.record_success(start.elapsed());
-                        res
+                vec!["groq/llama-3.3-70b-versatile".to_string(), "ollama/llama3".to_string()]
+            };
+
+            loop {
+                log::debug!("Agent sending request to model: {}", target_model.name());
+                let start = std::time::Instant::now();
+                
+                response_result = if self.tools.is_empty() {
+                    // For streaming, we don't currently do automatic fallback inside the stream, 
+                    // but we can catch initial setup errors.
+                    match target_model.stream_complete(request.clone()).await {
+                        Ok(mut stream) => {
+                            let mut full_content = String::new();
+                            use futures::StreamExt;
+                            let mut stream_error = false;
+                            while let Some(chunk_result) = stream.next().await {
+                                match chunk_result {
+                                    Ok(chunk) => {
+                                        full_content.push_str(&chunk);
+                                        let _ = self.event_tx.send(Event::AgentResponseChunk { 
+                                            session_id: self.session_id.clone(), 
+                                            chunk 
+                                        });
+                                    }
+                                    Err(e) => {
+                                        if e.is_rate_limit() {
+                                            stream_error = true;
+                                            response_result = Err(anyhow::Error::new(e));
+                                            break;
+                                        }
+                                        let _ = self.event_tx.send(Event::Error { message: format!("Streaming error: {}", e) });
+                                        return Err(anyhow::Error::new(e));
+                                    }
+                                }
+                            }
+                            if stream_error {
+                                // Fallthrough to fallback logic below
+                                Err(anyhow::anyhow!("Rate limit hit during stream setup"))
+                            } else {
+                                Ok(CompletionResponse {
+                                    content: Some(pharmakon_common::MessageContent::Text(full_content)),
+                                    tool_calls: None,
+                                    usage: None,
+                                })
+                            }
+                        }
+                        Err(e) => Err(anyhow::Error::new(e))
                     }
-                    Err(e) => {
-                        self.health_monitor.record_failure();
-                        return Err(anyhow::Error::new(e));
+                } else {
+                    match target_model.complete(request.clone()).await {
+                        Ok(res) => {
+                            self.health_monitor.record_success(start.elapsed());
+                            Ok(res)
+                        }
+                        Err(e) => {
+                            self.health_monitor.record_failure();
+                            Err(anyhow::Error::new(e))
+                        }
+                    }
+                };
+
+                match response_result {
+                    Ok(_) => break, // Success, exit retry loop
+                    Err(ref e) => {
+                        let is_rate_limit = if let Some(ae) = e.downcast_ref::<AgentError>() {
+                            ae.is_rate_limit()
+                        } else {
+                            let err_str = e.to_string().to_lowercase();
+                            err_str.contains("429") || err_str.contains("too many requests") || err_str.contains("quota")
+                        };
+                        
+                        if is_rate_limit && current_fallback_index < fallback_models.len() {
+                            let fallback_id = &fallback_models[current_fallback_index];
+                            log::warn!("Rate limit encountered for {}. Falling back to: {}", target_model.name(), fallback_id);
+                            let _ = self.event_tx.send(Event::Error { message: format!("API Rate limit reached for {}. Switching to fallback: {}", target_model.name(), fallback_id) });
+                            
+                            if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(fallback_id) {
+                                target_model = new_model;
+                                current_fallback_index += 1;
+                                continue;
+                            } else {
+                                log::error!("Fallback model {} not found or configured.", fallback_id);
+                                current_fallback_index += 1;
+                                continue;
+                            }
+                        }
+                        
+                        let _ = self.event_tx.send(Event::Error { message: format!("Model error: {}", e) });
+                        return Err(response_result.err().unwrap());
                     }
                 }
-            };
+            }
+
+            let response = response_result.unwrap();
 
             if let Some(content) = &response.content {
                 let c = content.clone();
@@ -340,8 +439,18 @@ impl Agent {
                             tool_call_id: Some(tool_call_id),
                             ..Default::default()
                         };
+                        
+                        // VOLATILE TOOL OUTPUT OPTIMIZATION:
+                        // Don't persist large tool outputs or system command results to long-term DB
+                        // This keeps future sessions clean and saves tokens.
+                        let is_volatile = tool_result_msg.content.as_ref()
+                            .map(|c| c.to_string().len() > 1024)
+                            .unwrap_or(false);
+
                         if let Some(store) = &self.session_store {
-                            let _ = store.save_message(&self.session_id, &tool_result_msg).await;
+                            if !is_volatile {
+                                let _ = store.save_message(&self.session_id, &tool_result_msg).await;
+                            }
                         }
                         self.history.push(tool_result_msg);
                     }
@@ -362,14 +471,19 @@ impl Agent {
             };
             let _ = self.hooks.trigger_message_sent(&final_msg).await;
 
-            // Trigger reflection asynchronously
-            let _ = self.reflect().await;
+            // BATCHED REFLECTION OPTIMIZATION:
+            // Only reflect every 5 interactions to save API requests and tokens
+            self.interaction_count += 1;
+            if self.interaction_count % 5 == 0 {
+                let _ = self.reflect().await;
+            }
 
             // Auto-index assistant response
             if let Some(weaver) = &self.memory_weaver {
                 let _ = weaver.remember(&final_content).await;
             }
 
+            let _ = self.event_tx.send(Event::AgentResponse { content: response.content.unwrap_or(MessageContent::Text("".to_string())) });
             return Ok(final_content);
         }
     }
@@ -444,7 +558,11 @@ impl Agent {
             tools: None,
         };
 
-        if let Ok(response) = self.model.complete(request).await {
+        // LIGHTWEIGHT MODEL OPTIMIZATION:
+        // Use planner_model (if set) for reflection instead of the expensive main model
+        let target_model = self.planner_model.as_ref().unwrap_or(&self.model);
+
+        if let Ok(response) = target_model.complete(request).await {
             if let Some(content) = response.content {
                 let insight = content.to_string();
                 if !insight.contains("NO_INSIGHT") {

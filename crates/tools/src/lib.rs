@@ -23,7 +23,7 @@ pub mod registry;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use std::process::Command;
+use tokio::process::Command;
 use std::fs;
 use crate::docker_sandbox::DockerSandbox;
 
@@ -65,6 +65,7 @@ impl Tool for ShellTool {
             .arg("-c")
             .arg(cmd)
             .output()
+            .await
             .map_err(|e| AgentError(e.to_string()))?;
         
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();

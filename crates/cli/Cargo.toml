@@ -16,6 +16,7 @@ pharmakon-tools.workspace = true
 pharmakon-memory.workspace = true
 pharmakon-gui = { path = "../gui" }
 anyhow.workspace = true
+async-trait.workspace = true
 tokio.workspace = true
 clap.workspace = true
 env_logger.workspace = true

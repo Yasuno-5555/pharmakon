@@ -15,8 +15,9 @@ interface MessageItemProps {
     thought?: string;
     images?: string[];
     toolCall?: { name: string; args: any };
+    toolResult?: { result: string };
     interactive?: { id: string; components: any[] };
-    context_used?: string[]; // Added for Memory Weaver traceability
+    context_used?: string[];
   };
   socket: WebSocket | null;
 }
@@ -58,8 +59,21 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
         {msg.toolCall && (
           <div className="tool-call">
             <Terminal size={14} />
-            <span>{msg.toolCall.name}</span>
-            <span style={{ opacity: 0.5 }}>{JSON.stringify(msg.toolCall.args)}</span>
+            <span className="tool-label">CALL:</span>
+            <span className="tool-name">{msg.toolCall.name}</span>
+            <span className="tool-args">{JSON.stringify(msg.toolCall.args)}</span>
+          </div>
+        )}
+        
+        {msg.toolResult && (
+          <div className="tool-result">
+            <div className="tool-result-header">
+              <Terminal size={12} />
+              <span>OUTPUT</span>
+            </div>
+            <pre className="tool-result-body">
+              {msg.toolResult.result}
+            </pre>
           </div>
         )}
 

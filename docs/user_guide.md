@@ -34,7 +34,7 @@ pharmakon agent --provider gemini --model gemini-1.5-pro-latest --message "Analy
 The Gateway acts as a central hub, exposing WebSockets and REST APIs for integrations (e.g., channels, UI clients).
 
 ```bash
-pharmakon gateway --port 18789
+pharmakon gateway --port 19999
 ```
 
 ### 5. Using the TUI Dashboard

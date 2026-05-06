@@ -23,3 +23,4 @@ serde_json = { workspace = true }
 futures = "0.3"
 tracing = "0.1"
 xilem_core = "0.4.0"
+chrono = { workspace = true }

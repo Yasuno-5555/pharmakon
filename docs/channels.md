@@ -43,7 +43,7 @@ pharmakon secrets set SLACK_BOT_TOKEN <your_slack_token>
 When you run the `pharmakon gateway` command, it will automatically read your secrets and spawn background tasks for each configured channel.
 
 ```bash
-pharmakon gateway --port 18789
+pharmakon gateway --port 19999
 ```
 
 Output Example:

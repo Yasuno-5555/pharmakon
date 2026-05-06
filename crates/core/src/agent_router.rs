@@ -15,16 +15,18 @@ pub struct AgentRouter {
     store: Arc<DbSessionStore>,
     config: Config,
     weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>,
+    fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>>,
 }
 
 impl AgentRouter {
-    pub fn new(model: Arc<dyn AgentModel>, store: Arc<DbSessionStore>, config: Config, weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>) -> Self {
+    pub fn new(model: Arc<dyn AgentModel>, store: Arc<DbSessionStore>, config: Config, weaver: Option<Arc<pharmakon_memory::weaver::MemoryWeaver>>, fact_memory: Option<Arc<Mutex<pharmakon_memory::fact_memory::FactMemory>>>) -> Self {
         Self {
             agents: HashMap::new(),
             model,
             store,
             config,
             weaver,
+            fact_memory,
         }
     }
 
@@ -44,7 +46,25 @@ impl AgentRouter {
                 if let Some(dynamic_model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
                     agent = Agent::new(dynamic_model, format!("agent-{}", name))
                         .with_store(self.store.clone());
+                    
+                    if let Some(w) = &self.weaver {
+                        agent = agent.with_memory_weaver(w.clone());
+                    }
+                    if let Some(f) = &self.fact_memory {
+                        agent = agent.with_fact_memory(f.clone());
+                    }
                 }
+            }
+        }
+
+        if agent.memory_weaver.is_none() {
+            if let Some(w) = &self.weaver {
+                agent = agent.with_memory_weaver(w.clone());
+            }
+        }
+        if agent.fact_memory.is_none() {
+            if let Some(f) = &self.fact_memory {
+                agent = agent.with_fact_memory(f.clone());
             }
         }
 

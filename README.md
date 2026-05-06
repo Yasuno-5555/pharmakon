@@ -63,7 +63,7 @@ cargo run -- onboard
 ### Running the Gateway
 
 ```bash
-cargo run -- gateway --port 18789
+cargo run -- gateway --port 19999
 ```
 
 ## 🛡️ Security

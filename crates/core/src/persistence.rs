@@ -155,7 +155,14 @@ impl DbSessionStore {
 
         let messages = rows.into_iter().map(|row| {
             let content = row.content.and_then(|c| {
-                serde_json::from_str(&c).ok().or_else(|| Some(crate::model::MessageContent::Text(c)))
+                // Try to parse as JSON first, if it fails, it might be a raw quoted string from sqlite3 output or old data
+                if let Ok(parsed) = serde_json::from_str::<crate::model::MessageContent>(&c) {
+                    Some(parsed)
+                } else if let Ok(s) = serde_json::from_str::<String>(&c) {
+                    Some(crate::model::MessageContent::Text(s))
+                } else {
+                    Some(crate::model::MessageContent::Text(c))
+                }
             });
             Message {
                 role: row.role,
@@ -173,6 +180,20 @@ impl DbSessionStore {
         let rows = sqlx::query_as::<_, (String,)>(
             "SELECT DISTINCT session_id FROM messages ORDER BY created_at DESC"
         )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    pub async fn search_sessions(&self, query: &str) -> Result<Vec<String>> {
+        let sql_query = format!("%{}%", query);
+        let rows = sqlx::query_as::<_, (String,)>(
+            "SELECT DISTINCT session_id FROM messages 
+             WHERE session_id LIKE ? OR content LIKE ? 
+             ORDER BY created_at DESC"
+        )
+        .bind(&sql_query)
+        .bind(&sql_query)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|r| r.0).collect())

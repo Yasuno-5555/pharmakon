@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Clock, Trash2, Bot, Layout, Zap } from 'lucide-react';
+import { Send, Clock, Trash2, Bot, Layout, Zap, Plus, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './App.css';
 import CanvasRenderer from './CanvasRenderer';
@@ -10,7 +10,7 @@ import SoulConfigurator from './components/SoulConfigurator';
 import SkillBrowser from './components/SkillBrowser';
 
 // Types
-type Role = 'user' | 'agent' | 'system';
+type Role = 'user' | 'agent' | 'assistant' | 'system' | 'tool';
 
 interface Message {
   id: string;
@@ -19,6 +19,7 @@ interface Message {
   thought?: string;
   images?: string[];
   toolCall?: { name: string; args: any };
+  toolResult?: { result: string };
   interactive?: { id: string; components: any[] };
 }
 
@@ -39,8 +40,14 @@ function App() {
   const [insights, setInsights] = useState<string[]>([]);
   const [healthStats, setHealthStats] = useState<any>(null);
   const [activeSwarms, setActiveSwarms] = useState<{id: string, role: string, status: string}[]>([]);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [currentModel, setCurrentModel] = useState<string>('');
+  const [sessions, setSessions] = useState<string[]>([]);
+  const [currentSession, setCurrentSession] = useState<string>('gateway');
+  const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleServerEventRef = useRef<((event: any) => void) | null>(null);
 
   // Initialize WebSocket
   useEffect(() => {
@@ -49,12 +56,17 @@ function App() {
       { id: '1', role: 'RESEARCHER', status: 'Analyzing trajectory for implicit goals...' }
     ]);
 
-    const ws = new WebSocket('ws://localhost:18789/ws');
+    const ws = new WebSocket('ws://localhost:19999/ws');
 
     ws.onopen = () => {
       setConnected(true);
-      // Request initial cron jobs list
+      // Request initial state from gateway
       ws.send(JSON.stringify({ type: "GetCronJobs" }));
+      ws.send(JSON.stringify({ type: "GetModels" }));
+      ws.send(JSON.stringify({ type: "GetOrchestration" }));
+      ws.send(JSON.stringify({ type: "GetMcpStats" }));
+      ws.send(JSON.stringify({ type: "GetGatewayStatus" }));
+      ws.send(JSON.stringify({ type: "GetSessions" }));
     };
 
     ws.onclose = () => setConnected(false);
@@ -62,7 +74,10 @@ function App() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        handleServerEvent(data);
+        console.log("WS Received:", data.type, data);
+        if (handleServerEventRef.current) {
+          handleServerEventRef.current(data);
+        }
       } catch (e) {
         console.error("Error parsing WS message:", e);
       }
@@ -91,8 +106,8 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleServerEvent = (event: any) => {
-    const { type, payload } = event;
+  handleServerEventRef.current = (event: any) => {
+    const { type, data: payload } = event;
 
     switch (type) {
       case 'AgentThought':
@@ -113,7 +128,7 @@ function App() {
           if (lastMsg && lastMsg.role === 'agent') {
             return [...prev.slice(0, -1), { 
               ...lastMsg, 
-              content: (lastMsg.content || '') + text,
+              content: text, // Overwrite with final content
               images: [...(lastMsg.images || []), ...images]
             }];
           }
@@ -121,10 +136,37 @@ function App() {
         });
         break;
 
+      case 'AgentThoughtChunk':
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.role === 'agent' && !lastMsg.content) {
+            return [...prev.slice(0, -1), { ...lastMsg, thought: (lastMsg.thought || '') + payload.chunk }];
+          }
+          return [...prev, { id: Math.random().toString(), role: 'agent', thought: payload.chunk }];
+        });
+        break;
+
+      case 'AgentResponseChunk':
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.role === 'agent') {
+            return [...prev.slice(0, -1), { ...lastMsg, content: (lastMsg.content || '') + payload.chunk }];
+          }
+          return [...prev, { id: Math.random().toString(), role: 'agent', content: payload.chunk }];
+        });
+        break;
+
       case 'ToolCall':
         setMessages(prev => [
           ...prev, 
           { id: Math.random().toString(), role: 'agent', toolCall: { name: payload.name, args: payload.args } }
+        ]);
+        break;
+
+      case 'ToolResult':
+        setMessages(prev => [
+          ...prev,
+          { id: Math.random().toString(), role: 'tool', toolResult: { result: payload.result } }
         ]);
         break;
 
@@ -150,11 +192,66 @@ function App() {
       case 'HealthUpdate':
         setHealthStats(payload);
         break;
+        
+      case 'OrchestrationState':
+        setActiveSwarms(payload.sub_agents.map((a: any) => ({
+          id: a.name,
+          role: a.role,
+          status: a.status
+        })));
+        break;
 
       case 'AgentInsight':
         setInsights(prev => [...prev.slice(-4), payload.insight]);
         break;
         
+      case 'ModelList':
+        setAvailableModels(payload.models);
+        break;
+
+      case 'ModelSwitched':
+        setCurrentModel(payload.model_id);
+        setMessages(prev => [...prev, { id: Math.random().toString(), role: 'system', content: `Model switched to ${payload.model_id}` }]);
+        break;
+
+      case 'HistoryList':
+        setMessages(payload.messages.map((m: any) => {
+          let contentStr = "";
+          if (m.content) {
+            if (m.content.Text) contentStr = m.content.Text;
+            else if (Array.isArray(m.content.Multimodal)) {
+              contentStr = m.content.Multimodal.find((p: any) => p.type === 'text')?.text || "";
+            } else if (typeof m.content === 'string') {
+              contentStr = m.content;
+            }
+          }
+          
+          return {
+            id: Math.random().toString(),
+            role: (m.role === 'assistant' ? 'agent' : m.role) as Role,
+            content: contentStr,
+            thought: m.thought,
+            toolCall: m.tool_calls?.[0] ? { 
+              name: m.tool_calls[0].function.name, 
+              args: typeof m.tool_calls[0].function.arguments === 'string' 
+                ? JSON.parse(m.tool_calls[0].function.arguments) 
+                : m.tool_calls[0].function.arguments 
+            } : undefined,
+            toolResult: m.role === 'tool' ? { result: contentStr } : undefined
+          };
+        }));
+        break;
+
+      case 'SessionList':
+        setSessions(payload.sessions);
+        break;
+
+      case 'Action':
+        if (payload === 'Session switched') {
+          // Handled by HistoryList
+        }
+        break;
+
       case 'Error':
         setMessages(prev => [...prev, { id: Math.random().toString(), role: 'system', content: `Error: ${payload.message}` }]);
         break;
@@ -171,7 +268,7 @@ function App() {
     // Send to backend
     socket.send(JSON.stringify({
       type: "SendMessage",
-      payload: { message: input }
+      data: { message: input }
     }));
     
     setInput('');
@@ -197,7 +294,7 @@ function App() {
     if (!socket || !connected) return;
     socket.send(JSON.stringify({
       type: "CancelCronJob",
-      payload: { id }
+      data: { id }
     }));
   };
 
@@ -206,27 +303,86 @@ function App() {
     socket.send(JSON.stringify({ type: "GetCronJobs" }));
   };
 
+  const switchModel = (modelId: string) => {
+    if (!socket || !connected) return;
+    socket.send(JSON.stringify({ type: "SwitchModel", data: { model_id: modelId } }));
+  };
+
+  const switchSession = (sessionId: string) => {
+    if (!socket || !connected) return;
+    setCurrentSession(sessionId);
+    socket.send(JSON.stringify({ type: "SwitchSession", data: { id: sessionId } }));
+  };
+
+  const startNewSession = () => {
+    const newId = `session-${Date.now().toString().slice(-6)}`;
+    switchSession(newId);
+    // Backend will create the session on the first message or explicit switch
+    setSessions(prev => [...prev, newId]);
+  };
+
+  const searchSessions = (query: string) => {
+    setSearchQuery(query);
+    if (!socket || !connected) return;
+    socket.send(JSON.stringify({ type: "SearchSessions", data: { query } }));
+  };
+
   return (
     <div className="app-container premium-theme">
       {/* Left Sidebar: Sessions & Metrics */}
       <aside className="sidebar left-sidebar glass-panel">
         <div className="sidebar-section">
           <div className="section-header">
-            <Layout size={18} />
-            <span>SESSIONS</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Layout size={18} />
+              <span>SESSIONS</span>
+            </div>
+            <button 
+              className="icon-btn small-btn" 
+              onClick={startNewSession}
+              title="Start New Session"
+              style={{ padding: '4px', background: 'var(--accent-muted)', borderRadius: '4px', color: '#fff' }}
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <div className="search-bar-mini" style={{ padding: '0 12px 12px' }}>
+            <div className="search-input-wrapper" style={{ position: 'relative' }}>
+              <Search size={14} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input 
+                type="text" 
+                placeholder="Search history..." 
+                value={searchQuery}
+                onChange={(e) => searchSessions(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px 6px 28px', fontSize: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff' }}
+              />
+            </div>
           </div>
           <div className="session-list">
-            {['Current Session', 'Research - Project X', 'Debug Log - May 5'].map((s, i) => (
-              <div key={i} className={`session-item ${i === 0 ? 'active' : ''}`}>
+            {sessions.map((s) => (
+              <div 
+                key={s} 
+                className={`session-item ${s === currentSession ? 'active' : ''}`}
+                onClick={() => switchSession(s)}
+              >
                 <Clock size={14} />
                 <span>{s}</span>
               </div>
             ))}
+            {sessions.length === 0 && <div className="session-item-muted">No saved sessions</div>}
           </div>
         </div>
         
         <div className="sidebar-section metrics-section">
           <HealthMonitor stats={healthStats} />
+        </div>
+
+        <div className="sidebar-section">
+          <SoulConfigurator socket={socket} />
+        </div>
+
+        <div className="sidebar-section">
+          <SkillBrowser />
         </div>
       </aside>
 
@@ -242,6 +398,19 @@ function App() {
               </div>
             </div>
             <div className="header-actions">
+              <div className="model-selector">
+                <Bot size={14} />
+                <select 
+                  value={currentModel} 
+                  onChange={(e) => switchModel(e.target.value)}
+                  className="model-select-dropdown"
+                >
+                  <option value="" disabled>Select Model</option>
+                  {availableModels.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
               <Zap size={18} className={connected ? 'pulsing' : ''} />
               <button onClick={() => setMessages([])}><Trash2 size={18} /></button>
             </div>
@@ -306,18 +475,14 @@ function App() {
             <span>SUB-AGENT SWARM</span>
           </div>
           <div className="swarm-list">
-            {[
-              { role: 'SUPERVISOR', name: 'Coordination', status: 'Active' },
-              { role: 'RESEARCHER', name: 'Knowledge', status: 'Idle' },
-              { role: 'CODER', name: 'Implementation', status: 'Active' },
-            ].map((s, i) => (
+            {activeSwarms.map((s, i) => (
               <div key={i} className="swarm-card">
                 <div className="card-header">
                   <span className="role-tag">{s.role}</span>
                   <div className={`status-dot ${s.status === 'Active' ? 'online' : 'offline'}`} />
                 </div>
                 <div className="card-body">
-                  <span className="agent-name">{s.name}</span>
+                  <span className="agent-name">{s.id}</span>
                   <p className="agent-status-text">Status: {s.status}</p>
                 </div>
               </div>

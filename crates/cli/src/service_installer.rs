@@ -95,3 +95,63 @@ WantedBy=default.target"#,
     
     Ok(())
 }
+
+pub fn stop_service() -> Result<()> {
+    let os = env::consts::OS;
+    match os {
+        "macos" => {
+            let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+            let plist_path = home.join("Library").join("LaunchAgents").join("ai.openclaw.pharmakon.plist");
+            
+            if !plist_path.exists() {
+                return Err(anyhow!("Service plist not found at {:?}", plist_path));
+            }
+
+            std::process::Command::new("launchctl")
+                .args(&["unload", plist_path.to_str().unwrap()])
+                .status()?;
+            println!("✅ Service stopped (unloaded from launchd).");
+            Ok(())
+        }
+        "linux" => {
+            std::process::Command::new("systemctl")
+                .args(&["--user", "stop", "pharmakon"])
+                .status()?;
+            println!("✅ Service stopped (systemd).");
+            Ok(())
+        }
+        _ => Err(anyhow!("Service management not supported on {}", os)),
+    }
+}
+
+pub fn get_service_status() -> Result<()> {
+    let os = env::consts::OS;
+    match os {
+        "macos" => {
+            let label = "ai.openclaw.pharmakon";
+            let output = std::process::Command::new("launchctl")
+                .args(&["list", label])
+                .output()?;
+            
+            if output.status.success() {
+                println!("🟢 Service is running (launchd).");
+            } else {
+                println!("🔴 Service is not running or not loaded.");
+            }
+            Ok(())
+        }
+        "linux" => {
+            let output = std::process::Command::new("systemctl")
+                .args(&["--user", "is-active", "pharmakon"])
+                .output()?;
+            let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if status == "active" {
+                println!("🟢 Service is active (systemd).");
+            } else {
+                println!("🔴 Service status: {}", status);
+            }
+            Ok(())
+        }
+        _ => Err(anyhow!("Service management not supported on {}", os)),
+    }
+}

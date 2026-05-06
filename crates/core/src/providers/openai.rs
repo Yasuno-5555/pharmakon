@@ -209,6 +209,7 @@ impl AgentModel for OpenAIModel {
                 prompt_tokens: u.prompt_tokens,
                 completion_tokens: u.completion_tokens,
                 total_tokens: u.total_tokens,
+                thoughts_tokens: None,
             }),
         })
     }

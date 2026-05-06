@@ -43,17 +43,17 @@ impl BrowserSandbox {
         let containers = self.docker.list_containers::<String>(None).await?;
         if let Some(c) = containers.iter().find(|c| c.names.as_ref().map(|n| n.iter().any(|name| name.contains(&self.container_name))).unwrap_or(false)) {
             if c.state.as_deref() == Some("running") {
-                return Ok(3000); // Default browserless port
+                return Ok(3030); // Use new port
             }
         }
 
         // 3. Create and start container
         let mut port_bindings = HashMap::new();
         port_bindings.insert(
-            "3000/tcp".to_string(),
+            "3000/tcp".to_string(), // Container internal port stays 3000
             Some(vec![bollard::service::PortBinding {
                 host_ip: Some("127.0.0.1".to_string()),
-                host_port: Some("3000".to_string()),
+                host_port: Some("3030".to_string()), // Host port changed to 3030
             }]),
         );
 
@@ -76,8 +76,8 @@ impl BrowserSandbox {
 
         self.docker.start_container(&self.container_name, None::<StartContainerOptions<String>>).await?;
 
-        log::info!("Browser sandbox container started on port 3000");
-        Ok(3000)
+        log::info!("Browser sandbox container started on port 3030");
+        Ok(3030)
     }
 
     pub async fn stop(&self) -> Result<()> {

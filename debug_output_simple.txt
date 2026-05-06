@@ -1,0 +1,693 @@
+warning: field `finish_reason` is never read
+  --> crates/core/src/providers/gemini.rs:95:5
+   |
+92 | struct Candidate {
+   |        --------- field in this struct
+...
+95 |     finish_reason: Option<String>,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `thoughts_token_count` is never read
+   --> crates/core/src/providers/gemini.rs:107:5
+    |
+ 99 | struct GeminiUsage {
+    |        ----------- field in this struct
+...
+107 |     thoughts_token_count: u32,
+    |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: `pharmakon-core` (lib) generated 2 warnings
+warning: unused variable: `export_trajectory`
+   --> crates/cli/src/main.rs:182:91
+    |
+182 | ..., model, trajectory: export_trajectory } => {
+    |                         ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_export_trajectory`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `get_api_key` is never used
+   --> crates/cli/src/main.rs:269:4
+    |
+269 | fn get_api_key(provider: &str) -> Option<String> {
+    |    ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `pharmakon-cli` (bin "pharmakon") generated 2 warnings (run `cargo fix --bin "pharmakon" -p pharmakon-cli` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.95s
+     Running `target/debug/pharmakon agent --message Hello --model gemini/gemini-2.5-flash`
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="PRAGMA journal_mode = WAL; …" db.statement="\n\nPRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; \n" rows_affected=0 rows_returned=1 elapsed=792.917µs elapsed_secs=0.000792917
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS messages (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                session_id TEXT NOT NULL,\n                role TEXT NOT NULL,\n                content TEXT,\n                tool_calls TEXT,\n                tool_call_id TEXT,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=75.125µs elapsed_secs=7.5125e-5
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="PRAGMA journal_mode = WAL; …" db.statement="\n\nPRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; \n" rows_affected=0 rows_returned=1 elapsed=1.912791ms elapsed_secs=0.001912791
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS usage_stats (\n                id INTEGER PRIMARY KEY,\n                session_id TEXT,\n                provider TEXT,\n                model TEXT,\n                prompt_tokens INTEGER,\n                completion_tokens INTEGER,\n                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=1.868208ms elapsed_secs=0.001868208
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS traffic_capture (\n                id INTEGER PRIMARY KEY,\n                session_id TEXT,\n                url TEXT,\n                method TEXT,\n                status INTEGER,\n                request_body TEXT,\n                response_body TEXT,\n                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=138.666µs elapsed_secs=0.000138666
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS delivery_queue (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                session_id TEXT NOT NULL,\n                payload TEXT NOT NULL,\n                retry_count INTEGER DEFAULT 0,\n                next_retry TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n                status TEXT DEFAULT 'pending'\n            )\n" rows_affected=0 rows_returned=0 elapsed=84.417µs elapsed_secs=8.4417e-5
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS trajectories (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                session_id TEXT NOT NULL,\n                steps_json TEXT NOT NULL,\n                model TEXT,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=36.375µs elapsed_secs=3.6375e-5
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS commitments (\n                id TEXT PRIMARY KEY,\n                description TEXT NOT NULL,\n                deadline DATETIME,\n                status TEXT NOT NULL,\n                metadata TEXT,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=38.584µs elapsed_secs=3.8584e-5
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS approved_users (\n                channel_id TEXT PRIMARY KEY,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=84.5µs elapsed_secs=8.45e-5
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS agent_souls (\n                name TEXT PRIMARY KEY,\n                description TEXT,\n                instruction TEXT NOT NULL,\n                avatar_url TEXT,\n                metadata TEXT,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=32.625µs elapsed_secs=3.2625e-5
+[2026-05-06T04:01:45Z DEBUG sqlx::query] summary="CREATE TABLE IF NOT …" db.statement="\n\nCREATE TABLE IF NOT EXISTS facts (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                content TEXT NOT NULL,\n                source TEXT,\n                importance INTEGER DEFAULT 1,\n                metadata TEXT,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            )\n" rows_affected=0 rows_returned=0 elapsed=65.958µs elapsed_secs=6.5958e-5
+[2026-05-06T04:01:45Z DEBUG keyring] creating entry with service pharmakon, user GEMINI_API_KEY, and no target
+[2026-05-06T04:01:45Z DEBUG keyring] created entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] get password from entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] creating entry with service pharmakon, user OPENAI_API_KEY, and no target
+[2026-05-06T04:01:45Z DEBUG keyring] created entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] get password from entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] creating entry with service pharmakon, user ANTHROPIC_API_KEY, and no target
+[2026-05-06T04:01:45Z DEBUG keyring] created entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] get password from entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] creating entry with service pharmakon, user GROQ_API_KEY, and no target
+[2026-05-06T04:01:45Z DEBUG keyring] created entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] get password from entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] creating entry with service pharmakon, user PERPLEXITY_API_KEY, and no target
+[2026-05-06T04:01:45Z DEBUG keyring] created entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG keyring] get password from entry MockCredential { inner: Mutex { data: RefCell { value: MockData { secret: None, error: None } }, poisoned: false, .. } }
+[2026-05-06T04:01:45Z DEBUG ort::environment] Environment not yet initialized, creating a new one
+[2026-05-06T04:01:45Z DEBUG ort::environment] Environment created env_ptr="0xad1173980"
+[2026-05-06T04:01:45Z DEBUG ort::environment] Session Options {  execution_mode:0 execution_order:DEFAULT enable_profiling:0 optimized_model_filepath:"" enable_mem_pattern:1 enable_mem_reuse:1 enable_cpu_mem_arena:1 profile_file_prefix:onnxruntime_profile_ session_logid: session_log_severity_level:-1 session_log_verbosity_level:0 max_num_graph_transformation_steps:10 graph_optimization_level:3 intra_op_param:OrtThreadPoolParams { thread_pool_size: 8 auto_set_affinity: 0 allow_spinning: 1 dynamic_block_base_: 0 stack_size: 0 affinity_str:  set_denormal_as_zero: 0 } inter_op_param:OrtThreadPoolParams { thread_pool_size: 0 auto_set_affinity: 0 allow_spinning: 1 dynamic_block_base_: 0 stack_size: 0 affinity_str:  set_denormal_as_zero: 0 } use_per_session_threads:1 thread_pool_allow_spinning:1 use_deterministic_compute:0 config_options: {  } }
+[2026-05-06T04:01:45Z DEBUG ort::environment] Flush-to-zero and denormal-as-zero are off
+[2026-05-06T04:01:45Z DEBUG ort::environment] Creating and using per session threadpools since use_per_session_threads_ is true
+[2026-05-06T04:01:45Z DEBUG ort::environment] Dynamic block base set to 0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Initializing session.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Adding default CPU execution provider.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Creating BFCArena for Cpu with following configs: initial_chunk_size_bytes: 1048576 max_dead_bytes_per_chunk: 134217728 initial_growth_chunk_size_bytes: 2097152 max_power_of_two_extend_bytes: 1073741824 memory limit: 18446744073709551615 arena_extend_strategy: 0
+[2026-05-06T04:01:45Z DEBUG ort::environment] This model does not have any local functions defined. AOT Inlining is not performed
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer DoubleQDQPairsRemover modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total shared scalar initializer count: 270
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ConstantSharing modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer CommonSubexpressionElimination modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ConstantFolding modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulAddFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.0/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.0/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.0/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.0/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.1/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.1/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.1/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.1/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.2/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.2/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.2/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.2/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.3/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.3/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.3/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.3/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.4/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.4/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.4/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.4/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.5/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.5/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.5/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.5/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.6/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.6/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.6/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.6/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.7/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.7/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.7/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.7/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.8/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.8/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.8/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.8/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.9/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.9/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.9/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.9/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.10/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.10/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.10/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.10/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.11/attention/self/Reshape_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.11/attention/self/Reshape_2_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.11/attention/self/Reshape_1_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Fused reshape node: /encoder/layer.11/attention/self/Reshape_3_output_0
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total fused reshape node count: 48
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ReshapeFusion modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/attention/self/Constant_15_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/attention/self/Constant_13_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/attention/self/Constant_11_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.10/attention/self/Constant_6_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer FreeDimensionOverrideTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QDQPropagationTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer RocmBlasAltImpl modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer TransposeOptimizer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer DoubleQDQPairsRemover modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ConstantFolding modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulAddFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ReshapeFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer FreeDimensionOverrideTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QDQPropagationTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer RocmBlasAltImpl modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer TransposeOptimizer_CPUExecutionProvider modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QDQSelectorActionTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GemmActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulIntegerToFloatFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer DynamicQuantizeMatMulFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ConvActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GeluFusionL2 modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/intermediate/intermediate_act_fn/Constant_2_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/intermediate/intermediate_act_fn/Constant_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer LayerNormFusionL2 modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/output/LayerNorm/Constant_1_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/output/LayerNorm/Constant_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer AttentionFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer EmbedLayerNormFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatmulTransposeFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer BiasGeluFusion modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer SkipLayerNormFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer FastGeluFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer BiasSoftmaxFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer BiasDropoutFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulScaleFusion modified: 1 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Removing initializer '/encoder/layer.11/attention/self/Constant_12_output_0'. It is no longer used by any node.
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulNBitsFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QDQFinalCleanupTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QDQSelectorActionTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GemmActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulIntegerToFloatFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer DynamicQuantizeMatMulFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ConvActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GeluFusionL2 modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer LayerNormFusionL2 modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer AttentionFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer EmbedLayerNormFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatmulTransposeFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer SkipLayerNormFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer FastGeluFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer BiasSoftmaxFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer BiasDropoutFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulScaleFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MatMulNBitsFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer QDQFinalCleanupTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer NhwcTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer ConvAddActivationFusion modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer RemoveDuplicateCastTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer CastFloat16Transformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] GraphTransformer MemcpyTransformer modified: 0 with status: OK
+[2026-05-06T04:01:45Z DEBUG ort::environment] Use DeviceBasedPartition as default
+[2026-05-06T04:01:45Z DEBUG ort::environment] Saving initialized tensors.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:0 (requested) num_bytes: 32 (actual) rounded_bytes:256
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 1048576 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 1048576
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0xad1878000 to 0xad1978000
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:2 (requested) num_bytes: 1536 (actual) rounded_bytes:1536
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 2097152 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 3145728
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0x5bc800000 to 0x5bca00000
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:13 (requested) num_bytes: 2359296 (actual) rounded_bytes:2359296
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 4194304 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 7340032
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0x5c8000000 to 0x5c8400000
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:13 (requested) num_bytes: 2359296 (actual) rounded_bytes:2359296
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 8388608 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 15728640
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0x5c8800000 to 0x5c9000000
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:11 (requested) num_bytes: 589824 (actual) rounded_bytes:589824
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 16777216 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 32505856
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0x5c9400000 to 0x5ca400000
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:2 (requested) num_bytes: 1536 (actual) rounded_bytes:1536
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 33554432 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 66060288
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0x5ca800000 to 0x5cc800000
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:13 (requested) num_bytes: 2359296 (actual) rounded_bytes:2359296
+[2026-05-06T04:01:45Z DEBUG ort::environment] Extended allocation by 67108864 bytes.
+[2026-05-06T04:01:45Z DEBUG ort::environment] Total allocated bytes: 133169152
+[2026-05-06T04:01:45Z DEBUG ort::environment] Allocated memory at 0x5ccc00000 to 0x5d0c00000
+[2026-05-06T04:01:46Z DEBUG ort::environment] Extending BFCArena for Cpu. bin_num:2 (requested) num_bytes: 1536 (actual) rounded_bytes:1536
+[2026-05-06T04:01:46Z DEBUG ort::environment] Extended allocation by 134217728 bytes.
+[2026-05-06T04:01:46Z DEBUG ort::environment] Total allocated bytes: 267386880
+[2026-05-06T04:01:46Z DEBUG ort::environment] Allocated memory at 0x5d1000000 to 0x5d9000000
+[2026-05-06T04:01:46Z DEBUG ort::environment] Done saving initialized tensors
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 589824
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Reserving memory in BFCArena for Cpu size: 2359296
+[2026-05-06T04:01:46Z DEBUG ort::environment] Session successfully initialized.
+[2026-05-06T04:01:46Z DEBUG lance_io::object_store::tracing] list_with_delimiter; prefix="Users/yasuno/.pharmakon/memory_weaver.db"
+[2026-05-06T04:01:46Z DEBUG sqlx::query] summary="SELECT role, content, tool_calls, …" db.statement="\n\nSELECT role, content, tool_calls, tool_call_id FROM messages \n             WHERE session_id = ? ORDER BY created_at ASC\n" rows_affected=0 rows_returned=33 elapsed=779.208µs elapsed_secs=0.000779208
+[2026-05-06T04:01:46Z DEBUG sqlx::query] summary="INSERT INTO messages (session_id, …" db.statement="\n\nINSERT INTO messages (session_id, role, content, tool_calls, tool_call_id)\n             VALUES (?, ?, ?, ?, ?)\n" rows_affected=1 rows_returned=0 elapsed=1.351ms elapsed_secs=0.001351
+[2026-05-06T04:01:46Z INFO  pharmakon_memory::compactor] Compaction: summarizing conversation
+[2026-05-06T04:01:46Z DEBUG pharmakon_core::providers::gemini] Gemini API URL: https://generativelanguage.googleapis.com/v1beta/models/gemini/gemini-2.5-flash:generateContent
+[2026-05-06T04:01:46Z DEBUG pharmakon_core::providers::gemini] Gemini Request Body: {"contents":[{"role":"user","parts":[{"text":"Summarize the following part of a conversation concisely:\n\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。\nassistant: [No content]\ntool: {\"average_ttft\":\"800ms\",\"mcp_latency\":{\"brave_search\":\"450ms\",\"shell\":\"12ms\"},\"status\":\"Healthy\"}\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。\nuser: 自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。\nassistant: [No content]\ntool: {\"average_ttft\":\"800ms\",\"mcp_latency\":{\"brave_search\":\"450ms\",\"shell\":\"12ms\"},\"status\":\"Healthy\"}\nassistant: [No content]\ntool: {\"current\":{\"cpu_usage\":44.7676887512207,\"disk_usage_percent\":0.0,\"mem_usage_percent\":72.82390594482422,\"timestamp\":\"2026-05-05T20:17:42.144251Z\"},\"summary\":\"Last 24h Summary: Avg CPU 44.8%, Max CPU 44.8%. Sample count: 1\"}\nassistant: 私の現在の体調は以下の通りです。\n\n**パフォーマンス:**\n*   平均TTFT (Time To First Token): 800ms\n*   MCP (Multi-Tool Communication Protocol) レイテンシ:\n    *   Brave Search: 450ms\n    *   Shell: 12ms\n*   全体的なステータス: 健康\n\n**PCの負荷状況:**\n*   現在のCPU使用率: 44.77%\n*   現在のディスク使用率: 0.0%\n*   現在のメモリ使用率: 72.82%\n*   過去24時間のサマリー: 平均CPU使用率 44.8%、最大CPU使用率 44.8%。サンプル数: 1\n\n全体的に、私は健康な状態であり、PCの負荷も適切に処理できています。\nuser: Hello, please reply with 'ACK' to confirm you are working.\nuser: Hello, please reply with 'ACK' to confirm you are working.\nassistant: ACK\nuser: Hello, who are you?\nuser: Hello, who are you?\nuser: Hello, who are you?\nuser: Hello, who are you?\nuser: Hello, who are you?\nuser: Hello, who are you?\nuser: Hello, who are you?\nuser: ls -F\nuser: ls -F\n"}]}],"generationConfig":{"temperature":0.3,"thinkingConfig":{"thinkingBudget":1024}}}
+[2026-05-06T04:01:46Z DEBUG reqwest::connect] starting new connection: https://generativelanguage.googleapis.com/
+[2026-05-06T04:01:46Z DEBUG hyper_util::client::legacy::connect::http] connecting to [2404:6800:400b:c00e::5f]:443
+[2026-05-06T04:01:46Z DEBUG hyper_util::client::legacy::connect::http] connected to [2404:6800:400b:c00e::5f]:443
+[2026-05-06T04:01:46Z DEBUG hyper_util::client::legacy::pool] pooling idle connection for ("https", generativelanguage.googleapis.com)
+[2026-05-06T04:01:46Z ERROR pharmakon_core::providers::gemini] Gemini API Error Status: 404 Not Found, Body: 
+[2026-05-06T04:01:46Z INFO  tracing::span] load;
+[2026-05-06T04:01:46Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:46Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/_versions/18446744073709551606.manifest"
+[2026-05-06T04:01:46Z INFO  lance::dataset_events] event="loading" uri="/Users/yasuno/.pharmakon/memory_weaver.db/memories.lance" target_ref=None version=9 status="success"
+[2026-05-06T04:01:46Z DEBUG tracing::span] create_plan;
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'nullif'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'arrow_cast'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'arrow_metadata'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'nvl'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'nvl2'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'overlay'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'arrow_typeof'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'named_struct'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'get_field'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'coalesce'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'greatest'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'least'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'union_extract'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'union_tag'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'version'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'struct'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'current_date'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'current_time'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'date_bin'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'date_part'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'date_trunc'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'from_unixtime'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'make_date'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'make_time'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'to_char'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'to_date'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'to_local_time'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'to_time'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'to_unixtime'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'encode'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'decode'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'abs'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'acos'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'acosh'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'asin'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'asinh'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'atan'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'atan2'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'atanh'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'cbrt'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'ceil'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'cos'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'cosh'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'cot'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'degrees'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'exp'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'factorial'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'floor'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'gcd'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'isnan'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'iszero'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'lcm'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'ln'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'log'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'log2'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'log10'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'nanvl'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'pi'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'power'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'radians'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'random'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'signum'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sin'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sinh'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sqrt'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'tan'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'tanh'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'round'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'trunc'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'regexp_count'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'regexp_match'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'regexp_instr'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'regexp_like'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'regexp_replace'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'digest'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'md5'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sha224'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sha256'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sha384'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'sha512'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'character_length'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'find_in_set'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'initcap'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'left'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'lpad'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'reverse'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'right'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'rpad'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'strpos'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'substr'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'substr_index'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'translate'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'ascii'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'bit_length'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'btrim'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'chr'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'concat'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'concat_ws'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'ends_with'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'levenshtein'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'lower'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'ltrim'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'octet_length'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'repeat'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'replace'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'rtrim'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'split_part'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'starts_with'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'to_hex'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'upper'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'uuid'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'contains'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_to_string'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'string_to_array'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'range'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'generate_series'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_dims'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'cardinality'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_ndims'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_append'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_prepend'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_concat'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_except'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_element'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_pop_back'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_pop_front'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_slice'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_any_value'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'make_array'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_has'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_has_all'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_has_any'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'empty'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_length'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_distance'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'flatten'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_max'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_min'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_sort'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_repeat'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_resize'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_reverse'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_distinct'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_intersect'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_union'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_position'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_positions'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_remove'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_remove_all'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_remove_n'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_replace_n'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_replace_all'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'array_replace'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'map'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'map_entries'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'map_extract'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'map_keys'
+[2026-05-06T04:01:46Z DEBUG datafusion::execution::session_state] Registered UDF 'map_values'
+[2026-05-06T04:01:46Z DEBUG lance_table::io::manifest] read_manifest_indexes; location=ManifestLocation { version: 9, path: Path { raw: "Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/_versions/18446744073709551606.manifest" }, size: Some(1077), naming_scheme: V2, e_tag: Some("8f8358c-6511dfc481edf-435") }
+[2026-05-06T04:01:46Z DEBUG sqlparser::parser] Parsing sql '_distance'...
+[2026-05-06T04:01:47Z DEBUG lance_datafusion::exec] Executing plan:
+    ProjectionExec: expr=[id@3 as id, text@4 as text, vector@0 as vector, _distance@2 as _distance]
+      Take: columns="vector, _rowid, _distance, (id), (text)"
+        CoalesceBatchesExec: target_batch_size=1024
+          GlobalLimitExec: skip=0, fetch=5
+            FilterExec: _distance@2 IS NOT NULL
+              SortExec: TopK(fetch=5), expr=[_distance@2 ASC NULLS LAST, _rowid@1 ASC NULLS LAST], preserve_partitioning=[false]
+                KNNVectorDistance: metric=l2
+                  LanceRead: uri=Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data, projection=[vector], num_fragments=8, range_before=None, range_after=None, row_id=true, row_addr=false, full_filter=--, refine_filter=--
+    
+[2026-05-06T04:01:47Z INFO  tracing::span] DatasetRecordBatchStream;
+[2026-05-06T04:01:47Z INFO  tracing::span] plan_scan;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z DEBUG tracing::span] full_frag_range;
+[2026-05-06T04:01:47Z INFO  tracing::span] init_filtered_read_stream;
+[2026-05-06T04:01:47Z DEBUG lance::io::exec::filtered_read] Filtered read on 8 fragments with frag_readahead=16 and io_parallelism=8
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z INFO  tracing::span] read_fragment;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/011000110101110010100101198d5440768ba876918b90518c.lance"
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/111001000100000011101010faa6f64fb6bdaf4cf0b369d22c.lance"
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/0110011001110110011011013c31b74314abdaaf54663ef852.lance"
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/010000000010010000100011f036e544f68e3fe9a5e83e44f9.lance"
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/101001110111011010010010a46f86473b9057a3a496b48d62.lance"
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/1100011111110101100000104e07af443e968276cb9ef89c0c.lance"
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/0011001010100011110011008fed054593bcd65e2ad212d1b7.lance"
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/0100001101101011101010117aa0f3428a990e4cfc1308c50e.lance"
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 ranges (1 rows) spread across range 0..1 with batch_size 1024 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_addrs;
+[2026-05-06T04:01:47Z DEBUG tracing::span] fetch_row_ids;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG tracing::span] compute_distance;
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 rows spread across range 0..0 with batch_size 4294967295 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 rows spread across range 0..0 with batch_size 4294967295 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 rows spread across range 0..0 with batch_size 4294967295 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/010000000010010000100011f036e544f68e3fe9a5e83e44f9.lance"
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/011000110101110010100101198d5440768ba876918b90518c.lance"
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 rows spread across range 0..0 with batch_size 4294967295 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/101001110111011010010010a46f86473b9057a3a496b48d62.lance"
+[2026-05-06T04:01:47Z DEBUG lance_file::reader] Taking 1 rows spread across range 0..0 with batch_size 4294967295 from columns [0, 1, 2]
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/111001000100000011101010faa6f64fb6bdaf4cf0b369d22c.lance"
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] wait_for_scheduled;
+[2026-05-06T04:01:47Z INFO  tracing::span] schedule_ranges;
+[2026-05-06T04:01:47Z DEBUG tracing::span] get_all;
+[2026-05-06T04:01:47Z DEBUG lance_io::object_store::tracing] get_opts; path="Users/yasuno/.pharmakon/memory_weaver.db/memories.lance/data/1100011111110101100000104e07af443e968276cb9ef89c0c.lance"
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] next_batch_task;
+[2026-05-06T04:01:47Z DEBUG tracing::span] task_to_batch;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_row_id_and_deletes;
+[2026-05-06T04:01:47Z DEBUG tracing::span] apply_deletions;
+[2026-05-06T04:01:47Z INFO  lance::execution] type="plan_run" plan_summary="Projection(Take(CoalesceBatches(GlobalLimit(LanceFilter(SortExec(TopK)(KNNVectorDistance(FilteredRead)))))))" output_rows=5 iops=16 requests=16 bytes_read=31934 indices_loaded=0 parts_loaded=0 index_comparisons=0
+[2026-05-06T04:01:47Z DEBUG pharmakon_core::agent] Agent sending request to model: gemini/gemini-2.5-flash
+[2026-05-06T04:01:47Z DEBUG pharmakon_core::providers::gemini] Gemini API URL: https://generativelanguage.googleapis.com/v1beta/models/gemini/gemini-2.5-flash:generateContent
+[2026-05-06T04:01:47Z DEBUG pharmakon_core::providers::gemini] Gemini Request Body: {"contents":[{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。"}]},{"role":"model","parts":[{"function_call":{"name":"self_diagnostic","args":{"aspect":"performance"}}}]},{"role":"user","parts":[{"text":"{\"average_ttft\":\"800ms\",\"mcp_latency\":{\"brave_search\":\"450ms\",\"shell\":\"12ms\"},\"status\":\"Healthy\"}"},{"function_response":{"name":"self_diagnostic","response":{"result":"{\"average_ttft\":\"800ms\",\"mcp_latency\":{\"brave_search\":\"450ms\",\"shell\":\"12ms\"},\"status\":\"Healthy\"}"}}}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。"}]},{"role":"user","parts":[{"text":"自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。"}]},{"role":"model","parts":[{"function_call":{"name":"self_diagnostic","args":{"aspect":"performance"}}}]},{"role":"user","parts":[{"text":"{\"average_ttft\":\"800ms\",\"mcp_latency\":{\"brave_search\":\"450ms\",\"shell\":\"12ms\"},\"status\":\"Healthy\"}"},{"function_response":{"name":"self_diagnostic","response":{"result":"{\"average_ttft\":\"800ms\",\"mcp_latency\":{\"brave_search\":\"450ms\",\"shell\":\"12ms\"},\"status\":\"Healthy\"}"}}}]},{"role":"model","parts":[{"function_call":{"name":"self_diagnostic","args":{"aspect":"pc_stats"}}}]},{"role":"user","parts":[{"text":"{\"current\":{\"cpu_usage\":44.7676887512207,\"disk_usage_percent\":0.0,\"mem_usage_percent\":72.82390594482422,\"timestamp\":\"2026-05-05T20:17:42.144251Z\"},\"summary\":\"Last 24h Summary: Avg CPU 44.8%, Max CPU 44.8%. Sample count: 1\"}"},{"function_response":{"name":"self_diagnostic","response":{"result":"{\"current\":{\"cpu_usage\":44.7676887512207,\"disk_usage_percent\":0.0,\"mem_usage_percent\":72.82390594482422,\"timestamp\":\"2026-05-05T20:17:42.144251Z\"},\"summary\":\"Last 24h Summary: Avg CPU 44.8%, Max CPU 44.8%. Sample count: 1\"}"}}}]},{"role":"model","parts":[{"text":"私の現在の体調は以下の通りです。\n\n**パフォーマンス:**\n*   平均TTFT (Time To First Token): 800ms\n*   MCP (Multi-Tool Communication Protocol) レイテンシ:\n    *   Brave Search: 450ms\n    *   Shell: 12ms\n*   全体的なステータス: 健康\n\n**PCの負荷状況:**\n*   現在のCPU使用率: 44.77%\n*   現在のディスク使用率: 0.0%\n*   現在のメモリ使用率: 72.82%\n*   過去24時間のサマリー: 平均CPU使用率 44.8%、最大CPU使用率 44.8%。サンプル数: 1\n\n全体的に、私は健康な状態であり、PCの負荷も適切に処理できています。"}]},{"role":"user","parts":[{"text":"Hello, please reply with 'ACK' to confirm you are working."}]},{"role":"user","parts":[{"text":"Hello, please reply with 'ACK' to confirm you are working."}]},{"role":"model","parts":[{"text":"ACK"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"Hello, who are you?"}]},{"role":"user","parts":[{"text":"ls -F"}]},{"role":"user","parts":[{"text":"ls -F"}]},{"role":"user","parts":[{"text":"ls -F"}]},{"role":"user","parts":[{"text":"ls -F"}]},{"role":"user","parts":[{"text":"ls -F"}]},{"role":"user","parts":[{"text":"ls -F"}]},{"role":"user","parts":[{"text":"Hello"}]}],"tools":[{"functionDeclarations":[{"name":"shell","description":"Execute a shell command","parameters":{"properties":{"command":{"type":"string"}},"required":["command"],"type":"object"}},{"name":"read_file","description":"Read the contents of a file","parameters":{"properties":{"path":{"type":"string"}},"required":["path"],"type":"object"}},{"name":"web_fetch","description":"Fetch the raw content of a URL (HTML, JSON, etc.)","parameters":{"properties":{"url":{"type":"string"}},"required":["url"],"type":"object"}},{"name":"brave_search","description":"Search the web using Brave Search for privacy-focused results","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}}]}],"toolConfig":{"functionCallingConfig":{"mode":"AUTO"}},"generationConfig":{"temperature":0.7,"thinkingConfig":{"thinkingBudget":1024}},"systemInstruction":{"parts":[{"text":"You are Pharmakon, a powerful and helpful AI assistant written in Rust. You have access to various tools and can help with coding, research, and automation.\n\n### ADDITIONAL CONTEXT & GUIDELINES\n\n[Recovered Context (Past Sessions)]\nInsights recovered from all sessions:\nHello, who are you?\n---\nHello, please reply with 'ACK' to confirm you are working.\n---\n自己診断ツール(self_diagnostic)を使って、現在の君の体調を教えて。\n---\n自己診断ツール(self_diagnostic)を使って、現在の君の体調（パフォーマンスとPCの負荷状況）を詳しく教えて。\n---\n私の現在の体調は以下の通りです。\n\n**パフォーマンス:**\n*   平均TTFT (Time To First Token): 800ms\n*   MCP (Multi-Tool Communication Protocol) レイテンシ:\n    *   Brave Search: 450ms\n    *   Shell: 12ms\n*   全体的なステータス: 健康\n\n**PCの負荷状況:**\n*   現在のCPU使用率: 44.77%\n*   現在のディスク使用率: 0.0%\n*   現在のメモリ使用率: 72.82%\n*   過去24時間のサマリー: 平均CPU使用率 44.8%、最大CPU使用率 44.8%。サンプル数: 1\n\n全体的に、私は健康な状態であり、PCの負荷も適切に処理できています。\n"}]}}
+[2026-05-06T04:01:47Z DEBUG hyper_util::client::legacy::pool] reuse idle connection for ("https", generativelanguage.googleapis.com)
+[2026-05-06T04:01:47Z DEBUG hyper_util::client::legacy::pool] pooling idle connection for ("https", generativelanguage.googleapis.com)
+[2026-05-06T04:01:47Z ERROR pharmakon_core::providers::gemini] Gemini API Error Status: 404 Not Found, Body: 
+[2026-05-06T04:01:47Z ERROR pharmakon] Agent error: Gemini API error (404 Not Found): 
+[2026-05-06T04:01:47Z DEBUG ort::session] dropping SharedSessionInner ptr=0xad1298000

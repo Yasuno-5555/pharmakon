@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use rust_i18n::t;
 use pharmakon_common::{Config, SecretStore};
 use pharmakon_core::flows::crestodian::Crestodian;
-use crate::GeminiModel;
+use pharmakon_core::providers::gemini::GeminiModel;
 use std::fs;
 use std::sync::Arc;
 
@@ -43,16 +43,28 @@ pub fn run_wizard() -> Result<()> {
 
     // 4. Provider & API Key
     let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity"];
-    let provider_idx = Select::with_theme(&theme)
-        .with_prompt(t!("provider_prompt").to_string())
-        .items(&provider_options)
-        .default(0) // Now gemini is 0 in this list if we want it to be default
-        .interact()?;
-    let provider = provider_options[provider_idx].to_string();
+    let mut selected_providers = Vec::new();
     
-    let api_key: String = Password::with_theme(&theme)
-        .with_prompt(format!("Enter your {} API Key", provider))
-        .interact()?;
+    println!("\n--- {} ---", t!("api_key_setup_title", default = "API Key Setup"));
+    
+    for p in provider_options {
+        if Confirm::with_theme(&theme)
+            .with_prompt(format!("Do you want to configure {}?", p))
+            .default(p == "gemini")
+            .interact()? 
+        {
+            let key: String = Password::with_theme(&theme)
+                .with_prompt(format!("Enter your {} API Key", p))
+                .interact()?;
+            selected_providers.push((p.to_string(), key));
+        }
+    }
+
+    if selected_providers.is_empty() {
+        return Err(anyhow!("At least one AI provider must be configured."));
+    }
+
+    let default_provider = selected_providers[0].0.clone();
 
     // 5. Telegram Setup
     let enable_telegram = Confirm::with_theme(&theme)
@@ -66,6 +78,20 @@ pub fn run_wizard() -> Result<()> {
             .with_prompt(t!("telegram_token_prompt").to_string())
             .interact()?;
         telegram_token = Some(token);
+    }
+
+    // 5.5 Discord Setup
+    let enable_discord = Confirm::with_theme(&theme)
+        .with_prompt(t!("discord_enable_prompt").to_string())
+        .default(false)
+        .interact()?;
+    
+    let mut discord_token = None;
+    if enable_discord {
+        let token: String = Password::with_theme(&theme)
+            .with_prompt(t!("discord_token_prompt").to_string())
+            .interact()?;
+        discord_token = Some(token);
     }
 
     // 6. Advanced settings (Port, Auth)
@@ -100,13 +126,13 @@ pub fn run_wizard() -> Result<()> {
     }
 
     // 7. Save configuration
-    println!("\n{}", t!("configuring_agent", name = &name, provider = &provider));
+    println!("\n{}", t!("configuring_agent", name = &name, provider = &default_provider));
     
     let mut config = Config::load().unwrap_or_default();
-    config.default_agent.provider = provider.clone();
-    config.default_agent.model = match provider.as_str() {
+    config.default_agent.provider = default_provider.clone();
+    config.default_agent.model = match default_provider.as_str() {
         "openai" => "gpt-4o".to_string(),
-        "anthropic" => "claude-3-5-sonnet-20240620".to_string(),
+        "anthropic" => "claude-3-5-sonnet-latest".to_string(),
         "gemini" => "gemini-1.5-pro".to_string(),
         _ => "default".to_string(),
     };
@@ -122,13 +148,20 @@ pub fn run_wizard() -> Result<()> {
 
     // 8. Save secrets to Keyring
     let secret_store = SecretStore::new();
-    let secret_name = format!("{}_API_KEY", provider.to_uppercase());
-    secret_store.set_secret(&secret_name, &api_key)?;
-    println!("✅ Stored {} in security layer.", secret_name);
+    for (p, key) in selected_providers {
+        let secret_name = format!("{}_API_KEY", p.to_uppercase());
+        secret_store.set_secret(&secret_name, &key)?;
+        println!("✅ Stored {} in security layer.", secret_name);
+    }
     
     if let Some(tg_token) = telegram_token {
         secret_store.set_secret("TELEGRAM_BOT_TOKEN", &tg_token)?;
         println!("✅ Stored TELEGRAM_BOT_TOKEN in security layer.");
+    }
+
+    if let Some(ds_token) = discord_token {
+        secret_store.set_secret("DISCORD_BOT_TOKEN", &ds_token)?;
+        println!("✅ Stored DISCORD_BOT_TOKEN in security layer.");
     }
     
     if auth_mode == "token" {

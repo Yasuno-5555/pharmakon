@@ -14,6 +14,13 @@ impl std::fmt::Display for AgentError {
 
 impl std::error::Error for AgentError {}
 
+impl AgentError {
+    pub fn is_rate_limit(&self) -> bool {
+        let msg = self.0.to_lowercase();
+        msg.contains("429") || msg.contains("too many requests") || msg.contains("quota") || msg.contains("rate limit")
+    }
+}
+
 pub type AgentResult<T> = std::result::Result<T, AgentError>;
 pub type Result<T> = AgentResult<T>;
 
@@ -141,6 +148,8 @@ pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thoughts_tokens: Option<u32>,
 }
 
 #[async_trait]

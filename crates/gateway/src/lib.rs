@@ -128,6 +128,7 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State((agent, canvas_host, cron_manager, _config)): State<(Arc<Mutex<pharmakon_core::agent::Agent>>, Arc<canvas::CanvasHost>, Arc<pharmakon_core::automation::cron::CronManager>, Arc<pharmakon_common::Config>)>,
 ) -> impl IntoResponse {
+    tracing::info!("WebSocket upgrade request received!");
     ws.on_upgrade(move |socket| handle_socket(socket, agent, canvas_host, cron_manager))
 }
 
@@ -144,7 +145,7 @@ async fn handle_socket(
     canvas_host: Arc<canvas::CanvasHost>,
     cron_manager: Arc<pharmakon_core::automation::cron::CronManager>
 ) {
-    tracing::debug!("WebSocket connection established.");
+    tracing::info!("WebSocket connection established.");
     let mut rx = {
         let agent_lock = agent.lock().await;
         agent_lock.event_tx.subscribe()
@@ -162,15 +163,27 @@ async fn handle_socket(
     // Task to send events to client
     let canvas_host_clone = canvas_host.clone();
     let mut send_task = tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            // Update canvas host state if it's a canvas event
-            canvas_host_clone.handle_event(&event);
-            
-            let msg = serde_json::to_string(&event).unwrap();
-            tracing::debug!(target: "gateway", "Sending event: {}", msg);
-            if let Err(e) = sender.send(WsMessage::Text(msg.into())).await {
-                tracing::error!("WebSocket send error: {}", e);
-                break;
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    // Update canvas host state if it's a canvas event
+                    canvas_host_clone.handle_event(&event);
+                    
+                    let msg = serde_json::to_string(&event).unwrap();
+                    tracing::info!(target: "gateway", "Sending event: {}", msg);
+                    if let Err(e) = sender.send(WsMessage::Text(msg.into())).await {
+                        tracing::error!("WebSocket send error: {}", e);
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    tracing::warn!("WebSocket: Broadcast channel lagged, skipping some events");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    tracing::info!("WebSocket: Broadcast channel closed");
+                    break;
+                }
             }
         }
     });
@@ -179,7 +192,7 @@ async fn handle_socket(
     let agent_clone = agent.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
-            tracing::debug!(target: "gateway", "Received request: {}", text);
+            tracing::info!(target: "gateway", "Received request: {}", text);
             if let Ok(req) = serde_json::from_str::<Request>(&text) {
                 match req {
                     Request::SendMessage { message } => {
@@ -229,8 +242,37 @@ async fn handle_socket(
                     }
                     Request::SwitchSession { id } => {
                         let mut agent_lock = agent_clone.lock().await;
-                        agent_lock.session_id = id;
+                        agent_lock.session_id = id.clone();
+                        agent_lock.reset_history();
+                        
+                        // Load history for the new session
+                        let history = if let Some(store) = &agent_lock.session_store {
+                            store.load_history(&id).await.unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        
+                        agent_lock.history = history.clone();
+                        let _ = agent_lock.event_tx.send(Event::HistoryList { messages: history });
                         let _ = agent_lock.event_tx.send(Event::Action("Session switched".to_string()));
+                    }
+                    Request::GetHistory { session_id } => {
+                        let agent_lock = agent_clone.lock().await;
+                        let history = if let Some(store) = &agent_lock.session_store {
+                            store.load_history(&session_id).await.unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        let _ = agent_lock.event_tx.send(Event::HistoryList { messages: history });
+                    }
+                    Request::SearchSessions { query } => {
+                        let agent_lock = agent_clone.lock().await;
+                        let sessions = if let Some(store) = &agent_lock.session_store {
+                            store.search_sessions(&query).await.unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
                     }
                     Request::GetOrchestration => {
                         let agent_lock = agent_clone.lock().await;
@@ -297,6 +339,21 @@ async fn handle_socket(
                             }
                         }
                     }
+                    Request::GetModels => {
+                        let models = pharmakon_core::providers::registry::ModelRegistry::list_available_models();
+                        let agent_lock = agent_clone.lock().await;
+                        let _ = agent_lock.event_tx.send(Event::ModelList { models });
+                    }
+                    Request::SwitchModel { model_id } => {
+                        if let Some(model) = pharmakon_core::providers::registry::ModelRegistry::get_model(&model_id) {
+                            let mut agent_lock = agent_clone.lock().await;
+                            agent_lock.update_model(model);
+                            let _ = agent_lock.event_tx.send(Event::ModelSwitched { model_id });
+                        } else {
+                            let agent_lock = agent_clone.lock().await;
+                            let _ = agent_lock.event_tx.send(Event::Error { message: format!("Model not found: {}", model_id) });
+                        }
+                    }
                 }
             }
         }
@@ -307,5 +364,5 @@ async fn handle_socket(
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
     };
-    tracing::debug!("WebSocket connection closed.");
+    tracing::info!("WebSocket connection closed.");
 }

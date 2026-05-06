@@ -41,6 +41,8 @@ pub struct DefaultAgentConfig {
     pub provider: String,
     #[serde(default = "default_model")]
     pub model: String,
+    #[serde(default = "default_fallback_models")]
+    pub fallback_models: Vec<String>,
 }
 
 impl Default for DefaultAgentConfig {
@@ -48,8 +50,16 @@ impl Default for DefaultAgentConfig {
         Self {
             provider: default_provider(),
             model: default_model(),
+            fallback_models: default_fallback_models(),
         }
     }
+}
+
+fn default_fallback_models() -> Vec<String> {
+    vec![
+        "groq/llama-3.3-70b-versatile".to_string(),
+        "ollama/llama3".to_string()
+    ]
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -66,11 +76,11 @@ fn default_provider() -> String {
 }
 
 fn default_model() -> String {
-    "gemini-2.5-flash".to_string()
+    "gemini-2.0-flash".to_string()
 }
 
 fn default_port() -> u16 {
-    18789
+    19999
 }
 
 fn default_dm_policy() -> String {
@@ -147,7 +157,8 @@ impl Default for Config {
             agents: HashMap::<String, AgentConfig>::new(),
             default_agent: DefaultAgentConfig {
                 provider: "gemini".to_string(),
-                model: "gemini-1.5-pro".to_string(),
+                model: "gemini-2.0-flash".to_string(),
+                fallback_models: default_fallback_models(),
             },
         }
     }
@@ -177,6 +188,9 @@ pub enum Event {
     McpStats { stats: Vec<McpToolStat> },
     VisionUpdate { frames: Vec<VisionFrameInfo> },
     GraphUpdate { relations: Vec<String> },
+    ModelList { models: Vec<String> },
+    ModelSwitched { model_id: String },
+    HistoryList { messages: Vec<Message> },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -218,6 +232,10 @@ pub enum Request {
     GetMcpStats,
     GetVisionFrames,
     GetGraphMemory { query: String },
+    GetModels,
+    SwitchModel { model_id: String },
+    GetHistory { session_id: String },
+    SearchSessions { query: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
