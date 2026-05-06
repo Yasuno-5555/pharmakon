@@ -27,7 +27,7 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         _ => {
                             let agent_lock = agent_clone.lock().await;
                             AcpMessage::Event {
-                                session_id: agent_lock.session_id.clone(),
+                                session_id: agent_lock.session_id.lock().await.clone(),
                                 event
                             }
                         }
@@ -71,8 +71,8 @@ pub async fn handle_acp_socket(socket: WebSocket, agent: Arc<Mutex<Agent>>) {
                         traits,
                         system_prompt,
                     } => {
-                        let mut agent_lock = agent_clone.lock().await;
-                        let mut soul = agent_lock.prompt_manager.soul().clone();
+                        let agent_lock = agent_clone.lock().await;
+                        let mut soul = agent_lock.prompt_manager.lock().await.soul().clone();
                         if let Some(t) = traits {
                             soul.traits = t;
                         }

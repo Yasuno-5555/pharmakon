@@ -22,8 +22,8 @@ impl InitiativeEngineWorker {
             let agent_lock = self.agent.lock().await;
 
             // Extract recent trajectory to find unresolved threads
-            let recent_steps = agent_lock
-                .trajectory
+            let trajectory = agent_lock.trajectory.lock().await;
+            let recent_steps = trajectory
                 .steps
                 .iter()
                 .rev()
@@ -38,7 +38,7 @@ impl InitiativeEngineWorker {
                         context_summary.push_str(&format!("Thought: {}\n", content));
                     }
                     crate::trajectory::TrajectoryStep::Action { tool, args, .. } => {
-                        let arg_str = serde_json::to_string(args).unwrap_or_default();
+                        let arg_str = serde_json::to_string(&args).unwrap_or_default();
                         context_summary
                             .push_str(&format!("Action: {} with args {}\n", tool, arg_str));
                     }
@@ -93,7 +93,7 @@ impl InitiativeEngineWorker {
             tools: None,
         };
 
-        let response = model.complete(request).await?;
+        let response = model.lock().await.complete(request).await?;
 
         let task = match &response.content {
             Some(pharmakon_common::MessageContent::Text(t)) => t.trim().to_string(),

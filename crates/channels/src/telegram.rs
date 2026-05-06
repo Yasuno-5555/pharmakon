@@ -26,7 +26,7 @@ impl TelegramChannel {
 
 #[async_trait]
 impl Channel for TelegramChannel {
-    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()> {
+    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
         log::info!("TelegramChannel starting...");
 
         let bot = self.bot.clone();
@@ -60,7 +60,7 @@ impl Channel for TelegramChannel {
         }
 
         let handler = dptree::entry()
-            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Agent>, last_chat_id: Arc<Mutex<Option<ChatId>>>| async move {
+            .branch(Update::filter_message().endpoint(move |bot: Bot, msg: Message, agent: Arc<Mutex<Agent>>, last_chat_id: Arc<Mutex<Option<ChatId>>>| async move {
                 {
                     let mut last_id = last_chat_id.lock().await;
                     *last_id = Some(msg.chat.id);
@@ -71,14 +71,14 @@ impl Channel for TelegramChannel {
 
                     if text.starts_with("/approve ") {
                         let id = text.trim_start_matches("/approve ").to_string();
-                        agent.approve(id.clone(), true);
+                        agent.lock().await.approve(id.clone(), true);
                         let _ = bot.send_message(msg.chat.id, format!("✅ Tool call approved: {}", id)).await;
                         return Ok(());
                     }
                     
                     if text.starts_with("/deny ") {
                         let id = text.trim_start_matches("/deny ").to_string();
-                        agent.approve(id.clone(), false);
+                        agent.lock().await.approve(id.clone(), false);
                         let _ = bot.send_message(msg.chat.id, format!("❌ Tool call denied: {}", id)).await;
                         return Ok(());
                     }
@@ -100,7 +100,8 @@ impl Channel for TelegramChannel {
                     let chat_id = msg.chat.id;
                     let text_owned = text.to_string();
                     tokio::spawn(async move {
-                        match agent_spawn.chat(&text_owned).await {
+                        let agent_lock = agent_spawn.lock().await;
+                        match agent_lock.chat(&text_owned).await {
                             Ok(response) => {
                                 log::info!("Telegram sending response to {}: {}", chat_id, response);
                                 match bot.send_message(chat_id, response).await {
@@ -128,7 +129,7 @@ impl Channel for TelegramChannel {
         let agent_for_events = agent.clone();
         let last_chat_id = self.last_chat_id.clone();
         tokio::spawn(async move {
-            let event_tx = agent_for_events.event_tx();
+            let event_tx = agent_for_events.lock().await.event_tx();
             let mut event_rx = event_tx.subscribe();
             log::info!("Telegram event listener started.");
 

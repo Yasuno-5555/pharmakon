@@ -110,8 +110,8 @@ impl AppData {
         let agent = self.agent.clone();
         let session_id = self.current_session.clone();
         tokio::spawn(async move {
-            let mut agent_lock = agent.lock().await;
-            agent_lock.session_id = session_id;
+            let agent_lock = agent.lock().await;
+            agent_lock.set_session_id(session_id);
             let _ = agent_lock.chat(&message_to_send).await;
         });
     }
@@ -124,9 +124,9 @@ impl AppData {
         let db = self.db.clone();
         tokio::spawn(async move {
             let history = db.load_history(&session_id).await.unwrap_or_default();
-            let mut agent_lock = agent.lock().await;
-            agent_lock.session_id = session_id;
-            agent_lock.history = history;
+            let agent_lock = agent.lock().await;
+            agent_lock.set_session_id(session_id);
+            agent_lock.replace_history(history);
             // Note: We'd need a way to send this back to the UI thread if not polling
         });
     }

@@ -1,12 +1,12 @@
 use axum::{
-    http::{Request, StatusCode, header},
+    http::{Request, StatusCode, header, HeaderValue},
     middleware::Next,
     response::Response,
 };
 use pharmakon_common::secrets::SecretStore;
 
-pub async fn auth_middleware<B>(req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
-    let auth_header = req.headers().get("x-api-key").and_then(|h| h.to_str().ok());
+pub async fn auth_middleware(req: Request<axum::body::Body>, next: Next) -> Result<Response, StatusCode> {
+    let auth_header = req.headers().get("x-api-key").and_then(|h: &HeaderValue| h.to_str().ok());
 
     if let Some(key) = auth_header {
         let store = SecretStore::new();

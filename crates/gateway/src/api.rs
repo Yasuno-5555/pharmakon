@@ -4,6 +4,7 @@ use pharmakon_common::{Event, MessageContent};
 use pharmakon_core::agent::Agent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Deserialize)]
 pub struct ExecuteToolRequest {
@@ -18,7 +19,7 @@ pub struct ExecuteToolResponse {
 
 pub async fn execute_tool(
     State((agent, _, _, _)): State<(
-        Arc<Agent>,
+        Arc<Mutex<Agent>>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -31,7 +32,8 @@ pub async fn execute_tool(
         req.args
     );
 
-    let tools = agent.tools.blocking_lock();
+    let agent_lock = agent.lock().await;
+    let tools = agent_lock.tools.blocking_lock();
     if let Some(tool) = tools.iter().find(|t| t.name() == req.name) {
         match tool.call(req.args).await {
             Ok(result) => (StatusCode::OK, Json(ExecuteToolResponse { result })).into_response(),
@@ -57,7 +59,7 @@ pub struct ChatRequest {
 
 pub async fn agent_chat(
     State((agent, _, _, _)): State<(
-        Arc<Agent>,
+        Arc<Mutex<Agent>>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
@@ -65,8 +67,8 @@ pub async fn agent_chat(
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
     log::info!("API: Agent chat request: {}", req.message);
-
-    match agent.chat(&req.message).await {
+    let agent_lock = agent.lock().await;
+    match agent_lock.chat(&req.message).await {
         Ok(response) => (StatusCode::OK, Json(json!({ "response": response }))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -78,17 +80,18 @@ pub async fn agent_chat(
 
 pub async fn get_state(
     State((agent, _, _, _)): State<(
-        Arc<Agent>,
+        Arc<Mutex<Agent>>,
         Arc<crate::canvas::CanvasHost>,
         Arc<pharmakon_core::automation::cron::CronManager>,
         Arc<pharmakon_common::Config>,
     )>,
 ) -> impl IntoResponse {
-    let trajectory = agent.trajectory.blocking_lock();
-    let history = agent.history.blocking_lock();
+    let agent_lock = agent.lock().await;
+    let trajectory = agent_lock.trajectory.blocking_lock();
+    let history = agent_lock.history.blocking_lock();
 
     Json(json!({
-        "session_id": agent.session_id.blocking_lock().clone(),
+        "session_id": agent_lock.session_id.blocking_lock().clone(),
         "trajectory_steps": trajectory.steps.len(),
         "history_messages": history.len(),
         "model": trajectory.metadata.model.clone(),

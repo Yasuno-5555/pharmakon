@@ -45,7 +45,7 @@ impl Hook for TokenEconomyHook {
         }
 
         match event {
-            Event::AgentInteractionFinished { response, .. } => {
+            Event::InteractionFinished { response, .. } => {
                 let usage = response.usage.as_ref();
                 if let Some(u) = usage {
                     let mut total = self.cumulative_usage.lock().await;
@@ -63,7 +63,7 @@ impl Hook for TokenEconomyHook {
                         log::warn!(
                             "🚨 TOKEN BUDGET EXCEEDED! ({} > {})",
                             *total,
-                            self.budget_limit
+                            limit
                         );
                         // Inject a strong warning for the next turn
                         let mut history = ctx.agent.history.lock().await;
@@ -73,7 +73,7 @@ impl Hook for TokenEconomyHook {
                                 "CRITICAL: You have exceeded your token budget ({} / {}). \
                                 From now on, you MUST be extremely concise. No explanations, just direct answers or essential tool calls. \
                                 Failure to comply will result in task termination.", 
-                                *total, self.budget_limit
+                                *total, limit
                             ))),
                             ..Default::default()
                         });

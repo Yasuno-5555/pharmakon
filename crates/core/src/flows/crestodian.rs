@@ -1,6 +1,7 @@
 use crate::agent::Agent;
 use crate::model::AgentModel;
 use crate::soul::Soul;
+use pharmakon_common::ToolRegistry;
 use pharmakon_tools::config_tool::ConfigTool;
 use std::sync::Arc;
 

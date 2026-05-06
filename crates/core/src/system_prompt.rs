@@ -53,6 +53,10 @@ impl SystemPromptManager {
         &self.base_soul
     }
 
+    pub fn set_soul(&mut self, soul: Soul) {
+        self.base_soul = soul;
+    }
+
     pub fn build(&self) -> String {
         let mut prompt = self.base_soul.system_prompt.clone();
 

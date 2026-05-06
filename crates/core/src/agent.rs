@@ -4,7 +4,7 @@ use crate::model::{
 };
 use crate::system_prompt::SystemPromptManager;
 use anyhow::{Result, anyhow};
-use pharmakon_common::Event;
+use pharmakon_common::{Event, ToolRegistry};
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
 
@@ -149,7 +149,11 @@ impl Agent {
             WorkspacePerceptionTool,
         };
 
-        self.add_tool(Arc::new(SkillFactoryTool::new(Arc::downgrade(self))));
+        let agent_arc: Arc<Agent> = self.clone();
+        let tool_registry_arc: Arc<dyn pharmakon_common::ToolRegistry> = agent_arc;
+        self.add_tool(Arc::new(pharmakon_tools::SkillFactoryTool::new(
+            Arc::downgrade(&tool_registry_arc),
+        )));
         self.add_tool(Arc::new(WorkspacePerceptionTool));
         self.add_tool(Arc::new(GrepSearchTool));
         self.add_tool(Arc::new(CodeEditTool));
@@ -598,7 +602,11 @@ impl Agent {
                 }
             }
 
-            let response = response_result.unwrap();
+            let response: pharmakon_common::agent_types::CompletionResponse = response_result.unwrap();
+
+            let _ = self.event_tx.send(Event::InteractionFinished {
+                response: response.clone(),
+            });
 
             if let Some(content) = &response.content {
                 let c = content.clone();

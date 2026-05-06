@@ -3,7 +3,7 @@ use crate::model::AgentModel;
 use crate::persistence::DbSessionStore;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use pharmakon_common::AgentSpawner;
+use pharmakon_common::{AgentSpawner, ToolRegistry};
 use pharmakon_tools::subagent::SubAgentTool;
 use std::sync::Arc;
 
@@ -52,7 +52,7 @@ impl AgentSpawner for DefaultAgentSpawner {
         log::info!(
             "Sub-agent starting task (depth: {}) in session: {}",
             depth,
-            agent.session_id
+            *agent.session_id.lock().await
         );
         agent.chat(task).await
     }

@@ -32,7 +32,7 @@ struct StatusResponse {
 pub struct Gateway {
     pub port: u16,
     pub channels: Vec<Arc<dyn Channel>>,
-    pub agent: Arc<Agent>,
+    pub agent: Arc<Mutex<Agent>>,
     pub canvas_host: Arc<canvas::CanvasHost>,
     pub cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
     pub config: pharmakon_common::Config,
@@ -41,7 +41,7 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(
         port: u16,
-        agent: Arc<Agent>,
+        agent: Arc<Mutex<Agent>>,
         cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
         config: pharmakon_common::Config,
     ) -> Self {
@@ -173,12 +173,12 @@ async fn acp_handler(
 
 async fn handle_socket(
     socket: WebSocket,
-    agent: Arc<pharmakon_core::agent::Agent>,
+    agent: Arc<Mutex<pharmakon_core::agent::Agent>>,
     canvas_host: Arc<canvas::CanvasHost>,
     cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
 ) {
     tracing::info!("WebSocket connection established.");
-    let mut rx = agent.event_tx.subscribe();
+    let mut rx = agent.lock().await.event_tx.subscribe();
 
     let (mut sender, mut receiver) = socket.split();
 
@@ -224,25 +224,27 @@ async fn handle_socket(
         while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
             tracing::info!(target: "gateway", "Received request: {}", text);
             if let Ok(req) = serde_json::from_str::<Request>(&text) {
+                let agent_clone_inner = agent_clone.clone();
                 match req {
                     Request::SendMessage { message } => {
-                        let agent_spawn = agent_clone.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = agent_spawn.chat(&message).await {
-                                let _ = agent_spawn.event_tx.send(Event::Error {
+                            let agent_lock = agent_clone_inner.lock().await;
+                            if let Err(e) = agent_lock.chat(&message).await {
+                                let _ = agent_lock.event_tx.send(Event::Error {
                                     message: e.to_string(),
                                 });
                             }
                         });
                     }
                     Request::ProvideApproval { id, approved } => {
-                        let _ = agent_clone.approval_tx.send((id, approved));
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let _ = agent_lock.approval_tx.send((id, approved));
                     }
                     Request::GetStatus => {
                         // Status handled via HTTP
                     }
                     Request::ResetHistory => {
-                        agent_clone.reset_history();
+                        agent_clone_inner.lock().await.reset_history();
                     }
                     Request::InteractiveResponse {
                         element_id,
@@ -259,7 +261,8 @@ async fn handle_socket(
                     Request::GetCronJobs => {
                         let jobs = cron_manager.list_jobs().await;
                         let event = Event::CronJobList { jobs };
-                        let _ = agent_clone.event_tx.send(event);
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let _ = agent_lock.event_tx.send(event);
                     }
                     Request::CancelCronJob { id } => {
                         if let Err(e) = cron_manager.cancel_job(&id).await {
@@ -267,54 +270,59 @@ async fn handle_socket(
                         } else {
                             let jobs = cron_manager.list_jobs().await;
                             let event = Event::CronJobList { jobs };
-                            let _ = agent_clone.event_tx.send(event);
+                            let agent_lock = agent_clone_inner.lock().await;
+                            let _ = agent_lock.event_tx.send(event);
                         }
                     }
                     Request::GetSessions => {
-                        let sessions: Vec<String> = if let Some(store) = &agent_clone.session_store
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let sessions: Vec<String> = if let Some(store) = &agent_lock.session_store
                         {
                             store.list_sessions().await.unwrap_or_default()
                         } else {
                             vec!["default".to_string()]
                         };
-                        let _ = agent_clone.event_tx.send(Event::SessionList { sessions });
+                        let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
                     }
                     Request::SwitchSession { id } => {
-                        agent_clone.set_session_id(id.clone());
-                        agent_clone.reset_history();
+                        let agent_lock = agent_clone_inner.lock().await;
+                        agent_lock.set_session_id(id.clone());
+                        agent_lock.reset_history();
 
                         // Load history for the new session
-                        let history = if let Some(store) = &agent_clone.session_store {
+                        let history = if let Some(store) = &agent_lock.session_store {
                             store.load_history(&id).await.unwrap_or_default()
                         } else {
                             Vec::new()
                         };
 
-                        agent_clone.replace_history(history.clone());
-                        let _ = agent_clone
+                        agent_lock.replace_history(history.clone());
+                        let _ = agent_lock
                             .event_tx
                             .send(Event::HistoryList { messages: history });
-                        let _ = agent_clone
+                        let _ = agent_lock
                             .event_tx
                             .send(Event::Action("Session switched".to_string()));
                     }
                     Request::GetHistory { session_id } => {
-                        let history = if let Some(store) = &agent_clone.session_store {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let history = if let Some(store) = &agent_lock.session_store {
                             store.load_history(&session_id).await.unwrap_or_default()
                         } else {
                             Vec::new()
                         };
-                        let _ = agent_clone
+                        let _ = agent_lock
                             .event_tx
                             .send(Event::HistoryList { messages: history });
                     }
                     Request::SearchSessions { query } => {
-                        let sessions = if let Some(store) = &agent_clone.session_store {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let sessions = if let Some(store) = &agent_lock.session_store {
                             store.search_sessions(&query).await.unwrap_or_default()
                         } else {
                             Vec::new()
                         };
-                        let _ = agent_clone.event_tx.send(Event::SessionList { sessions });
+                        let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
                     }
                     Request::GetOrchestration => {
                         let event = Event::OrchestrationState {
@@ -334,7 +342,8 @@ async fn handle_socket(
                                 },
                             ],
                         };
-                        let _ = agent_clone.event_tx.send(event);
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetGatewayStatus => {
                         let event = Event::GatewayStatus {
@@ -342,7 +351,8 @@ async fn handle_socket(
                             connected_clients: 1,            // Dummy
                             memory_usage: 128 * 1024 * 1024, // Dummy
                         };
-                        let _ = agent_clone.event_tx.send(event);
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetMcpStats => {
                         let event = Event::McpStats {
@@ -352,10 +362,12 @@ async fn handle_socket(
                                 call_count: 12,
                             }],
                         };
-                        let _ = agent_clone.event_tx.send(event);
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetVisionFrames => {
-                        if let Some(stream) = &agent_clone.vision_stream {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        if let Some(stream) = &agent_lock.vision_stream {
                             let stream_lock = stream.lock().await;
                             let frames = stream_lock
                                 .get_recent_frames()
@@ -366,28 +378,31 @@ async fn handle_socket(
                                     title: f.window_title,
                                 })
                                 .collect();
-                            let _ = agent_clone.event_tx.send(Event::VisionUpdate { frames });
+                            let _ = agent_lock.event_tx.send(Event::VisionUpdate { frames });
                         }
                     }
                     Request::GetGraphMemory { query } => {
-                        if let Some(graph) = &agent_clone.graph_store {
+                        let agent_lock = agent_clone_inner.lock().await;
+                        if let Some(graph) = &agent_lock.graph_store {
                             if let Ok(relations) = graph.query_relations(&query).await {
-                                let _ = agent_clone.event_tx.send(Event::GraphUpdate { relations });
+                                let _ = agent_lock.event_tx.send(Event::GraphUpdate { relations });
                             }
                         }
                     }
                     Request::GetModels => {
                         let models = pharmakon_core::providers::registry::ModelRegistry::list_available_models();
-                        let _ = agent_clone.event_tx.send(Event::ModelList { models });
+                        let agent_lock = agent_clone_inner.lock().await;
+                        let _ = agent_lock.event_tx.send(Event::ModelList { models });
                     }
                     Request::SwitchModel { model_id } => {
+                        let agent_lock = agent_clone_inner.lock().await;
                         if let Some(model) =
                             pharmakon_core::providers::registry::ModelRegistry::get_model(&model_id)
                         {
-                            agent_clone.update_model(model);
-                            let _ = agent_clone.event_tx.send(Event::ModelSwitched { model_id });
+                            agent_lock.update_model(model);
+                            let _ = agent_lock.event_tx.send(Event::ModelSwitched { model_id });
                         } else {
-                            let _ = agent_clone.event_tx.send(Event::Error {
+                            let _ = agent_lock.event_tx.send(Event::Error {
                                 message: format!("Model not found: {}", model_id),
                             });
                         }

@@ -176,6 +176,9 @@ impl Default for Config {
 pub enum Event {
     Message(Message),
     Action(String),
+    InteractionFinished {
+        response: CompletionResponse,
+    },
     CanvasUpdate {
         primitive: crate::visual_primitives::CanvasPrimitive,
     },

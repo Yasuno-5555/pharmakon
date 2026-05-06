@@ -26,7 +26,7 @@ impl DiscordChannel {
 }
 
 struct Handler {
-    agent: Arc<Agent>,
+    agent: Arc<Mutex<Agent>>,
 }
 
 #[async_trait]
@@ -41,7 +41,8 @@ impl EventHandler for Handler {
         let agent_clone = self.agent.clone();
         let content = msg.content.clone();
         tokio::spawn(async move {
-            match agent_clone.chat(&content).await {
+            let agent_lock = agent_clone.lock().await;
+            match agent_lock.chat(&content).await {
                 Ok(response) => {
                     if let Err(e) = msg.channel_id.say(&ctx.http, response).await {
                         log::error!("Discord send error: {}", e);
@@ -62,7 +63,7 @@ impl EventHandler for Handler {
 
 #[async_trait]
 impl Channel for DiscordChannel {
-    async fn run(&self, agent: Arc<Agent>) -> anyhow::Result<()> {
+    async fn run(&self, agent: Arc<Mutex<Agent>>) -> anyhow::Result<()> {
         log::info!("DiscordChannel starting...");
 
         let intents = GatewayIntents::GUILD_MESSAGES

@@ -1,6 +1,7 @@
 use crate::agent::Agent;
 use anyhow::{Context, Result};
 use notify::{Event, RecursiveMode, Watcher};
+use pharmakon_common::ToolRegistry;
 use pharmakon_tools::wasm_tool::WasmTool;
 use std::fs;
 use std::path::PathBuf;

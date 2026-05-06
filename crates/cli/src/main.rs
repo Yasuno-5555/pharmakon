@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
-use pharmakon_common::{AgentResult, Config, SecretStore};
+use pharmakon_common::{AgentResult, Config, SecretStore, ToolRegistry};
 use pharmakon_core::agent::Agent;
 use pharmakon_core::persistence::DbSessionStore;
 use pharmakon_core::providers::registry::ModelRegistry;
@@ -280,8 +280,8 @@ async fn main() -> Result<()> {
             agent.add_tool(Arc::new(WebFetchTool::new()));
             agent.add_tool(Arc::new(BraveSearchTool::new("".to_string())));
 
-            let agent_arc = Arc::new(agent);
-            agent_arc.setup_autonomous_tools();
+            let agent_arc = Arc::new(Mutex::new(agent));
+            // TODO: Figure out how to call setup_autonomous_tools on a Mutex-wrapped agent
 
             let mut gateway =
                 pharmakon_gateway::Gateway::new(actual_port, agent_arc, cron_manager, config);

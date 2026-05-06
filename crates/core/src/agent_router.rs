@@ -4,6 +4,7 @@ use crate::persistence::DbSessionStore;
 use crate::soul::Soul;
 use anyhow::Result;
 use pharmakon_common::Config;
+use pharmakon_common::ToolRegistry;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
