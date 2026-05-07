@@ -1,0 +1,19 @@
+[package]
+name = "pharmakon-common"
+version = "0.1.1"
+edition = "2024"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+anyhow.workspace = true
+dirs.workspace = true
+log.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+rust-i18n.workspace = true
+futures.workspace = true
+keyring.workspace = true
+chrono.workspace = true
+toml = "0.8"
+sysinfo = "0.38.4"

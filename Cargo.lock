@@ -8044,34 +8044,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pharmakon-audio"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "log",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "pharmakon-channels"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "log",
- "pharmakon-common",
- "pharmakon-core",
- "serenity",
- "slack-morphism",
- "teloxide",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "pharmakon-cli"
 version = "0.1.0"
 dependencies = [
@@ -8086,11 +8058,9 @@ dependencies = [
  "futures-util",
  "log",
  "open",
- "pharmakon-channels",
  "pharmakon-common",
  "pharmakon-core",
  "pharmakon-gateway",
- "pharmakon-gui",
  "pharmakon-memory",
  "pharmakon-tools",
  "ratatui",
@@ -8130,6 +8100,7 @@ dependencies = [
  "async-trait",
  "bollard",
  "chrono",
+ "diffy",
  "dirs",
  "futures",
  "keyring",
@@ -8138,9 +8109,7 @@ dependencies = [
  "notify",
  "once_cell",
  "pharmakon-common",
- "pharmakon-mcp",
  "pharmakon-memory",
- "pharmakon-tools",
  "qdrant-client",
  "rand 0.8.6",
  "regex",
@@ -8150,9 +8119,12 @@ dependencies = [
  "serde_yaml",
  "sqlx",
  "sysinfo 0.38.4",
+ "tempfile",
  "tiktoken-rs",
  "tokio",
  "tokio-cron-scheduler",
+ "tokio-util",
+ "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -8163,31 +8135,12 @@ dependencies = [
 name = "pharmakon-gateway"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "axum 0.8.9",
- "dirs",
- "futures",
- "log",
- "pharmakon-channels",
- "pharmakon-common",
- "pharmakon-core",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sysinfo 0.38.4",
- "tokio",
- "tokio-cron-scheduler",
- "tower-http",
- "tracing",
-]
-
-[[package]]
-name = "pharmakon-gui"
-version = "0.1.0"
-dependencies = [
  "accesskit",
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
  "chrono",
- "env_logger",
+ "dirs",
  "futures",
  "log",
  "masonry",
@@ -8197,30 +8150,23 @@ dependencies = [
  "pharmakon-common",
  "pharmakon-core",
  "pharmakon-tools",
+ "rand 0.8.6",
+ "serde",
  "serde_json",
+ "serenity",
+ "slack-morphism",
+ "sysinfo 0.38.4",
+ "teloxide",
  "tokio",
+ "tokio-cron-scheduler",
+ "tower-http",
  "tracing",
  "tray-icon",
+ "uuid",
  "vello",
  "winit",
  "xilem",
  "xilem_core",
-]
-
-[[package]]
-name = "pharmakon-mcp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tower 0.5.3",
 ]
 
 [[package]]
@@ -8279,13 +8225,13 @@ dependencies = [
  "log",
  "nokhwa",
  "pharmakon-common",
- "pharmakon-mcp",
  "pharmakon-memory",
  "reqwest",
  "scraper",
  "screenshots",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
  "tree-sitter",
  "tree-sitter-rust",

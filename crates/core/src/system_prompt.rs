@@ -32,6 +32,7 @@ impl SystemPromptContribution for StaticContribution {
 /// PromptLayout defines the structure of the prompt to maximize Gemini's implicit caching.
 /// Static parts (system rules, playbooks) are placed at the beginning.
 pub struct PromptLayout {
+    pub dynamic_context: String,
     pub system_rules: String,
     pub playbooks: String,
     pub repo_map: Option<String>,
@@ -42,7 +43,7 @@ pub struct PromptLayout {
 
 impl PromptLayout {
     pub fn render(&self) -> String {
-        let mut p = format!("{}\n\n{}", self.system_rules, self.playbooks);
+        let mut p = format!("{}\n\n{}\n\n{}", self.dynamic_context, self.system_rules, self.playbooks);
         if let Some(rm) = &self.repo_map {
             p.push_str(&format!("\n\n### REPOSITORY MAP\n{}", rm));
         }

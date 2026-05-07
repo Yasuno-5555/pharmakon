@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 pub use pharmakon_common::{
     AgentError, AgentErrorCode, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
-    ContentPart, FunctionCall, FunctionDefinition, Message, MessageContent, ToolCall,
-    ToolDefinition, Usage,
+    ContentPart, ExecutionClass, FunctionCall, FunctionDefinition, Message, MessageContent,
+    ToolCall, ToolCategory, ToolDefinition, ToolMeta, Usage,
 };
 
 pub struct MockModel;
@@ -15,7 +15,7 @@ impl AgentModel for MockModel {
             .last()
             .and_then(|m| m.content.as_ref())
             .map(|c| c.to_string())
-            .unwrap_or_else(|| "".to_string());
+            .unwrap_or_default();
         Ok(CompletionResponse {
             content: Some(MessageContent::Text(format!(
                 "Mock response to: {}",

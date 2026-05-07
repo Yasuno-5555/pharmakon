@@ -81,6 +81,7 @@ impl Tool for TerminalTool {
             "properties": {
                 "command": { "type": "string", "description": "Command to execute" },
                 "reset": { "type": "boolean", "default": false, "description": "Clear the session and start fresh" },
+                "timeout": { "type": "integer", "default": 30, "description": "Timeout in seconds" },
                 "requires_manual_approval": {
                     "type": "boolean",
                     "description": "Set to true if you judge this command is high-risk and requires user confirmation."
@@ -95,6 +96,12 @@ impl Tool for TerminalTool {
             .as_str()
             .ok_or_else(|| AgentError("Missing command".to_string()))?;
         let reset = args["reset"].as_bool().unwrap_or(false);
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(30);
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+        if args["dry_run"].as_bool().unwrap_or(false) {
+            return Ok(format!("[DRY RUN] Simulation of persistent terminal command: {}", command));
+        }
 
         if reset {
             let mut session_lock = self.session.lock().await;
@@ -124,7 +131,6 @@ impl Tool for TerminalTool {
         let mut output = String::new();
         let mut error_output = String::new();
 
-        let timeout_duration = std::time::Duration::from_secs(30);
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
                 let mut stdout_line = String::new();
@@ -155,7 +161,7 @@ impl Tool for TerminalTool {
                     Ok(format!("{}\n[Errors]:\n{}", output, error_output))
                 }
             }
-            Err(_) => Err(AgentError("Command timed out after 30 seconds".to_string())),
+            Err(_) => Err(AgentError(format!("Command timed out after {} seconds", timeout_secs))),
         }
     }
 
@@ -194,6 +200,11 @@ impl Tool for ShellTool {
         let command = args["command"]
             .as_str()
             .ok_or_else(|| AgentError("Missing command".to_string()))?;
+
+        if args["dry_run"].as_bool().unwrap_or(false) {
+            return Ok(format!("[DRY RUN] Simulation of shell command: {}", command));
+        }
+
         let output = std::process::Command::new("sh")
             .arg("-c")
             .arg(command)

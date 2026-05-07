@@ -76,6 +76,8 @@ pub struct Message {
     pub role: String,
     pub content: Option<MessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>, // For tool role, the name of the tool
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -213,14 +215,100 @@ pub trait AgentModel: Send + Sync {
     fn name(&self) -> &str;
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum ToolCategory {
-    FileSystem,
-    Network,
-    Media,
-    Autonomous,
-    System,
+    Core,           // Always loaded tools
+    FileSystem,     // File operations
+    Network,        // Web search, fetching
+    Media,          // Camera, screenshot
+    Autonomous,     // Meta-cognitive, reflection
+    System,         // Shell, Terminal, Environment
+    Orchestration,  // Swarm, MCTS, Tool Routing
+    Coding,         // Quality, Linter, AST
     Custom(String),
+}
+
+impl ToolCategory {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Core => "core",
+            Self::FileSystem => "filesystem",
+            Self::Network => "network",
+            Self::Media => "media",
+            Self::Autonomous => "autonomous",
+            Self::System => "system",
+            Self::Orchestration => "orchestration",
+            Self::Coding => "coding",
+            Self::Custom(s) => s,
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "core" => Self::Core,
+            "filesystem" => Self::FileSystem,
+            "network" => Self::Network,
+            "media" => Self::Media,
+            "autonomous" => Self::Autonomous,
+            "system" => Self::System,
+            "orchestration" => Self::Orchestration,
+            "coding" => Self::Coding,
+            _ => Self::Custom(s.to_string()),
+        }
+    }
+
+    pub fn all_categories() -> Vec<&'static str> {
+        vec![
+            "core",
+            "filesystem",
+            "network",
+            "media",
+            "autonomous",
+            "system",
+            "orchestration",
+            "coding",
+        ]
+    }
+}
+
+/// Classification of tool execution risk level.
+/// Used by PolicyEngine and CognitiveScheduler for resource governance.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExecutionClass {
+    /// No side effects: search, read, compute
+    Pure,
+    /// Local mutations: file write, AST edit
+    Local,
+    /// Shell execution, git push, network calls
+    Dangerous,
+    /// Swarm spawn, self-modification, autonomous loops
+    Autonomous,
+}
+
+impl ExecutionClass {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pure => "pure",
+            Self::Local => "local",
+            Self::Dangerous => "dangerous",
+            Self::Autonomous => "autonomous",
+        }
+    }
+
+    pub fn requires_default_approval(&self) -> bool {
+        matches!(self, Self::Dangerous | Self::Autonomous)
+    }
+}
+
+/// Lightweight tool metadata for deferred loading.
+/// Only ~80 bytes per tool — kept in memory permanently.
+/// Full Tool implementation is hydrated on demand.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolMeta {
+    pub name: String,
+    pub description: String,
+    pub category: ToolCategory,
+    pub execution_class: ExecutionClass,
 }
 
 #[async_trait]
@@ -232,6 +320,10 @@ pub trait Tool: Send + Sync {
     fn category(&self) -> ToolCategory {
         ToolCategory::Custom("generic".to_string())
     }
+    /// Classification for safety and resource governance.
+    fn execution_class(&self) -> ExecutionClass {
+        ExecutionClass::Pure
+    }
     fn metadata(&self) -> std::collections::HashMap<String, String> {
         std::collections::HashMap::new()
     }
@@ -240,6 +332,15 @@ pub trait Tool: Send + Sync {
     }
     fn approval_description(&self, _args: &serde_json::Value) -> String {
         String::new()
+    }
+    /// Generate lightweight ToolMeta from this tool instance.
+    fn to_meta(&self) -> ToolMeta {
+        ToolMeta {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            category: self.category(),
+            execution_class: self.execution_class(),
+        }
     }
 }
 

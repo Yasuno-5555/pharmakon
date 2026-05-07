@@ -3,15 +3,7 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-pub struct MemoryManagementTool {
-    nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
-}
-
-impl MemoryManagementTool {
-    pub fn new(nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>) -> Self {
-        Self { nexus }
-    }
-}
+pub struct MemoryManagementTool;
 
 #[async_trait]
 impl Tool for MemoryManagementTool {

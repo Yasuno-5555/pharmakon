@@ -63,6 +63,11 @@ impl Tool for FileWriteTool {
         let content = args["content"]
             .as_str()
             .ok_or_else(|| AgentError("Missing content".to_string()))?;
+
+        if args["dry_run"].as_bool().unwrap_or(false) {
+            return Ok(format!("[DRY RUN] Simulation: Writing {} bytes to {}", content.len(), path));
+        }
+
         fs::write(path, content)
             .map_err(|e| AgentError(format!("Failed to write {}: {}", path, e)))?;
         Ok(format!("Successfully wrote to {}", path))
@@ -108,6 +113,10 @@ impl Tool for ApplyPatchTool {
 
         let patched = diffy::apply(&original, &patch)
             .map_err(|e| AgentError(format!("Failed to apply patch: {}", e)))?;
+
+        if args["dry_run"].as_bool().unwrap_or(false) {
+            return Ok(format!("[DRY RUN] Simulation: Successfully patched {} ({} lines changed)", path, patched.lines().count()));
+        }
 
         fs::write(path, patched).map_err(|e| {
             AgentError(format!(

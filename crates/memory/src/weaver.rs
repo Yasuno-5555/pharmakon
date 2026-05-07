@@ -37,7 +37,7 @@ use tokio::sync::Mutex;
 
 pub struct KnowledgeNexus {
     embedding_model: Arc<LocalEmbeddingModel>,
-    conn: Connection,
+    conn: Arc<Mutex<Connection>>,
     table_name: String,
     pub graph: Arc<crate::graph::GraphStore>,
     // Isolated delta buffers
@@ -50,14 +50,14 @@ pub struct KnowledgeNexus {
 
 impl KnowledgeNexus {
     pub async fn new(db_path: &str, graph_db_path: &str) -> anyhow::Result<Self> {
-        let conn = connect(db_path).execute().await?;
+        let conn = Arc::new(Mutex::new(connect(db_path).execute().await?));
         let embedding_model = Arc::new(LocalEmbeddingModel::new()?);
         let graph = Arc::new(crate::graph::GraphStore::new(graph_db_path).await?);
 
         let table_name = "knowledge_units".to_string();
 
         // Ensure table exists in LanceDB
-        let table_names = conn.table_names().execute().await?;
+        let table_names = conn.lock().await.table_names().execute().await?;
         if !table_names.contains(&table_name) {
             let schema = Arc::new(Schema::new(vec![
                 Field::new("id", DataType::Utf8, false),
@@ -76,7 +76,9 @@ impl KnowledgeNexus {
             ]));
 
             let batch = RecordBatch::new_empty(schema);
-            conn.create_table(&table_name, vec![batch])
+            conn.lock()
+                .await
+                .create_table(&table_name, vec![batch])
                 .execute()
                 .await?;
         }
@@ -155,6 +157,7 @@ impl KnowledgeNexus {
                 embedding_status: "PENDING".to_string(),
                 access_count: 0,
                 last_access_time: chrono::Utc::now().timestamp(),
+                decay_score: 1.0,
                 properties: serde_json::json!({}),
             };
             new_nodes.push(node);
@@ -260,7 +263,7 @@ impl KnowledgeNexus {
         }
 
         // Perform LanceDB insertion
-        let table = self.conn.open_table(&self.table_name).execute().await?;
+        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
         table.add(batches).execute().await?;
 
         // ONLY AFTER SUCCESSFUL LANCEDB INSERTION, update SQLite status
@@ -280,7 +283,7 @@ impl KnowledgeNexus {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
 
-        let table = self.conn.open_table(&self.table_name).execute().await?;
+        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
         // Request more than limit to allow for re-ranking
         let mut results = table
             .vector_search(vector)?
@@ -394,17 +397,30 @@ impl KnowledgeNexus {
     }
 
     pub async fn decay_memories(&self, factor: f32) -> anyhow::Result<()> {
-        let table = self.conn.open_table(&self.table_name).execute().await?;
-        let bounded_factor = factor.clamp(0.98, 1.0);
+        let node_ids = self.graph.get_all_node_ids().await?;
+        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
 
-        // Bound decay so long-running project knowledge cannot silently vanish in a
-        // few weeks. Access frequency and node type are handled during smart_search
-        // reranking, where frequently used and structural code nodes stay favored.
-        table
-            .update()
-            .column("decay_score", format!("decay_score * {}", bounded_factor))
-            .execute()
-            .await?;
+        for id in node_ids {
+            if let Some(node) = self.graph.get_node(&id).await? {
+                // Decay suppression for high-access nodes
+                let suppression = (node.access_count as f32 / 100.0).min(0.95);
+                let bounded_factor = factor.clamp(0.90, 1.0);
+                let actual_factor = 1.0 - (1.0 - bounded_factor) * (1.0 - suppression);
+                
+                let new_score = (node.decay_score * actual_factor).max(0.01);
+                
+                // Update SQLite
+                self.graph.update_decay_score(&id, new_score).await?;
+                
+                // Update LanceDB
+                table
+                    .update()
+                    .only_if(format!("id = '{}'", id))
+                    .column("decay_score", new_score.to_string())
+                    .execute()
+                    .await?;
+            }
+        }
 
         Ok(())
     }

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
+use pharmakon_common::{AgentError, AgentResult, Tool};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -148,6 +148,7 @@ impl Tool for ASTKnowledgeIngestTool {
                     embedding_status: "PENDING".to_string(),
                     access_count: 0,
                     last_access_time: chrono::Utc::now().timestamp(),
+                    decay_score: 1.0,
                     properties: json!({
                         "file": path_str,
                         "kind": block.kind,
@@ -188,6 +189,7 @@ impl Tool for ASTKnowledgeIngestTool {
                 embedding_status: "COMPLETED".to_string(), // File names don't necessarily need embedding
                 access_count: 0,
                 last_access_time: chrono::Utc::now().timestamp(),
+                decay_score: 1.0,
                 properties: json!({"type": "file"}),
             })
             .await;

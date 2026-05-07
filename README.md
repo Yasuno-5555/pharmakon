@@ -3,56 +3,44 @@
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Pharmakon** is a high-performance, local-first Rust port of [OpenClaw](https://github.com/openclaw/openclaw). It serves as a single control plane for your personal AI sessions, tools, and messaging channels.
+**Pharmakon** is a high-performance, local-first Rust port of [OpenClaw](https://github.com/openclaw/openclaw). It serves as a unified control plane for autonomous AI engineering, tool orchestration, and multi-channel communication.
 
 ## 🚀 Key Features
 
-- **Autonomous Engineering OS**: Self-reflecting agent that learns from task trajectories and writes validated reflection logs to `PHARMAKON.md`.
-- **Codex-Style Tool Surface**: Local equivalents for execution trace, deterministic replay, reliability scoring, dry-run simulation, workspace snapshots, semantic grep, AST/LSP bridging, security auditing, and model routing.
-- **Unified and Structured Editing**: Precision code modification using unified diffs plus `mutate_ast` for structured Rust function edits.
-- **Task Orchestration**: Advanced task tracking with dependency management and Mermaid-based visualization.
-- **Cost-Aware Routing**: Intent-based tool selection with token usage estimation and cost modeling.
-- **Epistemic Memory**: Contradiction-aware belief systems (Knowledge Nexus) with LanceDB, FastEmbed, SQLite graph storage, access-aware ranking, and bounded decay.
-- **Multi-Agent Teams**: Orchestrate specialized agents using the `Supervisor` for complex task decomposition.
-- **Dynamic Model Loading**: Load and switch LLM providers (OpenAI, Gemini, Anthropic, Ollama, etc.) on the fly with automatic fallback support.
-- **Blazing Fast Gateway**: Built with Axum and Tokio for high-concurrency event handling.
-- **Sandboxed and Audited Execution**: Shell, terminal, dry-run, diff auditing, and Docker sandbox primitives are available for progressively safer execution.
-- **WASM Skill System**: Extensible tool system using `wasmtime` to run skills in a safe sandbox.
-- **Multi-Channel Integration**: Discord, Slack, and Telegram support out of the box.
-- **Local Persistence**: SQLx-based SQLite storage for conversation history and usage analytics.
-- **Secure by Default**: Keyring-based secret management and strict tool approval flows.
+- **Autonomous Engineering Loop**: Self-reflecting agent that learns from task trajectories, manages its own constraints, and maintains a validated knowledge base.
+- **Codex-Style Observability**: Structured execution traces, deterministic replay, and tool reliability scoring for deep transparency into agent behavior.
+- **Precision Code Manipulation**: Structured Rust function edits via `mutate_ast` and unified diffs, integrated with LSP (Language Server Protocol) for type-aware refactoring.
+- **Epistemic Memory (Knowledge Nexus)**: A sophisticated memory system using LanceDB for embeddings, SQLite for graph relations, and access-aware ranking with bounded decay.
+- **Safety First (Dry-Run & Auditing)**: Built-in dry-run simulation for shell/API calls, security auditing for diffs, and progressively sandboxed execution environments.
+- **High-Performance Gateway**: Multi-channel connectivity (Telegram, Discord, Slack) and a real-time web dashboard powered by Axum, Tokio, and Xilem.
+- **Integrated Tooling Surface**: Built-in browser, shell, git, python interpreter, and MCP (Model Context Protocol) client/server support.
+- **WASM Skill System**: Extensible tool system running sandboxed logic via `wasmtime`.
 
 ## 📦 Project Structure
 
-Pharmakon is organized as a Cargo workspace with the following crates:
+Pharmakon is organized as a clean, modular Cargo workspace designed for scalability and reliability:
 
-- `pharmakon-core`: The heart of the agent, handling LLM providers, persistence, and soul.
-- `pharmakon-memory`: Knowledge Nexus storage: LanceDB embeddings, SQLite graph, semantic search, decay, and compaction.
-- `pharmakon-gateway`: An Axum-based web server and WebSocket RPC hub.
-- `pharmakon-common`: Shared types, event definitions, and configuration logic.
-- `pharmakon-tools`: Tool definitions (Codex-style OS tools, Browser, Shell, Search, WASM, media, AST/LSP, snapshots, replay).
-- `pharmakon-channels`: Adapter implementations for various messaging platforms.
-- `pharmakon-cli`: The unified command-line entry point.
-- `pharmakon-gui`: Native GUI/system tray scaffolding.
-- `pharmakon-mcp`: MCP client/server glue for external tool servers.
-- `pharmakon-plugin-sdk`: WASM plugin SDK.
-- `pharmakon-audio`: Audio capability crate.
+- **`pharmakon-core`**: The agent's brain. Handles the decision loop, LLM provider abstraction, integrated MCP communication, and multi-agent orchestration.
+- **`pharmakon-memory`**: The agent's long-term memory. Implements the Knowledge Nexus (LanceDB + SQLite Graph), semantic search, and context optimization.
+- **`pharmakon-tools`**: The agent's hands. A unified library of all built-in tools (Codex OS tools, Browser, Shell, AST manipulation, RepoMap, etc.).
+- **`pharmakon-gateway`**: The agent's senses and voice. Orchestrates messaging channels (Telegram, Discord, etc.), serves the real-time Dashboard, and manages Audio I/O.
+- **`pharmakon-cli`**: The primary user interface. A unified command-line entry point for onboarding, agent interaction, and service management.
+- **`pharmakon-common`**: The shared foundation. Contains core data structures, event definitions, and traits used across all crates.
+- **`pharmakon-plugin-sdk`**: The extensibility kit. Provides the necessary types and macros for building external WASM-based tools and skills.
 
 ## 📚 Documentation
 
-Detailed documentation and guides can be found in the `docs/` directory:
+- [ARCHITECTURE.md](ARCHITECTURE.md): Deep dive into the Pharmakon system design and data flow.
 - [User Guide](docs/user_guide.md): Installation, setup, and CLI usage.
 - [Plugin Development Guide](docs/plugin_development.md): How to create and integrate WASM plugins.
 - [Channels Setup Guide](docs/channels.md): Connecting Pharmakon to Telegram, Discord, and Slack.
-
-API reference can be generated locally using `cargo doc --no-deps --workspace`.
 
 ## 🛠️ Getting Started
 
 ### Prerequisites
 
 - Rust 1.75+
-- Docker (for sandboxed tool execution)
+- Docker (for sandboxed execution)
 - SQLite
 
 ### Installation
@@ -79,10 +67,10 @@ cargo run -- gateway --port 19999
 
 ## 🛡️ Security
 
-Pharmakon follows a strict security model:
-- **Approval Flow**: Risky tools (like shell access) require manual approval via the Gateway's RPC.
-- **Sandboxing**: Every shell command executes in a fresh, temporary Docker container.
-- **Secrets**: API keys and tokens are stored in the system keyring, never in plain text.
+Pharmakon implements a multi-layered security model:
+- **Explicit Approval**: High-risk operations (shell, file write) require real-time user approval via the Dashboard or messaging channel.
+- **Dry-Run Simulation**: The agent can simulate destructive actions before commitment to verify intent and safety.
+- **Audited Diffs**: All code changes are scanned for security risks (API keys, patterns) before application.
 
 ## 📄 License
 

@@ -3,6 +3,7 @@ use crate::trajectory::Trajectory;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use sqlx::Row;
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::str::FromStr;
 
@@ -160,6 +161,19 @@ impl DbSessionStore {
         .execute(&pool)
         .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS tool_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_name TEXT NOT NULL,
+                success BOOLEAN NOT NULL,
+                latency_ms INTEGER NOT NULL,
+                error TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
         Ok(Self { pool })
     }
 
@@ -200,14 +214,14 @@ impl DbSessionStore {
         let messages = rows
             .into_iter()
             .map(|row| {
-                let content = row.content.and_then(|c| {
+                let content = row.content.map(|c| {
                     // Try to parse as JSON first, if it fails, it might be a raw quoted string from sqlite3 output or old data
                     if let Ok(parsed) = serde_json::from_str::<crate::model::MessageContent>(&c) {
-                        Some(parsed)
+                        parsed
                     } else if let Ok(s) = serde_json::from_str::<String>(&c) {
-                        Some(crate::model::MessageContent::Text(s))
+                        crate::model::MessageContent::Text(s)
                     } else {
-                        Some(crate::model::MessageContent::Text(c))
+                        crate::model::MessageContent::Text(c)
                     }
                 });
                 Message {
@@ -476,8 +490,7 @@ impl DbSessionStore {
     ) -> Result<()> {
         let payload_json = serde_json::to_string(payload)?;
         sqlx::query(
-            "INSERT INTO trajectory_events (session_id, event_type, payload)
-             VALUES (?, ?, ?)",
+            "INSERT INTO trajectory_events (session_id, event_type, payload) VALUES (?, ?, ?)",
         )
         .bind(session_id)
         .bind(event_type)
@@ -486,6 +499,50 @@ impl DbSessionStore {
         .await?;
         Ok(())
     }
+
+    pub async fn save_tool_metric(
+        &self,
+        tool_name: &str,
+        success: bool,
+        latency_ms: u64,
+        error: Option<String>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO tool_metrics (tool_name, success, latency_ms, error) VALUES (?, ?, ?, ?)",
+        )
+        .bind(tool_name)
+        .bind(success)
+        .bind(latency_ms as i64)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_tool_metrics(&self) -> Result<Vec<serde_json::Value>> {
+        let rows = sqlx::query(
+            "SELECT tool_name, 
+                    COUNT(*) as calls,
+                    SUM(CASE WHEN success THEN 1 ELSE 0 END) as successes,
+                    AVG(latency_ms) as avg_latency
+             FROM tool_metrics
+             GROUP BY tool_name"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut stats = Vec::new();
+        for r in rows {
+            stats.push(serde_json::json!({
+                "tool": r.get::<String, _>("tool_name"),
+                "calls": r.get::<i64, _>("calls"),
+                "successes": r.get::<i64, _>("successes"),
+                "avg_latency_ms": r.get::<f64, _>("avg_latency"),
+            }));
+        }
+        Ok(stats)
+    }
+
 
     pub async fn load_trajectory_events(
         &self,
@@ -500,7 +557,7 @@ impl DbSessionStore {
         .await?;
 
         let mut steps = Vec::new();
-        for (event_type, payload) in rows {
+        for (_event_type, payload) in rows {
             // We need to reconstruct TrajectoryStep.
             // Since TrajectoryStep is an enum with #[serde(tag = "type")],
             // the payload must match that structure.

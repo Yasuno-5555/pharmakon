@@ -1,6 +1,6 @@
-import React from 'react';
-import { Send, Trash2, Bot, Zap } from 'lucide-react';
-import { AnimatePresence } from 'framer-motion';
+import React, { useEffect } from 'react';
+import { Send, Trash2, Bot } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import MessageItem from '../components/MessageItem';
 
 interface ChatViewProps {
@@ -20,27 +20,39 @@ interface ChatViewProps {
 }
 
 const ChatView: React.FC<ChatViewProps> = ({
-  messages, input, sendMessage, handleKeyDown, handleInput,
+  messages, input, setInput, sendMessage, handleKeyDown, handleInput,
   connected, clearMessages, currentModel, availableModels, switchModel,
   textareaRef, messagesEndRef
 }) => {
+  // Auto-expand textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
+
   return (
-    <div className="chat-section glass-panel">
-      <header className="chat-header">
-        <div className="agent-info">
-          <div className="agent-avatar">P</div>
-          <div>
-            <h2>Pharmakon Supervisor</h2>
-            <span className="status-text">Ready for instructions</span>
+    <div className="chat-view">
+      <header className="view-header-chat glass-panel">
+        <div className="agent-identity">
+          <div className="agent-avatar-large">Φ</div>
+          <div className="agent-meta">
+            <h1>Pharmakon Supervisor</h1>
+            <div className="status-indicator">
+              <div className={`status-dot ${connected ? 'online' : 'offline'}`} />
+              <span>{connected ? 'Neural Link Active' : 'Offline'}</span>
+            </div>
           </div>
         </div>
-        <div className="header-actions">
-          <div className="model-selector">
-            <Bot size={14} />
+
+        <div className="chat-header-actions">
+          <div className="premium-select-wrapper">
+            <Bot size={14} className="select-icon" />
             <select
               value={currentModel}
               onChange={(e) => switchModel(e.target.value)}
-              className="model-select-dropdown"
+              className="premium-select"
             >
               <option value="" disabled>Select Model</option>
               {availableModels.map(m => (
@@ -48,18 +60,24 @@ const ChatView: React.FC<ChatViewProps> = ({
               ))}
             </select>
           </div>
-          <Zap size={18} className={connected ? 'pulsing' : ''} />
-          <button onClick={clearMessages}><Trash2 size={18} /></button>
+          <button className="icon-btn" onClick={clearMessages} title="Clear Session">
+            <Trash2 size={18} />
+          </button>
         </div>
       </header>
 
-      <div className="chat-messages">
+      <div className="chat-messages-container">
         <AnimatePresence initial={false}>
           {messages.length === 0 ? (
-            <div className="empty-state">
-              <Bot size={48} />
-              <p>Awaiting sequence deployment.</p>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="chat-empty-state"
+            >
+              <div className="empty-icon">Φ</div>
+              <h2>Awaiting Sequence</h2>
+              <p>Deploy your first instruction to begin the autonomous cycle.</p>
+            </motion.div>
           ) : (
             messages.map(msg => (
               <MessageItem key={msg.id} msg={msg} socket={null as any} />
@@ -69,17 +87,29 @@ const ChatView: React.FC<ChatViewProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      <footer className="chat-input-area">
-        <textarea
-          ref={textareaRef}
-          className="chat-input"
-          placeholder="Deploy instruction..."
-          value={input}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          rows={1}
-        />
-        <button onClick={sendMessage} className="send-btn"><Send size={18} /></button>
+      <footer className="chat-input-container">
+        <div className="chat-input-wrapper glass-panel">
+          <textarea
+            ref={textareaRef}
+            className="chat-textarea"
+            placeholder="Deploy instruction..."
+            value={input}
+            onChange={(e) => {
+              handleInput(e);
+              setInput(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            rows={1}
+          />
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={sendMessage}
+            className={`chat-send-btn ${input.trim() ? 'active' : ''}`}
+          >
+            <Send size={18} />
+          </motion.button>
+        </div>
       </footer>
     </div>
   );

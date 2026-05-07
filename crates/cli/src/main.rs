@@ -1,12 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
-use pharmakon_common::{AgentResult, Config, SecretStore, ToolRegistry};
+use pharmakon_common::{AgentResult, Config, SecretStore};
 use pharmakon_core::agent::Agent;
 use pharmakon_core::persistence::DbSessionStore;
 use pharmakon_core::providers::registry::ModelRegistry;
 use pharmakon_core::soul::Soul;
-use pharmakon_tools::{BraveSearchTool, FileReadTool, ShellTool, WebFetchTool};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -279,21 +278,14 @@ async fn main() -> Result<()> {
                 pharmakon_memory::fact_memory::BeliefSystem::new()?,
             ));
 
-            let mut agent = Agent::new(model_obj, "gateway".to_string())
+            let agent = Agent::new(model_obj, "gateway".to_string())
                 .with_store(session_store.clone())
                 .with_knowledge_nexus(nexus)
                 .with_fact_memory(fact_memory)
                 .with_fallback_models(config.default_agent.fallback_models.clone());
             agent.set_soul(soul).await;
-            agent.add_tool(Arc::new(ShellTool)).await;
-            agent.add_tool(Arc::new(FileReadTool)).await;
-            agent.add_tool(Arc::new(WebFetchTool::new())).await;
-            agent
-                .add_tool(Arc::new(BraveSearchTool::new("".to_string())))
-                .await;
 
             let agent_arc = Arc::new(agent);
-            agent_arc.setup_autonomous_tools().await;
 
             let mut gateway = pharmakon_gateway::Gateway::new(
                 actual_port,
@@ -301,6 +293,8 @@ async fn main() -> Result<()> {
                 cron_manager,
                 config,
             );
+
+            gateway.init_tools().await?;
 
             // Start Heartbeat Manager (Autonomous Maintenance & Checks)
             let heartbeat =
@@ -311,12 +305,12 @@ async fn main() -> Result<()> {
             if let Ok(token) = secret_store.get_secret("TELEGRAM_BOT_TOKEN") {
                 log::info!("Activating Telegram channel...");
                 gateway.add_channel(Arc::new(
-                    pharmakon_channels::telegram::TelegramChannel::new(token),
+                    pharmakon_gateway::channels::telegram::TelegramChannel::new(token),
                 ));
             }
             if let Ok(token) = secret_store.get_secret("DISCORD_BOT_TOKEN") {
                 log::info!("Activating Discord channel...");
-                gateway.add_channel(Arc::new(pharmakon_channels::discord::DiscordChannel::new(
+                gateway.add_channel(Arc::new(pharmakon_gateway::channels::discord::DiscordChannel::new(
                     token,
                 )));
             }
@@ -383,19 +377,13 @@ async fn main() -> Result<()> {
                 pharmakon_memory::fact_memory::BeliefSystem::new()?,
             ));
 
-            let mut agent = Agent::new(model_obj, session.clone())
+            let agent = Agent::new(model_obj, session.clone())
                 .with_store(session_store.clone())
                 .with_knowledge_nexus(nexus)
                 .with_fact_memory(fact_memory)
                 .with_fallback_models(config.default_agent.fallback_models.clone());
 
             agent.set_soul(soul).await;
-            agent.add_tool(Arc::new(ShellTool)).await;
-            agent.add_tool(Arc::new(FileReadTool)).await;
-            agent.add_tool(Arc::new(WebFetchTool::new())).await;
-            agent
-                .add_tool(Arc::new(BraveSearchTool::new("".to_string())))
-                .await;
 
             // Add SelfDiagnosticTool to satisfy agent's soul instructions
             struct SelfDiagnosticTool;
@@ -417,11 +405,11 @@ async fn main() -> Result<()> {
             agent.add_tool(Arc::new(SelfDiagnosticTool)).await;
 
             let agent_arc = Arc::new(agent);
-            agent_arc.setup_autonomous_tools().await;
 
             match agent_arc.chat(&message).await {
                 Ok(response) => {
-                    println!("\nAssistant: {}", response);
+                    println!("
+Assistant: {}", response);
                 }
                 Err(e) => {
                     log::error!("Agent error: {}", e);
@@ -464,11 +452,11 @@ async fn main() -> Result<()> {
         }
         Commands::Gui { soul: _, model: _ } => {
             println!("Launching Pharmakon GUI...");
-            let url = "http://localhost:4001";
+            let url = "http://localhost:19999";
             let _ = open::that(url);
         }
         Commands::Ui { port: _ } => {
-            let url = "http://localhost:4001";
+            let url = "http://localhost:19999";
             println!("Opening Pharmakon Interface at {}...", url);
             let _ = open::that(url);
         }

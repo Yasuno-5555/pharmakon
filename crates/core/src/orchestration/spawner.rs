@@ -3,8 +3,7 @@ use crate::model::AgentModel;
 use crate::persistence::DbSessionStore;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use pharmakon_common::{AgentSpawner, ToolRegistry};
-use pharmakon_tools::subagent::SubAgentTool;
+use pharmakon_common::AgentSpawner;
 use std::sync::Arc;
 
 pub struct DefaultAgentSpawner {
@@ -37,21 +36,6 @@ impl AgentSpawner for DefaultAgentSpawner {
             agent = agent.with_store(store.clone());
         }
 
-        // Register tools for sub-agent (essential tools)
-        agent.add_tool(Arc::new(pharmakon_tools::ShellTool)).await;
-        agent
-            .add_tool(Arc::new(pharmakon_tools::FileReadTool))
-            .await;
-        // Add SubAgentTool with incremented depth
-        agent
-            .add_tool(Arc::new(SubAgentTool::new_with_depth(
-                Arc::new(DefaultAgentSpawner::new(
-                    self.model.clone(),
-                    self.session_store.clone(),
-                )),
-                depth + 1,
-            )))
-            .await;
 
         log::info!(
             "Sub-agent starting task (depth: {}) in session: {}",

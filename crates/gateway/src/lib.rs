@@ -7,20 +7,22 @@ use axum::{
     routing::get,
 };
 use futures::{SinkExt, StreamExt};
-use pharmakon_channels::Channel;
 use pharmakon_common::{Event, Request};
 use pharmakon_core::agent::Agent;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use crate::channels::Channel;
+
 pub mod acp;
 pub mod api;
 pub mod auth;
 pub mod canvas;
 pub mod pairing;
 pub mod webhooks;
+pub mod channels;
+pub mod ui;
 
 #[derive(Serialize)]
 struct StatusResponse {
@@ -31,11 +33,23 @@ struct StatusResponse {
 
 pub struct Gateway {
     pub port: u16,
-    pub channels: Vec<Arc<dyn Channel>>,
+    pub channels: Vec<Arc<dyn channels::Channel + Send + Sync>>,
     pub agent: Arc<Agent>,
     pub canvas_host: Arc<canvas::CanvasHost>,
     pub cron_manager: Arc<pharmakon_core::automation::cron::CronManager>,
     pub config: pharmakon_common::Config,
+}
+
+use axum::response::Html;
+
+async fn serve_ui() -> impl IntoResponse {
+    let home = dirs::home_dir().expect("Could not find home directory");
+    let ui_path = home.join(".pharmakon").join("ui").join("index.html");
+    if let Ok(contents) = tokio::fs::read_to_string(ui_path).await {
+        Html(contents)
+    } else {
+        Html("<h1>UI not found</h1><p>Please run the frontend build and place the output in ~/.pharmakon/ui</p>".to_string())
+    }
 }
 
 impl Gateway {
@@ -55,7 +69,181 @@ impl Gateway {
         }
     }
 
-    pub fn add_channel(&mut self, channel: Arc<dyn Channel>) {
+    pub async fn init_tools(&self) -> Result<()> {
+        use pharmakon_tools::terminal::{ShellTool, TerminalTool, BackgroundRunTool, ProcessStatusTool};
+        use pharmakon_tools::files::{FileReadTool, FileWriteTool};
+        use pharmakon_tools::code::{ViewFileTool, ListDirTool, CodeEditTool, MultiCodeEditTool, GrepSearchTool, FindDefinitionTool, PythonInterpreterTool, ApplyPatchTool};
+        use pharmakon_tools::repomap::RepoMapTool;
+        use pharmakon_tools::git::{GitStatusTool, GitDiffTool, GitCommitTool};
+        use pharmakon_tools::browser::BrowserTool;
+        use pharmakon_tools::search::BraveSearchTool;
+        use pharmakon_tools::CustomScoutTool;
+        use pharmakon_tools::web_fetch::WebFetchTool;
+        use pharmakon_tools::web_search::{GoogleSearchTool, BraveSearchTool as WebSearchBraveSearchTool};
+        use pharmakon_tools::memory_hydration::HydrateContextTool;
+        use pharmakon_tools::playbook::PlaybookTool;
+        use pharmakon_tools::project_management::TaskTrackerTool;
+        use pharmakon_tools::workspace::WorkspacePerceptionTool;
+        use pharmakon_tools::probe::EnvironmentProbeTool;
+        use pharmakon_tools::link_understanding::LinkUnderstandingTool;
+        use pharmakon_tools::quality::CargoQualityTool;
+        use pharmakon_tools::tool_market::ToolMarketTool;
+        use pharmakon_tools::codex::{
+            DeterministicReplayTool, ContextBudgetOptimizerTool, DryRunTool, WorkspaceSnapshotTool, 
+            WebTaskTool, LocalModelRouterTool, SkillCompositionTool, FailureMemoryTool, 
+            ProactiveInterventionTool, CognitiveMirrorTool, IntentCompilerTool, RegretMinimizationTool, 
+            CounterfactualSimulatorTool, AttentionRouterTool, TemporalAwarenessTool, SoftDependencyGraphTool, 
+            AutonomyDialTool, FailurePredictionTool, AstLspBridgeTool, SpecFirstTestTool, 
+            SemanticConflictResolutionTool, TimeTravelDebuggerTool, NexusVisualizerTool, 
+            ProactiveSelfOptimizationTool, DiffSecurityAuditorTool, AstNativeMutationTool, 
+            MemoryActorStatusTool, GraphPrefetchTool, 
+            EphemeralRedTeamTool, NodeReplTool, CodexAutomationTool, 
+            CurrentTimeTool, WeatherLookupTool, FinanceLookupTool, SportsLookupTool, CodexCatalogTool
+        };
+        use pharmakon_tools::checkpoint::CheckpointTool;
+        use pharmakon_tools::reflection::ReflectionTool;
+        use pharmakon_tools::orchestration::{ToolRouterTool, LoadToolsTool};
+        use pharmakon_tools::memory_mgmt::MemoryManagementTool;
+        use pharmakon_tools::context_mgmt::UpdateContextTool;
+        use tokio::sync::Mutex;
+        use std::sync::Arc;
+
+        let background_processes = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+        self.agent.add_tool(Arc::new(LoadToolsTool {
+            active_categories: self.agent.active_categories.clone(),
+        })).await;
+        self.agent.add_tool(Arc::new(UpdateContextTool)).await;
+        self.agent.add_tool(Arc::new(ShellTool)).await;
+        self.agent.add_tool(Arc::new(TerminalTool::new())).await;
+        self.agent.add_tool(Arc::new(BackgroundRunTool {
+            active_processes: background_processes.clone(),
+        })).await;
+        self.agent.add_tool(Arc::new(ProcessStatusTool {
+            active_processes: background_processes,
+            retry_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        })).await;
+        self.agent.add_tool(Arc::new(FileReadTool)).await;
+        self.agent.add_tool(Arc::new(FileWriteTool)).await;
+        self.agent.add_tool(Arc::new(ViewFileTool)).await;
+        self.agent.add_tool(Arc::new(ListDirTool)).await;
+        self.agent.add_tool(Arc::new(CodeEditTool)).await;
+        self.agent.add_tool(Arc::new(MultiCodeEditTool)).await;
+        self.agent.add_tool(Arc::new(GrepSearchTool)).await;
+        self.agent.add_tool(Arc::new(FindDefinitionTool)).await;
+        self.agent.add_tool(Arc::new(PythonInterpreterTool)).await;
+        self.agent.add_tool(Arc::new(RepoMapTool::new())).await;
+        self.agent.add_tool(Arc::new(GitStatusTool)).await;
+        self.agent.add_tool(Arc::new(GitDiffTool)).await;
+        self.agent.add_tool(Arc::new(GitCommitTool)).await;
+        self.agent.add_tool(Arc::new(BrowserTool::new(None))).await;
+
+        if let Ok(key) = std::env::var("BRAVE_SEARCH_API_KEY") {
+            self.agent.add_tool(Arc::new(BraveSearchTool::new(key))).await;
+        }
+
+        self.agent.add_tool(Arc::new(WebFetchTool::new())).await;
+        self.agent.add_tool(Arc::new(WebSearchBraveSearchTool::new(
+            "".to_string(),
+        ))).await;
+        self.agent.add_tool(Arc::new(GoogleSearchTool)).await;
+        self.agent.add_tool(Arc::new(
+            CustomScoutTool,
+        )).await;
+        self.agent.add_tool(Arc::new(
+            HydrateContextTool::new(),
+        )).await;
+        self.agent.add_tool(Arc::new(PlaybookTool::new())).await;
+        self.agent.add_tool(Arc::new(
+            TaskTrackerTool::new(),
+        )).await;
+        self.agent.add_tool(Arc::new(
+            WorkspacePerceptionTool::new(),
+        )).await;
+        self.agent.add_tool(Arc::new(EnvironmentProbeTool::new())).await;
+        self.agent.add_tool(Arc::new(
+            LinkUnderstandingTool::new(),
+        )).await;
+        self.agent.add_tool(Arc::new(CargoQualityTool)).await;
+        self.agent.add_tool(Arc::new(ToolMarketTool)).await;
+        
+        // --- High-Performance Core Tools ---
+        let agent_weak = Arc::downgrade(&self.agent);
+        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::ExecutionTraceTool::new(agent_weak.clone()))).await;
+        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::ToolReliabilityTool::new(agent_weak.clone()))).await;
+        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::InsightTool::new(agent_weak.clone()))).await;
+        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::SemanticGrepTool::new(agent_weak.clone()))).await;
+        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::mcts::MctsSimulatorTool::new(agent_weak.clone()))).await;
+        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::rlfc::RlfcTool::new(agent_weak.clone()))).await;
+        
+        let swarm_manager = Arc::new(pharmakon_core::orchestration::swarm::SwarmManager::new(
+            Arc::new(Mutex::new((*self.agent).clone()))
+        ));
+        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::swarm::SwarmTool::new(swarm_manager.clone(), 0))).await;
+        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::swarm::FractalSwarmTool::new(swarm_manager, 0))).await;
+
+        self.agent.add_tool(Arc::new(DeterministicReplayTool)).await;
+        self.agent.add_tool(Arc::new(ContextBudgetOptimizerTool)).await;
+        self.agent.add_tool(Arc::new(DryRunTool)).await;
+        self.agent.add_tool(Arc::new(WorkspaceSnapshotTool)).await;
+        self.agent.add_tool(Arc::new(WebTaskTool)).await;
+        self.agent.add_tool(Arc::new(LocalModelRouterTool)).await;
+        self.agent.add_tool(Arc::new(SkillCompositionTool)).await;
+        self.agent.add_tool(Arc::new(FailureMemoryTool)).await;
+        self.agent.add_tool(Arc::new(ProactiveInterventionTool)).await;
+        self.agent.add_tool(Arc::new(CognitiveMirrorTool)).await;
+        self.agent.add_tool(Arc::new(IntentCompilerTool)).await;
+        self.agent.add_tool(Arc::new(RegretMinimizationTool)).await;
+        self.agent.add_tool(Arc::new(
+            CounterfactualSimulatorTool,
+        )).await;
+        self.agent.add_tool(Arc::new(AttentionRouterTool)).await;
+        self.agent.add_tool(Arc::new(TemporalAwarenessTool)).await;
+        self.agent.add_tool(Arc::new(SoftDependencyGraphTool)).await;
+        self.agent.add_tool(Arc::new(AutonomyDialTool)).await;
+        self.agent.add_tool(Arc::new(FailurePredictionTool)).await;
+        self.agent.add_tool(Arc::new(AstLspBridgeTool)).await;
+        self.agent.add_tool(Arc::new(SpecFirstTestTool)).await;
+        self.agent.add_tool(Arc::new(
+            SemanticConflictResolutionTool,
+        )).await;
+        self.agent.add_tool(Arc::new(TimeTravelDebuggerTool)).await;
+        self.agent.add_tool(Arc::new(NexusVisualizerTool)).await;
+        self.agent.add_tool(Arc::new(
+            ProactiveSelfOptimizationTool,
+        )).await;
+        self.agent.add_tool(Arc::new(DiffSecurityAuditorTool)).await;
+        self.agent.add_tool(Arc::new(AstNativeMutationTool)).await;
+        self.agent.add_tool(Arc::new(MemoryActorStatusTool)).await;
+        self.agent.add_tool(Arc::new(GraphPrefetchTool)).await;
+        self.agent.add_tool(Arc::new(EphemeralRedTeamTool)).await;
+        self.agent.add_tool(Arc::new(NodeReplTool)).await;
+        self.agent.add_tool(Arc::new(CodexAutomationTool)).await;
+        self.agent.add_tool(Arc::new(CurrentTimeTool)).await;
+        self.agent.add_tool(Arc::new(WeatherLookupTool)).await;
+        self.agent.add_tool(Arc::new(FinanceLookupTool)).await;
+        self.agent.add_tool(Arc::new(SportsLookupTool)).await;
+        self.agent.add_tool(Arc::new(CodexCatalogTool)).await;
+        // MCP Tools
+        self.agent.add_tool(Arc::new(pharmakon_core::mcp_tool::ConnectMcpServerTool { 
+            tool_registry: self.agent.tools.clone()
+        })).await;
+        // Phase 3 Tools
+        self.agent.add_tool(Arc::new(CheckpointTool)).await;
+        self.agent.add_tool(Arc::new(ReflectionTool)).await;
+        self.agent.add_tool(Arc::new(ToolRouterTool)).await;
+        if let Some(nexus) = &self.agent.knowledge_nexus {
+            self.agent.add_tool(Arc::new(
+                MemoryManagementTool,
+            )).await;
+        }
+        // Add apply_patch (SAFER replacement for write_file)
+        self.agent.add_tool(Arc::new(ApplyPatchTool)).await;
+
+        Ok(())
+    }
+
+    pub fn add_channel(&mut self, channel: Arc<dyn channels::Channel + Send + Sync>) {
         self.channels.push(channel);
     }
 
@@ -81,7 +269,7 @@ impl Gateway {
             .layer(axum::middleware::from_fn(auth::auth_middleware));
 
         let mut app = Router::new()
-            .route("/", get(Self::root))
+            .route("/", get(serve_ui))
             .route("/status", get(Self::status))
             .route("/health", get(Self::health))
             .nest("/api/v1", api_v1)
@@ -127,10 +315,6 @@ impl Gateway {
         axum::serve(listener, app).await?;
 
         Ok(())
-    }
-
-    async fn root() -> &'static str {
-        "Pharmakon Gateway is running."
     }
 
     async fn status() -> Json<StatusResponse> {
@@ -244,7 +428,7 @@ async fn handle_socket(
                         // Status handled via HTTP
                     }
                     Request::ResetHistory => {
-                        agent_clone_inner.reset_history().await;
+                        let _ = agent_clone_inner.reset_history().await;
                     }
                     Request::InteractiveResponse {
                         element_id,
@@ -284,9 +468,9 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(Event::SessionList { sessions });
                     }
                     Request::SwitchSession { id } => {
-                        let mut agent_lock = agent_clone_inner;
+                        let agent_lock = agent_clone_inner;
                         agent_lock.set_session_id(id.clone()).await;
-                        agent_lock.reset_history().await;
+                        let _ = agent_lock.reset_history().await;
 
                         // Load history for the new session
                         let history = if let Some(store) = &agent_lock.session_store {
@@ -294,7 +478,7 @@ async fn handle_socket(
                         } else {
                             Vec::new()
                         };
-                        agent_lock.replace_history(history.clone()).await;
+                        let _ = agent_lock.replace_history(history.clone()).await;
                         let _ = agent_lock
                             .event_tx
                             .send(Event::HistoryList { messages: history });
@@ -426,25 +610,15 @@ async fn handle_socket(
                         let _ = agent_lock.event_tx.send(event);
                     }
                     Request::GetVisionFrames => {
-                        let agent_lock = agent_clone_inner;
-                        if let Some(stream) = &agent_lock.vision_stream {
-                            let stream_lock = stream.lock().await;
-                            let frames = stream_lock
-                                .get_recent_frames()
-                                .into_iter()
-                                .map(|f| pharmakon_common::VisionFrameInfo {
-                                    path: f.path.to_string_lossy().to_string(),
-                                    captured_at: f.captured_at.to_rfc3339(),
-                                    title: f.window_title,
-                                })
-                                .collect();
-                            let _ = agent_lock.event_tx.send(Event::VisionUpdate { frames });
-                        }
+                        // vision_stream removed from Agent
+                        let _ = agent_clone_inner.event_tx.send(Event::Error {
+                            message: "Vision stream is currently disabled.".to_string(),
+                        });
                     }
                     Request::GetGraphMemory { query } => {
                         let agent_lock = agent_clone_inner;
-                        if let Some(graph) = &agent_lock.graph_store {
-                            if let Ok(relations) = graph.query_relations(&query).await {
+                        if let Some(graph) = &agent_lock.graph_store
+                            && let Ok(relations) = graph.query_relations(&query).await {
                                 let relations_str = relations
                                     .into_iter()
                                     .map(|(n, e)| {
@@ -455,7 +629,6 @@ async fn handle_socket(
                                     relations: relations_str,
                                 });
                             }
-                        }
                     }
                     Request::GetModels => {
                         let models = pharmakon_core::providers::registry::ModelRegistry::list_available_models();
@@ -467,7 +640,7 @@ async fn handle_socket(
                         if let Some(model) =
                             pharmakon_core::providers::registry::ModelRegistry::get_model(&model_id)
                         {
-                            agent_lock.update_model(model).await;
+                            let _ = agent_lock.update_model(model).await;
                             let _ = agent_lock.event_tx.send(Event::ModelSwitched { model_id });
                         } else {
                             let _ = agent_lock.event_tx.send(Event::Error {

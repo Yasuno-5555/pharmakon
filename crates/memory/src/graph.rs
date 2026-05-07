@@ -13,6 +13,7 @@ pub struct Node {
     pub embedding_status: String, // PENDING, COMPLETED, FAILED
     pub access_count: u32,
     pub last_access_time: i64,
+    pub decay_score: f32,
     pub properties: serde_json::Value,
 }
 
@@ -44,6 +45,7 @@ impl GraphStore {
                 embedding_status TEXT DEFAULT 'PENDING',
                 access_count INTEGER DEFAULT 0,
                 last_access_time INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 1.0,
                 properties TEXT NOT NULL
             )",
         )
@@ -70,7 +72,7 @@ impl GraphStore {
 
     pub async fn add_node(&self, node: Node) -> Result<()> {
         let props = serde_json::to_string(&node.properties)?;
-        sqlx::query("INSERT OR REPLACE INTO graph_nodes (id, label, node_type, content, summary, embedding_id, embedding_status, access_count, last_access_time, properties) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT OR REPLACE INTO graph_nodes (id, label, node_type, content, summary, embedding_id, embedding_status, access_count, last_access_time, decay_score, properties) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(node.id)
             .bind(node.label)
             .bind(node.node_type)
@@ -80,6 +82,7 @@ impl GraphStore {
             .bind(node.embedding_status)
             .bind(node.access_count)
             .bind(node.last_access_time)
+            .bind(node.decay_score)
             .bind(props)
             .execute(&self.pool)
             .await?;
@@ -142,6 +145,7 @@ impl GraphStore {
                 embedding_status: r.get("embedding_status"),
                 access_count: r.get::<i64, _>("access_count") as u32,
                 last_access_time: r.get("last_access_time"),
+                decay_score: r.get("decay_score"),
                 properties: serde_json::from_str(r.get("properties"))?,
             }))
         } else {
@@ -151,7 +155,7 @@ impl GraphStore {
 
     pub async fn record_access(&self, id: &str) -> Result<()> {
         sqlx::query(
-            "UPDATE graph_nodes SET access_count = access_count + 1, last_access_time = ? WHERE id = ?",
+            "UPDATE graph_nodes SET access_count = access_count + 1, last_access_time = ?, decay_score = 1.0 WHERE id = ?",
         )
         .bind(chrono::Utc::now().timestamp())
         .bind(id)
@@ -182,6 +186,7 @@ impl GraphStore {
                 embedding_status: r.get("embedding_status"),
                 access_count: r.get::<i64, _>("access_count") as u32,
                 last_access_time: r.get("last_access_time"),
+                decay_score: r.get("decay_score"),
                 properties: serde_json::from_str(r.get("properties"))?,
             };
             let edge = Edge {
@@ -194,5 +199,21 @@ impl GraphStore {
             results.push((node, edge));
         }
         Ok(results)
+    }
+
+    pub async fn get_all_node_ids(&self) -> Result<Vec<String>> {
+        let rows = sqlx::query("SELECT id FROM graph_nodes")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|r| r.get(0)).collect())
+    }
+
+    pub async fn update_decay_score(&self, id: &str, score: f32) -> Result<()> {
+        sqlx::query("UPDATE graph_nodes SET decay_score = ? WHERE id = ?")
+            .bind(score)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }

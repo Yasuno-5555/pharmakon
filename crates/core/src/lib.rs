@@ -1,7 +1,10 @@
+pub mod context;
 pub mod agent;
 pub mod agent_router;
 pub mod flows;
+pub mod mcp;
 pub mod mcp_manager;
+pub mod mcp_tool;
 pub mod model;
 pub mod persistence;
 pub mod providers;
@@ -20,4 +23,6 @@ pub mod skill_loader;
 pub mod soul;
 pub mod system_prompt;
 pub mod tasks;
+pub mod event_log;
+pub mod snapshot_store;
 pub mod trajectory;

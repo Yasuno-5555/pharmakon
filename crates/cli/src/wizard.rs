@@ -1,11 +1,8 @@
 use anyhow::{Result, anyhow};
 use dialoguer::{Confirm, Input, Password, Select, theme::ColorfulTheme};
 use pharmakon_common::{Config, SecretStore};
-use pharmakon_core::flows::crestodian::Crestodian;
-use pharmakon_core::providers::gemini::GeminiModel;
 use rust_i18n::t;
 use std::fs;
-use std::sync::Arc;
 
 pub fn run_wizard() -> Result<()> {
     let theme = ColorfulTheme::default();
@@ -192,11 +189,10 @@ pub fn run_wizard() -> Result<()> {
         .default(true)
         .interact()?;
 
-    if install_daemon {
-        if let Err(e) = crate::service_installer::install_service(gateway_port) {
+    if install_daemon
+        && let Err(e) = crate::service_installer::install_service(gateway_port) {
             println!("❌ Failed to install service: {}", e);
         }
-    }
 
     // 9. Finalize
     let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
@@ -205,57 +201,6 @@ pub fn run_wizard() -> Result<()> {
 
     println!("\n{}", t!("setup_success"));
     println!("{}", t!("next_steps"));
-
-    Ok(())
-}
-
-pub async fn run_conversational_wizard() -> Result<()> {
-    let theme = ColorfulTheme::default();
-    println!("\n=== {} (Conversational) ===", t!("intro_title"));
-
-    // 1. Check for basic API key to start
-    let secret_store = SecretStore::new();
-    let gemini_key = secret_store
-        .get_secret("GEMINI_API_KEY")
-        .or_else(|_| std::env::var("GEMINI_API_KEY"));
-
-    let api_key = match gemini_key {
-        Ok(key) => key,
-        Err(_) => {
-            println!("To start conversational onboarding, I need a Gemini API Key first.");
-            let key: String = Password::with_theme(&theme)
-                .with_prompt("Enter your Gemini API Key")
-                .interact()?;
-            secret_store.set_secret("GEMINI_API_KEY", &key)?;
-            key
-        }
-    };
-
-    // 2. Initialize Crestodian Agent
-    let model = Arc::new(GeminiModel::new(api_key, "gemini-1.5-pro".to_string()));
-    let mut agent = Crestodian::create_agent(model).await;
-
-    println!("\n--- Talking to Crestodian ---");
-    println!("Type 'exit' to finish setup.\n");
-
-    loop {
-        let input: String = Input::with_theme(&theme)
-            .with_prompt("You")
-            .interact_text()?;
-
-        if input == "exit" || input == "quit" {
-            break;
-        }
-
-        match agent.chat(&input).await {
-            Ok(response) => {
-                println!("\nCrestodian: {}\n", response);
-            }
-            Err(e) => {
-                println!("\nError: {}\n", e);
-            }
-        }
-    }
 
     Ok(())
 }

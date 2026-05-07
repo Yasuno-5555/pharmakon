@@ -1,6 +1,6 @@
 use anyhow::Result;
-use pharmakon_mcp::McpClient;
-use pharmakon_tools::mcp_tool::McpTool;
+use crate::mcp::McpClient;
+use crate::mcp_tool::McpTool;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -22,7 +22,7 @@ pub struct McpConfig {
 pub struct McpManager;
 
 impl McpManager {
-    pub async fn load_tools() -> Result<Vec<Arc<dyn pharmakon_tools::Tool>>> {
+    pub async fn load_tools() -> Result<Vec<Arc<dyn pharmakon_common::Tool>>> {
         let config_path = Self::get_config_path()?;
 
         if !config_path.exists() {
@@ -33,7 +33,7 @@ impl McpManager {
         let config: McpConfig = serde_json::from_str(&content)?;
 
         let futures = config.servers.into_iter().map(|server_cfg| async move {
-            let mut tools: Vec<Arc<dyn pharmakon_tools::Tool>> = Vec::new();
+            let mut tools: Vec<Arc<dyn pharmakon_common::Tool>> = Vec::new();
             log::info!("Initializing MCP server: {}", server_cfg.name);
             let args: Vec<&str> = server_cfg.args.iter().map(|s| s.as_str()).collect();
 

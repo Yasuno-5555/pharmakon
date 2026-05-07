@@ -128,11 +128,11 @@ function App() {
     return { text: '', images: [] };
   };
 
-  useEffect(() => {
-    if (activeTab === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, activeTab]);
+  // useEffect(() => {
+  //   if (activeTab === 'chat') {
+  //     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  //   }
+  // }, [messages, activeTab]);
 
   handleServerEventRef.current = (event: any) => {
     const { type, data: payload } = event;
@@ -330,7 +330,7 @@ function App() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
             transition={{ duration: 0.2 }}
-            style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}
           >
             {activeTab === 'chat' && (
               <ChatView

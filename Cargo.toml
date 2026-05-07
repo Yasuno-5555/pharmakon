@@ -1,7 +1,13 @@
 [workspace]
 members = [
-    "crates/*",
-    "crates/plugin-sdk", "scratch/test_skill",
+    "crates/cli",
+    "crates/common",
+    "crates/core",
+    "crates/gateway",
+    "crates/memory",
+    "crates/plugin-sdk",
+    "crates/tools",
+    "scratch/test_skill",
 ]
 resolver = "2"
 
@@ -52,6 +58,4 @@ pharmakon-common = { path = "crates/common" }
 pharmakon-memory = { path = "crates/memory" }
 pharmakon-core = { path = "crates/core" }
 pharmakon-gateway = { path = "crates/gateway" }
-pharmakon-channels = { path = "crates/channels" }
 pharmakon-tools = { path = "crates/tools" }
-pharmakon-mcp = { path = "crates/mcp" }

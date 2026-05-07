@@ -4,7 +4,6 @@ use crate::persistence::DbSessionStore;
 use crate::soul::Soul;
 use anyhow::Result;
 use pharmakon_common::Config;
-use pharmakon_common::ToolRegistry;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -48,9 +47,9 @@ impl AgentRouter {
             .with_store(self.store.clone());
 
         // Dynamically load model based on agent_config.model_id
-        if let Some(config) = &agent_config {
-            if let Some(model_id) = &config.model_id {
-                if let Some(dynamic_model) =
+        if let Some(config) = &agent_config
+            && let Some(model_id) = &config.model_id
+                && let Some(dynamic_model) =
                     crate::providers::registry::ModelRegistry::get_model(model_id)
                 {
                     agent = Agent::new(dynamic_model, format!("agent-{}", name))
@@ -63,19 +62,15 @@ impl AgentRouter {
                         agent = agent.with_fact_memory(f.clone());
                     }
                 }
-            }
-        }
 
-        if agent.knowledge_nexus.is_none() {
-            if let Some(n) = &self.nexus {
+        if agent.knowledge_nexus.is_none()
+            && let Some(n) = &self.nexus {
                 agent = agent.with_knowledge_nexus(n.clone());
             }
-        }
-        if agent.fact_memory.is_none() {
-            if let Some(f) = &self.fact_memory {
+        if agent.fact_memory.is_none()
+            && let Some(f) = &self.fact_memory {
                 agent = agent.with_fact_memory(f.clone());
             }
-        }
 
         let soul = if let Some(config) = &agent_config {
             if let Some(soul_path_str) = &config.soul_path {
@@ -97,31 +92,6 @@ impl AgentRouter {
 
         agent.set_soul(soul).await;
 
-        // Load and add tools based on agent_config.allowed_tools
-        if let Some(config) = &agent_config {
-            if let Some(allowed_tools) = &config.allowed_tools {
-                let deps = pharmakon_tools::registry::ToolDependencies {
-                    model: Some(self.model.clone()),
-                    store: Some(
-                        self.store.clone() as Arc<dyn pharmakon_common::CommitmentPersistence>
-                    ),
-                    soul_manager: None,
-                    event_tx: None,
-                    nexus: self.nexus.clone(),
-                    vision_stream: None,
-                    total_tokens: None,
-                    total_cost: None,
-                };
-
-                for tool_name in allowed_tools {
-                    if let Some(tool) =
-                        pharmakon_tools::registry::ToolRegistry::get_tool(tool_name, &deps)
-                    {
-                        agent.add_tool(tool).await;
-                    }
-                }
-            }
-        }
 
         let agent_arc = Arc::new(Mutex::new(agent));
         self.agents.insert(name.to_string(), agent_arc.clone());
@@ -139,7 +109,7 @@ impl AgentRouter {
 
         // Add supervisor tools to agents
         {
-            let mut m = manager.lock().await;
+            let m = manager.lock().await;
             m.add_tool(Arc::new(crate::orchestration::TeamMessageTool {
                 from: "Manager".to_string(),
             }))
@@ -148,7 +118,7 @@ impl AgentRouter {
                 .await;
         }
         {
-            let mut r = researcher.lock().await;
+            let r = researcher.lock().await;
             r.add_tool(Arc::new(crate::orchestration::TeamMessageTool {
                 from: "Researcher".to_string(),
             }))

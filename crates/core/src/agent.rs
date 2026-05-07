@@ -1,13 +1,12 @@
+use crate::orchestration::budget::{self, IterationSnapshot, ProgressTracker, TerminationSignal, TerminationPolicy};
 use crate::model::{
-    AgentError, AgentErrorCode, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
-    Message, MessageContent, ToolDefinition,
+    AgentError, AgentErrorCode, AgentModel, CompletionRequest,
+    Message, MessageContent, ToolDefinition, ToolCategory,
 };
 use crate::system_prompt::SystemPromptManager;
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use pharmakon_common::{Event, ToolRegistry};
+use pharmakon_common::Event;
 use pharmakon_memory::BeliefSystem;
-use pharmakon_tools::{GoogleSearchTool, search::custom_scout::CustomScoutTool};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::{Mutex, broadcast};
@@ -38,6 +37,8 @@ pub struct Agent {
     pub session_id: Arc<Mutex<String>>, // Current global session ID (legacy/default)
     pub session_states: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<SessionState>>>>>,
     pub prompt_manager: Arc<Mutex<SystemPromptManager>>,
+    pub context_manager: Arc<Mutex<crate::context::ContextManager>>,
+    pub active_categories: Arc<Mutex<std::collections::HashSet<crate::model::ToolCategory>>>,
     pub event_tx: broadcast::Sender<Event>,
     pub approval_tx: broadcast::Sender<(String, bool)>,
     pub trajectory: Arc<Mutex<crate::trajectory::Trajectory>>,
@@ -51,17 +52,19 @@ pub struct Agent {
     pub policy_engine: Arc<crate::security::policy::PolicyEngine>,
     pub session_store: Option<Arc<crate::persistence::DbSessionStore>>,
     pub planner_model: Option<Arc<Mutex<Arc<dyn AgentModel>>>>,
-    pub vision_stream: Option<Arc<Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
     pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
     pub interaction_count: Arc<std::sync::atomic::AtomicU32>,
     pub fallback_models: Arc<StdMutex<Vec<String>>>,
     pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
     pub total_cost: Arc<Mutex<f64>>,
     pub start_time: std::time::Instant,
+    pub dry_run: Arc<std::sync::atomic::AtomicBool>,
     pub tool_call_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
     pub territory_manager: Arc<crate::orchestration::territory::TerritoryManager>,
     pub research_notebook: Arc<Mutex<crate::orchestration::research::ResearchNotebook>>,
     pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
+    pub event_log: Arc<crate::event_log::EventLog>,
+    pub snapshot_store: Arc<crate::snapshot_store::SnapshotStore>,
 }
 
 impl Clone for Agent {
@@ -71,6 +74,8 @@ impl Clone for Agent {
             session_id: self.session_id.clone(),
             session_states: self.session_states.clone(),
             prompt_manager: self.prompt_manager.clone(),
+            context_manager: self.context_manager.clone(),
+            active_categories: self.active_categories.clone(),
             event_tx: self.event_tx.clone(),
             approval_tx: self.approval_tx.clone(),
             trajectory: self.trajectory.clone(),
@@ -84,17 +89,19 @@ impl Clone for Agent {
             policy_engine: self.policy_engine.clone(),
             session_store: self.session_store.clone(),
             planner_model: self.planner_model.clone(),
-            vision_stream: self.vision_stream.clone(),
             graph_store: self.graph_store.clone(),
             interaction_count: self.interaction_count.clone(),
             fallback_models: self.fallback_models.clone(),
             total_tokens: self.total_tokens.clone(),
             total_cost: self.total_cost.clone(),
             start_time: self.start_time,
+            dry_run: self.dry_run.clone(),
             tool_call_counts: self.tool_call_counts.clone(),
             territory_manager: self.territory_manager.clone(),
             research_notebook: self.research_notebook.clone(),
             usage_history: self.usage_history.clone(),
+            event_log: self.event_log.clone(),
+            snapshot_store: self.snapshot_store.clone(),
         }
     }
 }
@@ -115,10 +122,13 @@ impl Agent {
             crate::system_prompt::autonomy::AutonomyContribution,
         ));
 
-        let playbook_names = pharmakon_tools::playbook::PlaybookTool::list_names();
-        pm.add_contribution(Box::new(crate::system_prompt::PlaybookContribution {
-            names: playbook_names,
-        }));
+        let home = dirs::home_dir().unwrap_or_default();
+        let context_dir = home.join(".pharmakon").join("context");
+        let context_manager = Arc::new(Mutex::new(crate::context::ContextManager::new(&context_dir).unwrap_or_else(|_| crate::context::ContextManager::new(".").unwrap())));
+
+        let mut active_categories = std::collections::HashSet::new();
+        active_categories.insert(ToolCategory::Core);
+        let active_categories = Arc::new(Mutex::new(active_categories));
 
         let mut hooks = crate::hooks::HookRegistry::new();
         hooks.register(Box::new(
@@ -130,8 +140,11 @@ impl Agent {
             session_id: Arc::new(Mutex::new(session_id)),
             session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
             prompt_manager: Arc::new(Mutex::new(pm)),
+            context_manager,
+            active_categories,
             event_tx,
             approval_tx,
+
             trajectory,
             compactor,
             tools: Arc::new(Mutex::new(Vec::new())),
@@ -143,19 +156,25 @@ impl Agent {
             policy_engine: Arc::new(crate::security::policy::PolicyEngine::new()),
             session_store: None,
             planner_model: None,
-            vision_stream: None,
             graph_store: None,
             interaction_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             fallback_models: Arc::new(StdMutex::new(Vec::new())),
             total_tokens: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             total_cost: Arc::new(Mutex::new(0.0)),
             start_time: std::time::Instant::now(),
+            dry_run: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tool_call_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
             territory_manager: Arc::new(crate::orchestration::territory::TerritoryManager::new()),
             research_notebook: Arc::new(Mutex::new(
                 crate::orchestration::research::ResearchNotebook::new("Uninitialized"),
             )),
             usage_history: Arc::new(Mutex::new(Vec::new())),
+            event_log: Arc::new(crate::event_log::EventLog::new(
+                Some(home.join(".pharmakon").join("event_log").join("events.jsonl")),
+            )),
+            snapshot_store: Arc::new(crate::snapshot_store::SnapshotStore::new(
+                home.join(".pharmakon").join("snapshots"),
+            )),
         }
     }
 
@@ -190,11 +209,10 @@ impl Agent {
         }
 
         let mut history = Vec::new();
-        if let Some(store) = &self.session_store {
-            if let Ok(h) = store.load_history(session_id).await {
+        if let Some(store) = &self.session_store
+            && let Ok(h) = store.load_history(session_id).await {
                 history = h;
             }
-        }
 
         let state = Arc::new(Mutex::new(SessionState {
             history,
@@ -244,205 +262,6 @@ impl Agent {
         tools.push(tool);
     }
 
-    pub async fn init_standard_tools(&self) {
-        let background_processes = Arc::new(Mutex::new(std::collections::HashMap::new()));
-        self.add_tool(Arc::new(pharmakon_tools::terminal::ShellTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::terminal::TerminalTool::new()))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::terminal::BackgroundRunTool {
-            active_processes: background_processes.clone(),
-        }))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::terminal::ProcessStatusTool {
-            active_processes: background_processes,
-            retry_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        }))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::files::FileReadTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::files::FileWriteTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::ViewFileTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::ListDirTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::CodeEditTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::MultiCodeEditTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::GrepSearchTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::FindDefinitionTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::code::PythonInterpreterTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::repomap::RepoMapTool::new()))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::git::GitStatusTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::git::GitDiffTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::git::GitCommitTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::browser::BrowserTool::new(None)))
-            .await;
-
-        if let Ok(key) = std::env::var("BRAVE_SEARCH_API_KEY") {
-            self.add_tool(Arc::new(pharmakon_tools::search::BraveSearchTool::new(key)))
-                .await;
-        }
-
-        self.add_tool(Arc::new(pharmakon_tools::web_fetch::WebFetchTool::new()))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::web_search::BraveSearchTool::new(
-            "".to_string(),
-        )))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::web_search::GoogleSearchTool))
-            .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::search::custom_scout::CustomScoutTool,
-        ))
-        .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::memory_hydration::HydrateContextTool::new(),
-        ))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::playbook::PlaybookTool::new()))
-            .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::project_management::TaskTrackerTool::new(),
-        ))
-        .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::workspace::WorkspacePerceptionTool::new(),
-        ))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::probe::EnvironmentProbeTool::new()))
-            .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::link_understanding::LinkUnderstandingTool::new(),
-        ))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::quality::CargoQualityTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::tool_market::ToolMarketTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::ExecutionTraceTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::DeterministicReplayTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::ToolReliabilityScoringTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::ContextBudgetOptimizerTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::DryRunTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::WorkspaceSnapshotTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::SemanticGrepTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::WebTaskTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::LocalModelRouterTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::SkillCompositionTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::FailureMemoryTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::ProactiveInterventionTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::CognitiveMirrorTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::IntentCompilerTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::RegretMinimizationTool))
-            .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::codex::CounterfactualSimulatorTool,
-        ))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::AttentionRouterTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::TemporalAwarenessTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::SoftDependencyGraphTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::AutonomyDialTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::FailurePredictionTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::AstLspBridgeTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::SpecFirstTestTool))
-            .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::codex::SemanticConflictResolutionTool,
-        ))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::TimeTravelDebuggerTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::NexusVisualizerTool))
-            .await;
-        self.add_tool(Arc::new(
-            pharmakon_tools::codex::ProactiveSelfOptimizationTool,
-        ))
-        .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::DiffSecurityAuditorTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::AstNativeMutationTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::MctsSimulatorTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::MemoryActorStatusTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::GraphPrefetchTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::RlfcTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::EphemeralRedTeamTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::FractalSwarmTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::NodeReplTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::CodexAutomationTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::CurrentTimeTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::WeatherLookupTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::FinanceLookupTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::SportsLookupTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::codex::CodexCatalogTool))
-            .await;
-    }
-
-    pub async fn setup_autonomous_tools(&self) {
-        self.init_standard_tools().await;
-
-        // Add Phase 3 Tools
-        self.add_tool(Arc::new(pharmakon_tools::checkpoint::CheckpointTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::reflection::ReflectionTool))
-            .await;
-        self.add_tool(Arc::new(pharmakon_tools::orchestration::ToolRouterTool))
-            .await;
-
-        if let Some(nexus) = &self.knowledge_nexus {
-            self.add_tool(Arc::new(
-                pharmakon_tools::memory_mgmt::MemoryManagementTool::new(Some(nexus.clone())),
-            ))
-            .await;
-        }
-
-        // Add apply_patch (SAFER replacement for write_file)
-        self.add_tool(Arc::new(pharmakon_tools::code::ApplyPatchTool))
-            .await;
-    }
 
     pub async fn chat(&self, message: &str) -> Result<String> {
         let session_id = {
@@ -455,6 +274,10 @@ impl Agent {
     pub async fn set_session_id(&self, id: String) {
         let mut sid = self.session_id.lock().await;
         *sid = id;
+    }
+
+    pub fn set_dry_run(&self, enabled: bool) {
+        self.dry_run.store(enabled, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub async fn replace_history(&self, history: Vec<Message>) -> Result<()> {
@@ -474,7 +297,7 @@ impl Agent {
         // 1. Reset context engine
         {
             let state_arc = self.get_current_session_state().await;
-            let mut state = state_arc.lock().await;
+            let state = state_arc.lock().await;
             let mut context_engine = state.context_engine.lock().await;
             context_engine.clear_history();
         }
@@ -510,7 +333,6 @@ impl Agent {
             }
 
             let state_arc = self.get_session_state(session_id).await;
-            let mut state = state_arc.lock().await;
 
             let user_msg = Message {
                 role: "user".to_string(),
@@ -523,24 +345,14 @@ impl Agent {
             if let Some(store) = &self.session_store {
                 store.save_message(session_id, &user_msg).await?;
             }
-            state.history.push(user_msg);
-
-            // Auto-index user message for future recovery (DISABLED to prevent cross-session memory leaks)
-            /*
-            if user_message.len() > 10 {
-                if let Some(nexus) = &self.knowledge_nexus {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let _ = nexus
-                        .remember_batch(vec![(id, user_message.to_string())])
-                        .await;
-                }
-            }
-            */
 
             {
+                let mut state = state_arc.lock().await;
+                state.history.push(user_msg);
+
                 let mut history = state.history.clone();
                 {
-                    let mut context_engine = state.context_engine.lock().await;
+                    let context_engine = state.context_engine.lock().await;
                     let _ = context_engine.prune_history(&mut history).await;
                 }
                 state.history = history;
@@ -562,47 +374,48 @@ impl Agent {
         let knowledge_nexus = self.knowledge_nexus.clone();
         let user_msg_text = user_message.to_string();
 
-        let (semantic_res, nexus_res, scout_res) = if user_message.len() < 5 {
-            (None, None, None)
-        } else {
-            tokio::join!(
-                async {
-                    if let Some(search) = semantic_search {
-                        search.search_with_limit(&user_msg_text, 3).await.ok()
-                    } else {
-                        None
-                    }
-                },
-                async {
-                    if let Some(nexus) = knowledge_nexus {
-                        nexus.smart_search(&user_msg_text, 8).await.ok()
-                    } else {
-                        None
-                    }
-                },
-                async { self.scout_workspace(&user_msg_text).await }
-            )
-        };
+        // Parallel context gathering for performance
+        let (semantic_res, nexus_res) = tokio::join!(
+            async {
+                if let Some(search) = semantic_search {
+                    search.search_with_limit(&user_msg_text, 3).await.ok()
+                } else {
+                    None
+                }
+            },
+            async {
+                if let Some(nexus) = knowledge_nexus {
+                    nexus.smart_search(&user_msg_text, 8).await.ok()
+                } else {
+                    None
+                }
+            }
+        );
 
-        if let Some(memories) = semantic_res {
-            if !memories.is_empty() {
-                let memory_context = memories.join("\\n---\\n");
+        if let Some(memories) = semantic_res
+            && !memories.is_empty() {
+                let memory_context = memories.join("
+---
+");
                 self.add_to_working_memory(
-                    format!("Long-term Memories:\\n{}", memory_context),
+                    format!("Long-term Memories:
+{}", memory_context),
                     0.7,
                     "SemanticSearch".to_string(),
                 )
                 .await;
             }
-        }
 
-        if let Some(memories) = nexus_res {
-            if !memories.is_empty() {
-                let memory_context = memories.join("\\n---\\n");
+        if let Some(memories) = nexus_res
+            && !memories.is_empty() {
+                let memory_context = memories.join("
+---
+");
                 let _ = self.hooks.trigger_context_recovered(&memory_context).await;
                 self.add_to_working_memory(
                     format!(
-                        "Knowledge Nexus Insights (Hybrid + Graph):\\n{}",
+                        "Knowledge Nexus Insights (Hybrid + Graph):
+{}",
                         memory_context
                     ),
                     0.9,
@@ -610,16 +423,8 @@ impl Agent {
                 )
                 .await;
             }
-        }
 
-        if let Some(scout_context) = scout_res {
-            self.add_to_working_memory(
-                format!("Proactive Scout Insights:\\n{}", scout_context),
-                0.8,
-                "ProactiveScout".to_string(),
-            )
-            .await;
-        }
+
 
         let tools_count = self.tools.lock().await.len();
         log::info!(
@@ -628,70 +433,70 @@ impl Agent {
             session_id
         );
 
-        let mut iteration_count = 0;
-        let max_iterations = 15;
+        //--- Budgeted Execution Model Start ---
+        let complexity = if ["refactor", "implement", "debug", "test", "fix", "add", "create"]
+            .iter()
+            .any(|s| user_message.to_lowercase().contains(s))
+        {
+            budget::TaskComplexity::Standard
+        } else {
+            budget::TaskComplexity::Simple
+        };
+
+        let budget = budget::estimate_budget(complexity);
+        let mut progress_tracker = ProgressTracker::new(&budget.policy);
+        let mut current_iteration = 0;
+
         let start_time = std::time::Instant::now();
-        let max_duration = std::time::Duration::from_secs(300); // 5 minutes
+        //--- Budgeted Execution Model End ---
 
         loop {
-            iteration_count += 1;
-            if iteration_count > max_iterations {
+            // --- Start of Loop: Budget and Progress Checks ---
+            current_iteration += 1;
+            if start_time.elapsed() > budget.hard_max_wall_time {
                 let reason = format!(
-                    "Loop limit exceeded ({} iterations). Potential infinite loop detected.",
-                    iteration_count
+                    "Wall time limit exceeded ({:?}). Task aborted.",
+                    budget.hard_max_wall_time
                 );
                 log::error!("CRITICAL: {}", reason);
-                let _ = self.event_tx.send(Event::AgentHangDetected {
-                    reason: reason.clone(),
-                });
-                return Err(anyhow::anyhow!(AgentError::new(
-                    AgentErrorCode::HangDetected,
-                    reason
-                )));
+                return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
             }
 
-            if start_time.elapsed() > max_duration {
-                let reason = format!(
-                    "Time limit exceeded ({:?}). Agent is taking too long to respond.",
-                    max_duration
-                );
-                log::error!("CRITICAL: {}", reason);
-                let _ = self.event_tx.send(Event::AgentHangDetected {
-                    reason: reason.clone(),
-                });
-                return Err(anyhow::anyhow!(AgentError::new(
-                    AgentErrorCode::HangDetected,
-                    reason
-                )));
+            if let TerminationPolicy::FixedIterations(max_iters) = budget.policy {
+                if current_iteration > max_iters {
+                    log::info!(
+                        "Fixed iteration limit reached ({}). Task finished.",
+                        max_iters
+                    );
+                    let final_response = state_arc
+                        .lock()
+                        .await
+                        .history
+                        .last()
+                        .and_then(|msg| {
+                            if msg.role == "assistant" {
+                                msg.content.as_ref().map(|c| c.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default();
+                    break Ok(final_response);
+                }
             }
+            
+            let mut snapshot = IterationSnapshot::new();
+            // --- End of Loop: Budget and Progress Checks ---
 
-            log::info!("Agent iteration start ({})...", iteration_count);
-
-            // 0. SPECULATIVE PRE-FETCHING:
-            // Proactively load potentially relevant context in the background.
-            let prefetch_task = {
-                let agent_clone = self.clone();
-                let msg = user_message.to_string();
-                tokio::spawn(async move {
-                    let _ = agent_clone.scout_workspace(&msg).await;
-                })
-            };
-
-            // 1. HIERARCHICAL REASONING: Step 1 - Define Strategy (Only on first iteration)
-            if iteration_count == 1 {
-                 let _ = self.event_tx.send(Event::AgentThought {
-                    content: MessageContent::Text("Analyzing task complexity and planning resource retrieval...".to_string()),
-                 });
-                 // We could use a lighter model here to decide which tools to hydrate first.
-            }
-
+            log::info!("[SESSION: {}] Agent iteration start ({})...", session_id, current_iteration);
+            
+            // ... (rest of the message preparation logic remains the same)
             let mut messages_to_send = Vec::new();
             {
                 let prompt_manager = self.prompt_manager.lock().await;
 
                 // 1. VIRTUAL CONTEXT SCALING:
                 // Instead of loading all context, we load a sparse index.
-                let state_arc = self.get_current_session_state().await;
                 let state = state_arc.lock().await;
                 let virtual_index = {
                     let mut entries = Vec::new();
@@ -713,7 +518,13 @@ impl Agent {
                     engine.generate_virtual_index(&entries)
                 };
 
+                let dynamic_context = {
+                    let ctx_mgr = self.context_manager.lock().await;
+                    ctx_mgr.render_prompt_context()
+                };
+
                 let layout = crate::system_prompt::PromptLayout {
+                    dynamic_context,
                     system_rules: prompt_manager.soul().system_prompt.clone(),
                     playbooks: {
                         if state.active_playbooks.is_empty() {
@@ -721,9 +532,14 @@ impl Agent {
                         } else {
                             state.active_playbooks
                                 .iter()
-                                .map(|(name, content)| format!("#### ACTIVE PLAYBOOK: {}\n{}", name, content))
+                                .map(|(name, content)| format!("#### ACTIVE PLAYBOOK: {}
+{}", name, content))
                                 .collect::<Vec<_>>()
-                                .join("\n\n---\n\n")
+                                .join("
+
+---
+
+")
                         }
                     },
                     repo_map: None, // Will be populated by repomap tool if needed
@@ -737,38 +553,44 @@ impl Agent {
                     content: Some(MessageContent::Text(layout.render())),
                     ..Default::default()
                 });
-            }
-            {
-                let state = state_arc.lock().await;
+
                 messages_to_send.extend(state.history.clone());
             }
 
             let tool_definitions = {
                 let tools_lock = self.tools.lock().await;
+                let active_cats: tokio::sync::MutexGuard<'_, std::collections::HashSet<ToolCategory>> = self.active_categories.lock().await;
+
                 if tools_lock.is_empty() {
                     None
                 } else {
-                    Some(
-                        tools_lock
-                            .iter()
-                            .map(|t| ToolDefinition {
-                                r#type: "function".to_string(),
-                                function: crate::model::FunctionDefinition {
-                                    name: t.name().to_string(),
-                                    description: t.description().to_string(),
-                                    parameters: t.parameters(),
-                                },
-                            })
-                            .collect(),
-                    )
+                    let active_tools: Vec<_> = tools_lock
+                        .iter()
+                        .filter(|t| active_cats.contains(&t.category()))
+                        .map(|t| ToolDefinition {
+                            r#type: "function".to_string(),
+                            function: crate::model::FunctionDefinition {
+                                name: t.name().to_string(),
+                                description: t.description().to_string(),
+                                parameters: t.parameters(),
+                            },
+                        })
+                        .collect();
+
+                    if active_tools.is_empty() {
+                        None
+                    } else {
+                        Some(active_tools)
+                    }
                 }
             };
 
-            // Tiered Reasoning: Use planner model for tool selection if available
             let mut target_model = {
                 let m = self.model.lock().await;
                 (*m).clone()
             };
+
+            log::info!("[SESSION: {}] Sending completion request to model...", session_id);
 
             let request = CompletionRequest {
                 messages: messages_to_send,
@@ -777,7 +599,7 @@ impl Agent {
                 tools: tool_definitions,
             };
 
-            let mut response_result = None;
+             let mut response_result = None;
             let mut current_fallback_index = 0;
             let fallback_models = self.fallback_models.clone();
 
@@ -790,7 +612,7 @@ impl Agent {
                 response_result = Some(completion_task.await);
 
                 match response_result {
-                    Some(Ok(_)) => break, // Success, exit retry loop
+                    Some(Ok(_)) => {} // Success, condition will exit loop
                     Some(Err(ref e)) => {
                         let is_rate_limit = e.to_string().to_lowercase().contains("429")
                             || e.to_string().to_lowercase().contains("too many requests")
@@ -843,7 +665,8 @@ impl Agent {
                 response_result.unwrap().unwrap();
 
             log::debug!(
-                "Model response received. Content: {}, Tool calls: {}",
+                "[SESSION: {}] Model response received. Content: {}, Tool calls: {}",
+                session_id,
                 response.content.is_some(),
                 response.tool_calls.as_ref().map(|t| t.len()).unwrap_or(0)
             );
@@ -858,10 +681,17 @@ impl Agent {
                 response: response.clone(),
             });
 
-            // Handle tool calls in parallel if multiple
             if let Some(tool_calls) = &response.tool_calls {
+                log::info!("[SESSION: {}] Handling {} tool a-call(s)...", session_id, tool_calls.len());
+                
+                snapshot.tool_calls = tool_calls.len();
+                if let Some(last_tool) = tool_calls.last() {
+                    snapshot.last_tool_call_args = Some(last_tool.function.arguments.clone());
+                }
+
                 let mut tool_tasks = Vec::new();
                 for tool_call in tool_calls {
+                    // ... (tool task spawning logic remains the same)
                     let tool_call = tool_call.clone();
                     let _ = self.record_step(crate::trajectory::TrajectoryStep::Action {
                         tool: tool_call.function.name.clone(),
@@ -885,42 +715,60 @@ impl Agent {
                     };
                     let policy_engine = self.policy_engine.clone();
                     let tool_call_counts = self.tool_call_counts.clone();
+                    let dry_run = self.dry_run.load(std::sync::atomic::Ordering::SeqCst);
                     let forensic_id = uuid::Uuid::new_v4().to_string();
+                    let el = self.event_log.clone();
+                    let el_session = session_id.to_string();
 
                     tool_tasks.push(tokio::spawn(async move {
+                        let tool_name_from_call = tool_call.function.name.clone();
                         let tool = match tool {
                             Some(t) => t,
                             None => {
                                 return (
                                     tool_call.id.clone(),
                                     Err(anyhow!("Tool not found: {}", tool_call.function.name)),
+                                    tool_name_from_call,
+                                    0,
                                 );
                             }
                         };
 
-                        let args: serde_json::Value =
+                        let mut args: serde_json::Value =
                             serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+
+                        // Global dry-run injection
+                        if dry_run {
+                            if let Some(obj) = args.as_object_mut() {
+                                obj.insert("dry_run".to_string(), serde_json::json!(true));
+                            }
+                        }
 
                         let _ = event_tx.send(Event::ToolCall {
                             name: tool.name().to_string(),
                             args: args.clone(),
                         });
 
-                        if let Some(allowlist) = &soul.tool_allowlist {
-                            if !allowlist.contains(&tool.name().to_string()) {
+                        if let Some(allowlist) = &soul.tool_allowlist
+                            && !allowlist.contains(&tool.name().to_string()) {
+                                let tool_name = tool.name().to_string();
                                 return (
                                     tool_call.id.clone(),
                                     Ok(format!("Tool '{}' is not allowed.", tool.name())),
+                                    tool_name,
+                                    0,
                                 );
                             }
-                        }
 
                         let policy_result = policy_engine.evaluate_tool_call(tool.name(), &args);
                         let (needs_approval, _) = match policy_result {
                             crate::security::policy::PolicyAction::Deny(reason) => {
+                                let tool_name = tool.name().to_string();
                                 return (
                                     tool_call.id.clone(),
                                     Ok(format!("Denied by policy: {}", reason)),
+                                    tool_name,
+                                    0,
                                 );
                             }
                             crate::security::policy::PolicyAction::RequireApproval(reason) => {
@@ -953,9 +801,12 @@ impl Agent {
                                 }
                             }
                             if !approved {
+                                let tool_name = tool.name().to_string();
                                 return (
                                     tool_call.id.clone(),
                                     Ok("Denied by user.".to_string()),
+                                    tool_name,
+                                    0,
                                 );
                             }
                         }
@@ -975,20 +826,26 @@ impl Agent {
                             observation: None,
                         });
 
+                        let start = std::time::Instant::now();
+                        let args_hash = crate::event_log::short_hash(&args.to_string());
+                        el.append(&el_session, crate::event_log::EventKind::ToolCalled {
+                            tool: tool.name().to_string(),
+                            args_hash,
+                        }).await;
                         let result = tool.call(args).await;
+                        let latency_ms = start.elapsed().as_millis() as u64;
+
                         let mut result_str = match &result {
                             Ok(s) => s.clone(),
                             Err(e) => e.to_string(),
                         };
 
-                        // TOOL RESULT COMPRESSION: Prevent token explosion from long tool outputs
                         if result_str.len() > 2000 {
                             if tool.name() == "web_fetch" || tool.name() == "browser" {
                                 log::info!("Agent: Compressing large result from '{}' ({} chars)", tool.name(), result_str.len());
                                 let preview = result_str.chars().take(800).collect::<String>();
                                 result_str = format!("{}... [TRUNCATED due to size. The full content was omitted to save tokens. Use more specific search queries if needed.]", preview);
                             } else if result_str.len() > 10000 {
-                                // Generic compression for other tools if extremely long
                                 log::warn!("Agent: Generic compression for extremely long output from '{}'", tool.name());
                                 let preview = result_str.chars().take(2000).collect::<String>();
                                 result_str = format!("{}... [EXTREMELY LARGE OUTPUT TRUNCATED]", preview);
@@ -1009,23 +866,46 @@ impl Agent {
                         let _ = hooks
                             .trigger_after_tool_call(tool.name(), &result_str)
                             .await;
-                        (tool_call.id.clone(), result.map_err(|e| anyhow!(e.0)))
+                        
+                        let tool_name = tool.name().to_string();
+                        
+                        el.append(&el_session, crate::event_log::EventKind::ToolResult {
+                            tool: tool_name.clone(),
+                            success: result.is_ok(),
+                            latency_ms,
+                            output_hash: crate::event_log::short_hash(&result_str),
+                        }).await;
+                        
+                        (tool_call.id.clone(), result.map_err(|e| anyhow!(e.0)), tool_name, latency_ms)
                     }));
                 }
 
-                let mut rescue_error = None;
                 let task_results = futures::future::join_all(tool_tasks).await;
+                let mut tool_errors = Vec::new();
+
                 for task_res in task_results {
-                    if let Ok((tool_call_id, result_res)) = task_res {
+                    if let Ok((tool_call_id, result_res, tool_name, latency_ms)) = task_res {
+                        let success = result_res.is_ok();
+                         if success {
+                            snapshot.successful_tool_calls += 1;
+                        }
+                        let error = result_res.as_ref().err().map(|e: &anyhow::Error| e.to_string());
+                        
+                        if let Some(store) = &self.session_store {
+                            let _ = store.save_tool_metric(&tool_name, success, latency_ms, error).await;
+                        }
+
                         let result = match result_res {
                             Ok(r) => r,
                             Err(e) => {
-                                log::error!("Tool task execution error: {}", e);
-                                rescue_error = Some(e.to_string());
+                                let error_string = format!("Tool '{}' failed with error: {}", tool_name, e);
+                                log::error!("{}", error_string);
+                                tool_errors.push(error_string.clone());
                                 e.to_string()
                             }
                         };
-
+                        
+                        // ... (rest of tool result handling is the same)
                         if result.contains("### INJECTED PLAYBOOK") {
                             if let Some(line) = result.lines().next() {
                                 let name = line.replace("### INJECTED PLAYBOOK: ", "").trim().to_string();
@@ -1042,35 +922,62 @@ impl Agent {
                         }).await;
                         let tool_result_msg = Message {
                             role: "tool".to_string(),
+                            name: Some(tool_name),
                             content: Some(MessageContent::Text(result.clone())),
                             tool_call_id: Some(tool_call_id),
                             ..Default::default()
                         };
 
-                        // VOLATILE TOOL OUTPUT OPTIMIZATION:
                         let is_volatile = tool_result_msg
                             .content
                             .as_ref()
                             .map(|c| c.to_string().len() > 1024)
                             .unwrap_or(false);
 
-                        if let Some(store) = &self.session_store {
-                            if !is_volatile {
+                        if let Some(store) = &self.session_store
+                            && !is_volatile {
                                 let _ = store.save_message(session_id, &tool_result_msg).await;
                             }
-                        }
                         let mut state = state_arc.lock().await;
                         state.history.push(tool_result_msg);
                     }
                 }
-                continue; // Next iteration to let model process tool results
-            }
 
+                if !tool_errors.is_empty() {
+                    let error_summary = tool_errors.join("
+");
+                    let rescue_message = Message {
+                        role: "system".to_string(),
+                        content: Some(MessageContent::Text(format!(
+                            "Some tools failed to execute. Please review the errors and try a different approach. Errors:
+{}",
+                            error_summary
+                        ))),
+                        ..Default::default()
+                    };
+                    let mut state = state_arc.lock().await;
+                    state.history.push(rescue_message);
+                }
+
+                // --- Progress Tracking and Termination ---
+                if let TerminationPolicy::ProgressBased {..} = budget.policy {
+                    let signal = progress_tracker.record(snapshot);
+                    if signal != TerminationSignal::Continue {
+                        let reason = format!("Execution halted due to: {:?}", signal);
+                        log::error!("CRITICAL: {}", reason);
+                        return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
+                    }
+                }
+                // --- End Progress Tracking ---
+                continue; 
+            }
+            
+            // ... (rest of the response handling logic remains the same)
             if response.content.is_none() && response.tool_calls.is_none() {
                 log::warn!(
-                    "Model returned empty response. Retrying or breaking if too many iterations."
+                    "Model returned empty response. Breaking loop to avoid hang."
                 );
-                continue;
+                break Ok(String::new());
             }
 
             let raw_content = response
@@ -1078,8 +985,8 @@ impl Agent {
                 .as_ref()
                 .map(|c| c.to_string())
                 .unwrap_or_default();
-
-            // THOUGHT EXTRACTION: Extract <think>...</think> and strip it from final user content
+            
+            log::info!("[SESSION: {}] Processing final content response...", session_id);
             let mut final_content = raw_content.clone();
             let mut thoughts = Vec::new();
 
@@ -1122,21 +1029,28 @@ impl Agent {
             };
             let _ = self.hooks.trigger_message_sent(&final_msg).await;
 
-            // BATCHED REFLECTION OPTIMIZATION:
             let current_interaction_count = self
                 .interaction_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                 + 1;
-            if current_interaction_count % 5 == 0 {
-                let _ = self.reflect().await;
+            if current_interaction_count.is_multiple_of(5) {
+                let agent_clone = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = agent_clone.reflect().await {
+                        log::error!("Error during background reflection: {}", e);
+                    }
+                });
             }
 
-            // Auto-index assistant response
             if let Some(nexus) = &self.knowledge_nexus {
-                let id = uuid::Uuid::new_v4().to_string();
-                let _ = nexus
-                    .remember_batch(vec![(id, final_content.clone())])
-                    .await;
+                let nexus = nexus.clone();
+                let content_to_index = final_content.clone();
+                tokio::spawn(async move {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let _ = nexus
+                        .remember_batch(vec![(id, content_to_index)])
+                        .await;
+                });
             }
 
             let _ = self.event_tx.send(Event::AgentResponse {
@@ -1145,8 +1059,9 @@ impl Agent {
                     .unwrap_or(MessageContent::Text("".to_string())),
             });
             return Ok(final_content);
-        } }).await
-    }
+        }
+    }).await
+}
 
     pub async fn plan_retrieval(&self, query: &str) -> pharmakon_memory::RagStrategy {
         if query.to_lowercase().contains("deep research") || query.len() > 200 {
@@ -1176,7 +1091,7 @@ impl Agent {
 
         // Micro-summary generation
         let summary = if content.len() > 150 {
-            let mut compactor = self.compactor.lock().await;
+            let compactor = self.compactor.lock().await;
             compactor.compact_block(&content, 0.5).await.ok()
         } else {
             Some(content.clone())
@@ -1204,7 +1119,9 @@ impl Agent {
         if results.is_empty() {
             return None;
         }
-        Some(results.join("\\n---\\n"))
+        Some(results.join("
+---
+"))
     }
 
     pub async fn reflect(&self) -> Result<()> {
@@ -1232,7 +1149,10 @@ impl Agent {
                 )
             })
             .collect::<Vec<_>>()
-            .join("\\n");
+            .join("
+");
+
+        drop(state);
 
         let system_prompt = "Analyze the recent conversation and extract ONE key learned fact, architectural decision, or verified constraint. Output only the distilled insight.";
         let request = CompletionRequest {
@@ -1244,7 +1164,8 @@ impl Agent {
                 },
                 Message {
                     role: "user".to_string(),
-                    content: Some(MessageContent::Text(format!("Context:\\n{}", context))),
+                    content: Some(MessageContent::Text(format!("Context:
+{}", context))),
                     ..Default::default()
                 },
             ],
@@ -1254,9 +1175,9 @@ impl Agent {
         };
 
         let model = self.model.lock().await;
-        if let Ok(response) = model.complete(request).await {
-            if let Some(insight) = response.content.as_ref().and_then(|c| c.as_text()) {
-                if !insight.trim().is_empty() {
+        if let Ok(response) = model.complete(request).await
+            && let Some(insight) = response.content.as_ref().and_then(|c| c.as_text())
+                && !insight.trim().is_empty() {
                     log::info!("Agent Reflection Insight: {}", insight);
 
                     // Save to fact memory for long-term recall
@@ -1270,8 +1191,6 @@ impl Agent {
                         let _ = search.remember(insight).await;
                     }
                 }
-            }
-        }
         Ok(())
     }
 

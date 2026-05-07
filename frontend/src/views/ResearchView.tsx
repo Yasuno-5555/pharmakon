@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, BookOpen, QuestionMarkCircle, Link2, Ghost } from 'lucide-react';
+import { Search, BookOpen, CircleHelp, Link2, Ghost } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface Fact {
@@ -67,7 +67,7 @@ const ResearchView: React.FC<ResearchViewProps> = ({ notebook }) => {
 
         <section className="research-section questions-section">
           <div className="section-header">
-            <QuestionMarkCircle size={18} />
+            <CircleHelp size={18} />
             <span>PENDING QUESTIONS</span>
           </div>
           <div className="questions-list">

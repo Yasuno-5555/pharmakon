@@ -51,7 +51,7 @@ impl ToolRegistry {
             "workspace_perception" => {
                 Some(Arc::new(crate::workspace::WorkspacePerceptionTool::new()))
             }
-            "subagent" => deps.model.as_ref().map(|m| {
+            "subagent" => deps.model.as_ref().map(|_m| {
                 Arc::new(crate::subagent::SubAgentTool::new(Arc::new(
                     crate::subagent::NoopSpawner,
                 ))) as Arc<dyn Tool>
@@ -83,9 +83,7 @@ impl ToolRegistry {
             "checkpoint" => Some(Arc::new(crate::checkpoint::CheckpointTool)),
             "reflect" => Some(Arc::new(crate::reflection::ReflectionTool)),
             "route_tools" => Some(Arc::new(crate::orchestration::ToolRouterTool)),
-            "memory_management" => Some(Arc::new(crate::memory_mgmt::MemoryManagementTool::new(
-                deps.nexus.clone(),
-            ))),
+            "memory_management" => Some(Arc::new(crate::memory_mgmt::MemoryManagementTool)),
             "execution_trace" => Some(Arc::new(crate::codex::ExecutionTraceTool)),
             "deterministic_replay" => Some(Arc::new(crate::codex::DeterministicReplayTool)),
             "tool_reliability" => Some(Arc::new(crate::codex::ToolReliabilityScoringTool)),

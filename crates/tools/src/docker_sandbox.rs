@@ -75,17 +75,17 @@ impl DockerSandbox {
         Ok(name)
     }
 
-    pub async fn run_command(&self, command: &str) -> Result<(String, String)> {
+    pub async fn run_command(
+        &self,
+        command: &str,
+        timeout_duration: Option<std::time::Duration>,
+    ) -> Result<(String, String)> {
         let container_name = self.ensure_container().await?;
 
         let exec_config = CreateExecOptions {
             attach_stdout: Some(true),
             attach_stderr: Some(true),
-            cmd: Some(vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                command.to_string(),
-            ]),
+            cmd: Some(vec!["sh".to_string(), "-c".to_string(), command.to_string()]),
             ..Default::default()
         };
 
@@ -115,12 +115,13 @@ impl DockerSandbox {
             Ok::<(), anyhow::Error>(())
         };
 
-        let run_result = tokio::time::timeout(self.timeout, run_future).await;
+        let timeout = timeout_duration.unwrap_or(self.timeout);
+        let run_result = tokio::time::timeout(timeout, run_future).await;
 
         if let Err(_) = run_result {
             stderr.push_str(&format!(
                 "\n[Error: Command timed out after {:?}]",
-                self.timeout
+                timeout
             ));
         } else if let Ok(Err(e)) = run_result {
             return Err(e);

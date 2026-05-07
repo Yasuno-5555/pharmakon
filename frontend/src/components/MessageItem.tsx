@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Bot, Terminal } from 'lucide-react';
+import { User, Bot, Terminal, Sparkles, BookOpen } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,13 +25,13 @@ interface MessageItemProps {
 const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      initial={{ opacity: 0, y: 15, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+      transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
       className={`message ${msg.role}`}
     >
-      <div className="message-avatar">
-        {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
+      <div className={`message-avatar ${msg.role}`}>
+        {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
       </div>
 
       <div className="message-content">
@@ -41,35 +41,44 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="thought-bubble"
+              className="thought-container"
             >
-              {msg.thought.split('\n').map((line, i) => (
-                <span key={i}>{line}<br/></span>
-              ))}
+              <div className="thought-header">
+                <Sparkles size={12} />
+                <span>PHARMAKON COGNITION</span>
+              </div>
+              <div className="thought-body">
+                {msg.thought}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
 
         {msg.context_used && msg.context_used.length > 0 && (
           <div className="context-pill">
-            <span>🧠 Recalled {msg.context_used.length} memory fragment(s)</span>
+            <BookOpen size={12} />
+            <span>Retrieved {msg.context_used.length} semantic fragments</span>
           </div>
         )}
 
         {msg.toolCall && (
-          <div className="tool-call">
-            <Terminal size={14} />
-            <span className="tool-label">CALL:</span>
-            <span className="tool-name">{msg.toolCall.name}</span>
-            <span className="tool-args">{JSON.stringify(msg.toolCall.args)}</span>
+          <div className="tool-block tool-call">
+            <div className="tool-header">
+              <Terminal size={14} />
+              <span className="tool-label">EXECUTING TOOL</span>
+            </div>
+            <div className="tool-body">
+              <span className="tool-name">{msg.toolCall.name}</span>
+              <pre className="tool-args">{JSON.stringify(msg.toolCall.args, null, 2)}</pre>
+            </div>
           </div>
         )}
 
         {msg.toolResult && (
-          <div className="tool-result">
-            <div className="tool-result-header">
-              <Terminal size={12} />
-              <span>OUTPUT</span>
+          <div className="tool-block tool-result">
+            <div className="tool-header">
+              <Terminal size={14} />
+              <span className="tool-label">SYSTEM OUTPUT</span>
             </div>
             <pre className="tool-result-body">
               {msg.toolResult.result}
@@ -86,15 +95,26 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
                   code({node, inline, className, children, ...props}: any) {
                     const match = /language-(\w+)/.exec(className || '')
                     return !inline && match ? (
-                      <SyntaxHighlighter
-                        {...props}
-                        children={String(children).replace(/\n$/, '')}
-                        style={vscDarkPlus}
-                        language={match[1]}
-                        PreTag="div"
-                      />
+                      <div className="code-block-container">
+                        <div className="code-header">
+                          <span>{match[1].toUpperCase()}</span>
+                        </div>
+                        <SyntaxHighlighter
+                          {...props}
+                          children={String(children).replace(/\n$/, '')}
+                          style={vscDarkPlus}
+                          language={match[1]}
+                          PreTag="div"
+                          customStyle={{
+                            margin: 0,
+                            padding: '16px',
+                            background: 'rgba(0,0,0,0.3)',
+                            fontSize: '0.85rem'
+                          }}
+                        />
+                      </div>
                     ) : (
-                      <code {...props} className={className}>
+                      <code {...props} className="inline-code">
                         {children}
                       </code>
                     )
@@ -110,7 +130,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
                   <motion.img
                     key={i}
                     src={img}
-                    whileHover={{ scale: 1.05 }}
+                    whileHover={{ scale: 1.02 }}
                     className="chat-image"
                     alt="Multimodal content"
                   />
@@ -127,24 +147,14 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
                 return (
                   <button
                     key={i}
-                    className={`btn-${comp.payload.style}`}
+                    className={`premium-btn-${comp.payload.style || 'primary'}`}
                     onClick={() => socket?.send(JSON.stringify({ type: 'InteractiveResponse', payload: { element_id: comp.payload.id, action: 'click' } }))}
                   >
                     {comp.payload.label}
                   </button>
                 )
               }
-              if (comp.type === 'Poll') {
-                return (
-                  <div key={i} className="poll-component glass-card">
-                    <h3>{comp.payload.question}</h3>
-                    {comp.payload.options.map((opt: string, j: number) => (
-                      <button key={j} onClick={() => socket?.send(JSON.stringify({ type: 'InteractiveResponse', payload: { element_id: comp.payload.id, action: 'vote', value: opt } }))}>{opt}</button>
-                    ))}
-                  </div>
-                )
-              }
-              // ... Form implementation ...
+              // ...
               return null;
             })}
           </div>

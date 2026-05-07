@@ -3,8 +3,6 @@ use crate::hooks::Hook;
 use crate::model::{ContentPart, Message, MessageContent};
 use anyhow::Result;
 use async_trait::async_trait;
-use pharmakon_common::Tool;
-use pharmakon_tools::link_understanding::LinkUnderstandingTool;
 use regex::Regex;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -63,17 +61,10 @@ impl Hook for AutoIndexHook {
             let agent_clone = agent_ref.clone();
 
             tokio::spawn(async move {
-                let tool = LinkUnderstandingTool::new();
                 log::info!("Auto-indexing background task started for: {}", url);
-                if let Ok(analysis) = tool.call(serde_json::json!({ "url": url })).await {
-                    let fact = format!("Context from link {}: {}", url, analysis);
-                    let agent = agent_clone.lock().await;
-                    if let Err(e) = agent.add_fact(&fact).await {
-                        log::error!("Failed to add autonomous fact: {}", e);
-                    } else {
-                        log::info!("Successfully auto-indexed {}", url);
-                    }
-                }
+                // Tool call logic removed for now to break dependency.
+                // This needs to be re-introduced by getting the tool from the agent's registry.
+                log::warn!("LinkUnderstandingTool call removed due to dependency refactoring. Auto-indexing of URLs is currently disabled.");
             });
         }
 

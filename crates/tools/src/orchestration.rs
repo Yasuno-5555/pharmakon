@@ -1,6 +1,9 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
+use pharmakon_common::{AgentResult, Tool, ToolCategory};
 use serde_json::{Value, json};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use std::collections::HashSet;
 
 pub struct ToolRouterTool;
 
@@ -68,5 +71,51 @@ impl Tool for ToolRouterTool {
         };
 
         Ok(recommendations.to_string())
+    }
+}
+
+pub struct LoadToolsTool {
+    pub active_categories: Arc<Mutex<HashSet<ToolCategory>>>,
+}
+
+#[async_trait]
+impl Tool for LoadToolsTool {
+    fn name(&self) -> &str {
+        "load_tools"
+    }
+
+    fn description(&self) -> &str {
+        "Load a specific category of tools into your active context. Use this when you need specialized capabilities (e.g., 'coding', 'network', 'media') that are not currently available."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ToolCategory::all_categories(),
+                    "description": "The tool category to activate."
+                }
+            },
+            "required": ["category"]
+        })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Core
+    }
+
+    async fn call(&self, args: Value) -> AgentResult<String> {
+        let cat_str = args["category"].as_str().ok_or_else(|| pharmakon_common::AgentError("Missing category".to_string()))?;
+        let category = ToolCategory::from_str(cat_str);
+
+        let mut active = self.active_categories.lock().await;
+        if active.contains(&category) {
+            return Ok(format!("Category '{}' is already loaded.", cat_str));
+        }
+
+        active.insert(category);
+        Ok(format!("Successfully loaded category '{}'. You now have access to its tools.", cat_str))
     }
 }

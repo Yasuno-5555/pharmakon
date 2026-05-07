@@ -11,10 +11,8 @@ path = "src/main.rs"
 pharmakon-common.workspace = true
 pharmakon-core.workspace = true
 pharmakon-gateway.workspace = true
-pharmakon-channels.workspace = true
 pharmakon-tools.workspace = true
 pharmakon-memory.workspace = true
-pharmakon-gui = { path = "../gui" }
 anyhow.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

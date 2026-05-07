@@ -8,22 +8,22 @@ const HealthMonitor: React.FC<{ stats: HealthStats | null }> = ({ stats }) => {
   if (!stats) return null;
 
   return (
-    <div className="health-monitor glass-card" style={{ margin: '0 20px 20px 20px', padding: '16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '0.9rem', fontWeight: 600 }}>
-        <Activity size={16} color={stats.is_healthy ? 'var(--success)' : 'var(--danger)'} />
-        Agent Vitality
+    <div className="health-monitor glass-panel">
+      <div className="health-monitor-header">
+        <Activity size={16} className={stats.is_healthy ? 'status-icon healthy' : 'status-icon critical'} />
+        <span>AGENT VITALITY</span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        <div className="stat-item">
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px' }}>FAILURE RATE</div>
-          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: (stats.failure_rate || 0) > 30 ? 'var(--danger)' : 'var(--text-primary)' }}>
+      <div className="health-stats-grid">
+        <div className="health-stat-item">
+          <div className="stat-label">FAILURE RATE</div>
+          <div className={`stat-value ${(stats.failure_rate || 0) > 20 ? 'danger' : ''}`}>
             {(stats.failure_rate || 0).toFixed(1)}%
           </div>
         </div>
-        <div className="stat-item">
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px' }}>LATENCY</div>
-          <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+        <div className="health-stat-item">
+          <div className="stat-label">LATENCY</div>
+          <div className="stat-value">
             {stats.last_latency || '0ms'}
           </div>
         </div>
@@ -31,12 +31,12 @@ const HealthMonitor: React.FC<{ stats: HealthStats | null }> = ({ stats }) => {
 
       {!stats.is_healthy && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          style={{ marginTop: '12px', color: 'var(--danger)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="health-alert"
         >
           <ShieldAlert size={14} />
-          High failure rate detected. Rescue protocol active.
+          <span>Anomalous failure rate detected.</span>
         </motion.div>
       )}
     </div>
