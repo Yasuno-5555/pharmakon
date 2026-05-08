@@ -8,6 +8,8 @@ pub mod parallel;
 pub mod rlfc;
 pub mod retry;
 pub mod scheduler;
+pub mod cognitive_economics;
+pub mod dsge_integration;
 pub mod skill_library;
 pub mod research;
 pub mod spawner;

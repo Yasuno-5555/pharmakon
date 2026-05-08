@@ -82,6 +82,11 @@ pub struct CompressedPattern {
     pub generalized_script: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ModelTier {
+    Cheap, Medium, Premium,
+}
+
 /// Skill Crystallization — Rhai ready for Rust native translation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrystallizationCandidate {

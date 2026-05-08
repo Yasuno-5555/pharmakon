@@ -2,7 +2,7 @@
 
 This document describes the high-level design, component boundaries, and data flow of the Pharmakon Personal AI Engineering OS.
 
-**Last updated:** 2026-05-08 (Phase 0–3 complete)
+**Last updated:** 2026-05-08 (Phase 0–4 complete)
 
 ## Core Philosophy
 
@@ -10,7 +10,7 @@ Pharmakon is designed around four pillars:
 1. **Local-First Reliability**: Sensitive data and heavy processing (AST indexing, vector search) remain on the user's machine.
 2. **Deterministic Engineering**: Event-sourced execution with snapshot-based rollback ensures agent behavior is observable, reproducible, and reversible.
 3. **Epistemic Integrity**: A structured memory system (Knowledge Nexus) with causal edge tracking (`caused_by`, `fixed_by`, `invalidated_by`).
-4. **Sandboxed Safety**: Progressive isolation from Rhai scripting (CodeAct) to ephemeral Docker containers, guarded by a Constitutional Policy Engine.
+4. **Sandboxed Safety**: Progressive isolation from CodeAct scripting (Rhai → Python fallback) to ephemeral Docker containers, guarded by a Constitutional Policy Engine.
 
 ## Component Diagram (C4-Style)
 
@@ -83,15 +83,25 @@ Pharmakon is designed around four pillars:
 
 ## Crate Responsibilities
 
+### `pharmakon-core` — Skill Library (Phase 4)
+- **Skill Genome System**: Quantitative metadata per script (capabilities, failure_modes, token_cost, success_rate, composability_score).
+- **Composite Skills**: Merge two verified primitives into higher-order functions via `compose_skills()`.
+- **Trajectory Compression**: Extract reusable patterns (e.g. `safe_refactor()`) from raw agent traces.
+- **Skill Crystallization**: Auto-suggest Rhai→Rust native compilation candidates with `suggest_crystallizations()`.
+- **AntiPattern Extraction**: Cluster script failures, generate positive guidance, inject into system prompt.
+- **Primitive Darwinism**: Lifecycle management (experimental → stable → core → deprecated → removed) driven by usage counts.
+- **Dream Mode**: Background self-play loop — generate tasks, execute scripts, verify, label, store — fully autonomous skill acquisition.
+
 ### `pharmakon-core` (The Brain)
 - **Decision Loop**: Async iteration handling LLM completions, tool calls, parallel context gathering, and entropy-based loop detection.
 - **Entropy Monitor**: Four-factor entropy scoring (stagnation 0.4, repetition 0.25, failure 0.2, token_drift 0.15) with `EntropyOverflow` hard termination.
 - **Atomic Rollback**: `rollback_to_snapshot()` / `rollback_to_event()` — file-level restore via content-addressed SnapshotStore.
 - **Cognitive Scheduler**: LLM-based task complexity classification (Simple/Standard/Deep) with heuristic fallback. `ManagedTask` with cognitive economics (`priority_score`, `expected_information_gain`, `retry_cost`).
-- **CodeAct Hybrid Mode**: Rhai scripting engine for compound tool execution — 1 LLM turn = 10+ tool calls via control flow in scripts.
+- **CodeAct Hybrid Mode** (Python + Rhai): Rhai tried first (fast, sandboxed); falls back to Python via `python3` on error for higher LLM fluency. 1 LLM turn = 10+ tool calls via control flow in scripts. Marked as Core tool, always available. System prompt explicitly instructs CodeAct as PRIMARY execution mode for multi-step tasks.
 - **Constitutional PolicyEngine**: Immutable safety rules preventing self-modification, critical file deletion, and destructive shell commands.
 - **Durable Task Runtime**: `suspend()` / `resume()` with EventLog integration and `TaskSnapshot` persistence.
 - **Soul Management**: Markdown-based "Soul" files defining personality, constraints, and instructions.
+- **Multi-Provider Fallback**: Automatic model switching on API rate limits (429). Fallback chain configurable via `~/.pharmakon/config.json`. Default: deepseek/deepseek-chat → gemini/gemini-2.5-flash → groq/llama-3.3-70b-versatile. DeepSeek registered as first-class provider (API key: `DEEPSEEK_API_KEY`).
 - **Integrated MCP**: Native Model Context Protocol support for external tool servers.
 
 ### `pharmakon-memory` (The Memory)
@@ -114,7 +124,7 @@ Pharmakon is designed around four pillars:
 
 ### `pharmakon-gateway` (The Senses & Voice)
 - **Multi-Channel Hub**: Telegram, Discord, Slack bots.
-- **Real-time Dashboard**: Web UI for monitoring agent thoughts, tool traces, health stats.
+- **Real-time Desktop Dashboard**: Xilem+Vello native GUI with 8 tabs (Chat, Dashboard, Automation, Skills, Research, Database, System, Settings). Vello-powered SwarmVisualizer with animated particle system. Feature parity with React/TypeScript Web frontend.
 - **Tool Orchestration**: Initializes tools and registers them with the Agent.
 
 ## Interaction Flow: The Decision Loop
