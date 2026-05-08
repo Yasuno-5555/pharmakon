@@ -39,7 +39,7 @@ pub fn run_wizard() -> Result<()> {
         .interact_text()?;
 
     // 4. Provider & API Key
-    let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity"];
+    let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity", "openrouter"];
     let mut selected_providers = Vec::new();
 
     println!(
@@ -141,6 +141,7 @@ pub fn run_wizard() -> Result<()> {
         "openai" => "gpt-4o".to_string(),
         "anthropic" => "claude-3-5-sonnet-latest".to_string(),
         "gemini" => "gemini-1.5-pro".to_string(),
+        "openrouter" => "openai/gpt-4o".to_string(),
         _ => "default".to_string(),
     };
 

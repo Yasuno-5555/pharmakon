@@ -31,8 +31,8 @@ pub async fn execute_tool(
     );
 
     let agent_lock = agent;
-    let tools = agent_lock.tools.lock().await;
-    if let Some(tool) = tools.iter().find(|t| t.name() == req.name) {
+    let mut reg = agent_lock.registry.lock().await;
+    if let Some(tool) = reg.hydrate(&req.name) {
         match tool.call(req.args).await {
             Ok(result) => (StatusCode::OK, Json(ExecuteToolResponse { result })).into_response(),
             Err(e) => (

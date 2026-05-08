@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod topology;
+
 /// `identity.yml`: The core persona and operational rules of the agent.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IdentityContext {

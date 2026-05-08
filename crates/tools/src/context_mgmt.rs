@@ -3,7 +3,6 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 
 // Define local structs that mirror the YAML structure to avoid depending on core
 #[derive(serde::Deserialize, serde::Serialize, Default)]
@@ -13,7 +12,6 @@ struct LocalIdentityContext {
     #[serde(default)] traits: Vec<String>,
     #[serde(default)] core_directives: Vec<String>,
 }
-
 #[derive(serde::Deserialize, serde::Serialize, Default)]
 struct LocalUserContext {
     #[serde(default)] name: Option<String>,

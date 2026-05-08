@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 pub use pharmakon_common::{
     AgentError, AgentErrorCode, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
-    ContentPart, ExecutionClass, FunctionCall, FunctionDefinition, Message, MessageContent,
+    ContentPart, ExecutionProfile, FunctionCall, FunctionDefinition, Message, MessageContent,
     ToolCall, ToolCategory, ToolDefinition, ToolMeta, Usage,
 };
 

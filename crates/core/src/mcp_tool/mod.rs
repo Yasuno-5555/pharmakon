@@ -85,7 +85,7 @@ impl Tool for McpTool {
 }
 
 pub struct ConnectMcpServerTool {
-    pub tool_registry: Arc<Mutex<Vec<Arc<dyn Tool>>>>,
+    pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
 }
 
 #[async_trait]
@@ -133,12 +133,12 @@ impl Tool for ConnectMcpServerTool {
             .map_err(|e: anyhow::Error| AgentError(e.to_string()))?;
         let mut added = Vec::new();
         if let Some(tools_array) = tools_list.get("tools").and_then(|t: &Value| t.as_array()) {
-            let mut registry = self.tool_registry.lock().await;
+            let mut reg = self.registry.lock().await;
             for tool_val in tools_array {
                 let tool_name = tool_val["name"].as_str().unwrap_or("unknown").to_string();
                 let desc = tool_val["description"].as_str().unwrap_or("").to_string();
                 let params = tool_val["inputSchema"].clone();
-                registry.push(Arc::new(McpTool::new(
+                reg.add_tool(Arc::new(McpTool::new(
                     client_arc.clone(),
                     tool_name.clone(),
                     desc,

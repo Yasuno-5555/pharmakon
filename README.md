@@ -1,50 +1,58 @@
-# 🦞 Pharmakon — Personal AI Assistant (Rust Port)
+# 🦞 Pharmakon — Personal AI Engineering OS
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Pharmakon** is a high-performance, local-first Rust port of [OpenClaw](https://github.com/openclaw/openclaw). It serves as a unified control plane for autonomous AI engineering, tool orchestration, and multi-channel communication.
+**Pharmakon** is a high-performance, local-first Rust AI engineering OS. It serves as a unified control plane for autonomous AI engineering, tool orchestration, and multi-channel communication.
 
-## 🚀 Key Features
+**Status:** Phase 0–3 complete (2026-05-08). Foundation, Control Plane, Intelligence Layer, and Advanced Features all implemented.
 
-- **Autonomous Engineering Loop**: Self-reflecting agent that learns from task trajectories, manages its own constraints, and maintains a validated knowledge base.
-- **Codex-Style Observability**: Structured execution traces, deterministic replay, and tool reliability scoring for deep transparency into agent behavior.
-- **Precision Code Manipulation**: Structured Rust function edits via `mutate_ast` and unified diffs, integrated with LSP (Language Server Protocol) for type-aware refactoring.
-- **Epistemic Memory (Knowledge Nexus)**: A sophisticated memory system using LanceDB for embeddings, SQLite for graph relations, and access-aware ranking with bounded decay.
-- **Safety First (Dry-Run & Auditing)**: Built-in dry-run simulation for shell/API calls, security auditing for diffs, and progressively sandboxed execution environments.
-- **High-Performance Gateway**: Multi-channel connectivity (Telegram, Discord, Slack) and a real-time web dashboard powered by Axum, Tokio, and Xilem.
-- **Integrated Tooling Surface**: Built-in browser, shell, git, python interpreter, and MCP (Model Context Protocol) client/server support.
-- **WASM Skill System**: Extensible tool system running sandboxed logic via `wasmtime`.
+## Key Features
 
-## 📦 Project Structure
+### Foundation (Phase 0)
+- **ToolMetaRegistry + BM25 Search**: 65+ tools indexed by lightweight metadata (~80 bytes/tool). Deferred hydration — tool implementations loaded on-demand. BM25-powered semantic tool discovery.
+- **EventLog & SnapshotStore**: Append-only JSONL event log with structured event kinds. Content-addressed file snapshots enabling atomic rollback. Separated causal history from state materialization.
+- **ExecutionProfile Classification**: Risk assessment via `SideEffectLevel` (None/Local/Irreversible), `FilesystemScope` (None/Confined/Unrestricted), and `Reversibility` (Trivial/Possible/Impractical).
 
-Pharmakon is organized as a clean, modular Cargo workspace designed for scalability and reliability:
+### Control Plane (Phase 1)
+- **Entropy Monitor**: Four-factor inline entropy scoring (stagnation 0.4, repetition 0.25, failure 0.2, token_drift 0.15). Hard-terminates pathological loops at >0.95 entropy.
+- **Atomic Rollback**: `rollback_to_snapshot()` and `rollback_to_event()` — reverse any file mutation to its pre-mutation state via SnapshotStore.
+- **Cognitive Scheduler**: LLM-based task complexity classification (Simple/Standard/Deep) with heuristic fallback. `ManagedTask` with cognitive economics (`priority_score`, `expected_information_gain`, `retry_cost`).
 
-- **`pharmakon-core`**: The agent's brain. Handles the decision loop, LLM provider abstraction, integrated MCP communication, and multi-agent orchestration.
-- **`pharmakon-memory`**: The agent's long-term memory. Implements the Knowledge Nexus (LanceDB + SQLite Graph), semantic search, and context optimization.
-- **`pharmakon-tools`**: The agent's hands. A unified library of all built-in tools (Codex OS tools, Browser, Shell, AST manipulation, RepoMap, etc.).
-- **`pharmakon-gateway`**: The agent's senses and voice. Orchestrates messaging channels (Telegram, Discord, etc.), serves the real-time Dashboard, and manages Audio I/O.
-- **`pharmakon-cli`**: The primary user interface. A unified command-line entry point for onboarding, agent interaction, and service management.
-- **`pharmakon-common`**: The shared foundation. Contains core data structures, event definitions, and traits used across all crates.
-- **`pharmakon-plugin-sdk`**: The extensibility kit. Provides the necessary types and macros for building external WASM-based tools and skills.
+### Intelligence Layer (Phase 2)
+- **Capability Abstraction**: 65 tools mapped to 10 semantic capabilities (`Search`, `Modify`, `Execute`, `Investigate`, `Orchestrate`, `Reflect`, `Validate`, `Learn`, `Coordinate`, `Simulate`). ~90% token reduction in prompt injection.
+- **Causal Memory Edges**: Knowledge Nexus tracks `caused_by`, `fixed_by`, `invalidated_by` relationships. Auto-recorded by RLFC on success/failure.
+- **Swarm Return Channel**: `SpawnHandle` with `oneshot::Receiver` — sub-agent results are verified, not hallucinated. `FractalSwarmTool` awaits all handles.
 
-## 📚 Documentation
+### Advanced Features (Phase 3)
+- **CodeAct Hybrid Mode**: Rhai scripting engine for compound tool execution. 1 LLM turn = 10+ tool calls via control flow in scripts. Sandboxed with registered functions only.
+- **Constitutional Engine**: Immutable safety rules preventing self-modification, critical file deletion, and destructive shell commands. Cannot be bypassed.
+- **Durable Task Runtime**: `suspend()` / `resume()` with `TaskSnapshot` serialization and EventLog integration.
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): Deep dive into the Pharmakon system design and data flow.
-- [User Guide](docs/user_guide.md): Installation, setup, and CLI usage.
-- [Plugin Development Guide](docs/plugin_development.md): How to create and integrate WASM plugins.
-- [Channels Setup Guide](docs/channels.md): Connecting Pharmakon to Telegram, Discord, and Slack.
+## Project Structure
 
-## 🛠️ Getting Started
+- **`pharmakon-core`**: The agent's brain — decision loop, entropy monitor, atomic rollback, cognitive scheduler, CodeAct engine, constitutional policy engine.
+- **`pharmakon-memory`**: Long-term memory — Knowledge Nexus (LanceDB + SQLite Graph), causal edges, semantic search, access-aware decay.
+- **`pharmakon-tools`**: The agent's hands — ToolMetaRegistry (BM25), capability abstraction, Codex OS tools, AST mutation, LSP bridge, browser, shell.
+- **`pharmakon-gateway`**: Senses and voice — multi-channel (Telegram, Discord, Slack), real-time dashboard, tool orchestration.
+- **`pharmakon-cli`**: Primary UI — onboarding, agent interaction, service management.
+- **`pharmakon-common`**: Shared foundation — `ToolMetaCatalog`, `EventLog`, `SpawnHandle`, `ExecutionProfile`, core traits.
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): Full system architecture, component diagram, interaction flow.
+- [PHARMAKON.md](PHARMAKON.md): Engineering mandates, safety constitution, tool discipline.
+- [実装計画書.md](実装計画書.md): Implementation plan with all Phase 0–3 tasks.
+- [docs/](docs/): User guide, plugin development, channel setup.
+
+## Getting Started
 
 ### Prerequisites
-
 - Rust 1.75+
 - Docker (for sandboxed execution)
 - SQLite
 
 ### Installation
-
 ```bash
 git clone https://github.com/Yasuno-5555/Pharmakon.git
 cd Pharmakon
@@ -52,26 +60,22 @@ cargo build --release
 ```
 
 ### Setup
-
-Run the interactive onboarding flow to configure your API keys and default soul:
-
 ```bash
 cargo run -- onboard
 ```
 
 ### Running the Gateway
-
 ```bash
 cargo run -- gateway --port 19999
 ```
 
-## 🛡️ Security
+## Security
 
-Pharmakon implements a multi-layered security model:
-- **Explicit Approval**: High-risk operations (shell, file write) require real-time user approval via the Dashboard or messaging channel.
-- **Dry-Run Simulation**: The agent can simulate destructive actions before commitment to verify intent and safety.
-- **Audited Diffs**: All code changes are scanned for security risks (API keys, patterns) before application.
+- **Constitutional PolicyEngine**: Immutable rules — no self-modification, no critical file deletion, no destructive commands.
+- **Atomic Rollback**: Any file mutation reversible via `rollback_to_event()`.
+- **Entropy Overflow Protection**: Pathological loops hard-terminated at >0.95 entropy.
+- **SpawnHandle Verification**: Sub-agent results verified via `oneshot` channels.
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License.
+MIT License.

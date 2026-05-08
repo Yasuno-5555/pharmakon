@@ -1,5 +1,7 @@
 pub mod agent;
 pub mod agent_types;
+pub mod capability;
+pub mod tool_meta_catalog;
 pub use crate::agent_types::MessageContent;
 pub use agent_types::*;
 
@@ -58,6 +60,7 @@ impl Default for DefaultAgentConfig {
 fn default_fallback_models() -> Vec<String> {
     vec![
         "gemini/gemini-2.5-flash".to_string(),
+        "deepseek/deepseek-chat".to_string(),
         "groq/llama-3.3-70b-versatile".to_string(),
     ]
 }
@@ -376,6 +379,42 @@ pub struct CronJobInfo {
 #[async_trait]
 pub trait AgentSpawner: Send + Sync {
     async fn spawn(&self, task: &str, soul: Option<String>, depth: u8) -> anyhow::Result<String>;
+
+    /// Spawn a sub-agent and return a handle to await its completion.
+    async fn spawn_with_handle(
+        &self,
+        task: &str,
+        soul: Option<String>,
+        depth: u8,
+    ) -> anyhow::Result<SpawnHandle> {
+        let result = self.spawn(task, soul, depth).await?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok(result));
+        Ok(SpawnHandle { rx })
+    }
+}
+
+/// Handle to a spawned sub-agent, allowing the parent to await its result.
+///
+/// Replaces the fire-and-forget pattern where sub-agent success was hallucinated.
+/// Parents can `await` the handle, apply timeouts, and detect failures.
+///
+/// Future: Erlang/OTP-style supervision tree (restart, timeout, cancel propagation).
+#[derive(Debug)]
+pub struct SpawnHandle {
+    rx: tokio::sync::oneshot::Receiver<anyhow::Result<String>>,
+}
+
+impl SpawnHandle {
+    /// Create a new SpawnHandle from a oneshot receiver.
+    pub fn new(rx: tokio::sync::oneshot::Receiver<anyhow::Result<String>>) -> Self {
+        Self { rx }
+    }
+
+    /// Await the sub-agent's final result.
+    pub async fn await_result(self) -> anyhow::Result<String> {
+        self.rx.await.map_err(|_| anyhow::anyhow!("Sub-agent was dropped before completion"))?
+    }
 }
 
 #[async_trait]

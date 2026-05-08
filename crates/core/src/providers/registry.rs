@@ -63,12 +63,26 @@ impl ModelRegistry {
                 }
                 Some(Arc::new(GroqModel::new(api_key, model_name)))
             }
+            "deepseek" => {
+                let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
+                if api_key.is_empty() {
+                    return None;
+                }
+                Some(Arc::new(DeepSeekModel::new(api_key, model_name)))
+            }
             "perplexity" => {
                 let api_key = std::env::var("PERPLEXITY_API_KEY").unwrap_or_default();
                 if api_key.is_empty() {
                     return None;
                 }
                 Some(Arc::new(PerplexityModel::new(api_key, model_name)))
+            }
+            "openrouter" => {
+                let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+                if api_key.is_empty() {
+                    return None;
+                }
+                Some(Arc::new(OpenRouterModel::new(api_key, model_name)))
             }
             _ => None,
         }
@@ -107,9 +121,28 @@ impl ModelRegistry {
         let perplexity_key = std::env::var("PERPLEXITY_API_KEY").unwrap_or_default();
         if !perplexity_key.is_empty() {
             models.push("perplexity/sonar-large".to_string());
+
+        let deepseek_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
+        if !deepseek_key.is_empty() {
+            models.push("deepseek/deepseek-chat".to_string());
+            models.push("deepseek/deepseek-reasoner".to_string());
+        }
         }
 
         models.push("ollama/llama3.2".to_string());
+
+        let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+        if !openrouter_key.is_empty() {
+            // Popular models available through OpenRouter
+            models.push("openrouter/openai/gpt-4o".to_string());
+            models.push("openrouter/openai/gpt-4o-mini".to_string());
+            models.push("openrouter/anthropic/claude-3.5-sonnet".to_string());
+            models.push("openrouter/anthropic/claude-3.5-haiku".to_string());
+            models.push("openrouter/google/gemini-2.5-pro-preview".to_string());
+            models.push("openrouter/meta-llama/llama-3.3-70b-instruct".to_string());
+            models.push("openrouter/deepseek/deepseek-r1".to_string());
+            models.push("openrouter/mistralai/mistral-large".to_string());
+        }
 
         models
     }

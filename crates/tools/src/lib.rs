@@ -39,6 +39,7 @@ pub mod terminal;
 pub mod token_economy_tool;
 pub mod tool_discovery;
 pub mod tool_market;
+pub mod tool_meta_catalog;
 pub mod wasm_tool;
 pub mod web_fetch;
 pub mod web_search;
@@ -54,19 +55,6 @@ pub use crate::code::{
     ApplyPatchTool, CodeEditTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
     MultiCodeEditTool, PythonInterpreterTool, ViewFileTool,
 };
-pub use crate::codex::{
-    AstLspBridgeTool, AstNativeMutationTool, AttentionRouterTool, AutonomyDialTool,
-    CodexAutomationTool, CodexCatalogTool, CognitiveMirrorTool, ContextBudgetOptimizerTool,
-    CounterfactualSimulatorTool, CurrentTimeTool, DeterministicReplayTool, DiffSecurityAuditorTool,
-    DryRunTool, EphemeralRedTeamTool, ExecutionTraceTool, FailureMemoryTool, FailurePredictionTool,
-    FinanceLookupTool, FractalSwarmTool, GraphPrefetchTool, IntentCompilerTool,
-    LocalModelRouterTool, MctsSimulatorTool, MemoryActorStatusTool, NexusVisualizerTool,
-    NodeReplTool, ProactiveInterventionTool, ProactiveSelfOptimizationTool, RegretMinimizationTool,
-    RlfcTool, SemanticConflictResolutionTool, SemanticGrepTool, SkillCompositionTool,
-    SoftDependencyGraphTool, SpecFirstTestTool, SportsLookupTool, TemporalAwarenessTool,
-    TimeTravelDebuggerTool, ToolReliabilityScoringTool, WeatherLookupTool, WebTaskTool,
-    WorkspaceSnapshotTool,
-};
 pub use crate::commitment_tool::CommitmentTool;
 pub use crate::connectors::ContextConnectorTool;
 pub use crate::diagnostic::DiagnosticTool;
@@ -74,6 +62,7 @@ pub use crate::files::{FileReadTool, FileWriteTool};
 pub use crate::git::{GitCommitTool, GitDiffTool, GitStatusTool};
 pub use crate::host_script::HostScriptTool;
 pub use crate::link_understanding::LinkUnderstandingTool;
+pub use crate::lsp::LspTool;
 pub use crate::media::capture::{CameraTool, ScreenshotTool};
 pub use crate::media_understanding::MediaUnderstandingTool;
 pub use crate::memory_hydration::HydrateContextTool;

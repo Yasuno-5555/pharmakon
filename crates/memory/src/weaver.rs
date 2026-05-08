@@ -186,6 +186,31 @@ impl KnowledgeNexus {
         Ok(())
     }
 
+    /// Record a causal edge between two knowledge nodes.
+    ///
+    /// Causal edges track why things happened:
+    /// - `CAUSED_BY`: error was caused by a code pattern (RLFC failure)
+    /// - `FIXED_BY`: error was fixed by a specific change (RLFC success)
+    /// - `INVALIDATED_BY`: knowledge was superseded by newer information
+    ///
+    /// Weight indicates confidence (0.0–1.0). Default is 1.0 for verified causal links.
+    pub async fn record_causal_edge(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        relation: &str,
+        weight: f32,
+    ) -> anyhow::Result<()> {
+        let edge = crate::graph::Edge {
+            from_id: from_id.to_string(),
+            to_id: to_id.to_string(),
+            relation: relation.to_string(),
+            weight: weight.clamp(0.0, 1.0),
+            metadata: serde_json::json!({ "timestamp": chrono::Utc::now().to_rfc3339() }),
+        };
+        self.add_edge(edge).await
+    }
+
     pub async fn sync_embeddings(&self) -> anyhow::Result<()> {
         let pending = self.graph.get_pending_embeddings().await?;
         if pending.is_empty() {

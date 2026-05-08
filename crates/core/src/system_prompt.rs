@@ -39,6 +39,7 @@ pub struct PromptLayout {
     pub knowledge_graph: Option<String>,
     pub working_memory: String,
     pub current_task: String,
+    pub capability_summary: String,
 }
 
 impl PromptLayout {
@@ -55,6 +56,9 @@ impl PromptLayout {
             self.working_memory
         ));
         p.push_str(&format!("\n\n### CURRENT TASK\n{}", self.current_task));
+        if !self.capability_summary.is_empty() {
+            p.push_str(&format!("\n\n{}", self.capability_summary));
+        }
         p
     }
 }

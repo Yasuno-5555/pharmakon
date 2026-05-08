@@ -70,175 +70,13 @@ impl Gateway {
     }
 
     pub async fn init_tools(&self) -> Result<()> {
-        use pharmakon_tools::terminal::{ShellTool, TerminalTool, BackgroundRunTool, ProcessStatusTool};
-        use pharmakon_tools::files::{FileReadTool, FileWriteTool};
-        use pharmakon_tools::code::{ViewFileTool, ListDirTool, CodeEditTool, MultiCodeEditTool, GrepSearchTool, FindDefinitionTool, PythonInterpreterTool, ApplyPatchTool};
-        use pharmakon_tools::repomap::RepoMapTool;
-        use pharmakon_tools::git::{GitStatusTool, GitDiffTool, GitCommitTool};
-        use pharmakon_tools::browser::BrowserTool;
-        use pharmakon_tools::search::BraveSearchTool;
-        use pharmakon_tools::CustomScoutTool;
-        use pharmakon_tools::web_fetch::WebFetchTool;
-        use pharmakon_tools::web_search::{GoogleSearchTool, BraveSearchTool as WebSearchBraveSearchTool};
-        use pharmakon_tools::memory_hydration::HydrateContextTool;
-        use pharmakon_tools::playbook::PlaybookTool;
-        use pharmakon_tools::project_management::TaskTrackerTool;
-        use pharmakon_tools::workspace::WorkspacePerceptionTool;
-        use pharmakon_tools::probe::EnvironmentProbeTool;
-        use pharmakon_tools::link_understanding::LinkUnderstandingTool;
-        use pharmakon_tools::quality::CargoQualityTool;
-        use pharmakon_tools::tool_market::ToolMarketTool;
-        use pharmakon_tools::codex::{
-            DeterministicReplayTool, ContextBudgetOptimizerTool, DryRunTool, WorkspaceSnapshotTool, 
-            WebTaskTool, LocalModelRouterTool, SkillCompositionTool, FailureMemoryTool, 
-            ProactiveInterventionTool, CognitiveMirrorTool, IntentCompilerTool, RegretMinimizationTool, 
-            CounterfactualSimulatorTool, AttentionRouterTool, TemporalAwarenessTool, SoftDependencyGraphTool, 
-            AutonomyDialTool, FailurePredictionTool, AstLspBridgeTool, SpecFirstTestTool, 
-            SemanticConflictResolutionTool, TimeTravelDebuggerTool, NexusVisualizerTool, 
-            ProactiveSelfOptimizationTool, DiffSecurityAuditorTool, AstNativeMutationTool, 
-            MemoryActorStatusTool, GraphPrefetchTool, 
-            EphemeralRedTeamTool, NodeReplTool, CodexAutomationTool, 
-            CurrentTimeTool, WeatherLookupTool, FinanceLookupTool, SportsLookupTool, CodexCatalogTool
-        };
-        use pharmakon_tools::checkpoint::CheckpointTool;
-        use pharmakon_tools::reflection::ReflectionTool;
-        use pharmakon_tools::orchestration::{ToolRouterTool, LoadToolsTool};
-        use pharmakon_tools::memory_mgmt::MemoryManagementTool;
-        use pharmakon_tools::context_mgmt::UpdateContextTool;
-        use tokio::sync::Mutex;
-        use std::sync::Arc;
+        pharmakon_core::tool_init::init_all_agent_tools(&self.agent).await?;
 
-        let background_processes = Arc::new(Mutex::new(std::collections::HashMap::new()));
-
-        self.agent.add_tool(Arc::new(LoadToolsTool {
-            active_categories: self.agent.active_categories.clone(),
-        })).await;
-        self.agent.add_tool(Arc::new(UpdateContextTool)).await;
-        self.agent.add_tool(Arc::new(ShellTool)).await;
-        self.agent.add_tool(Arc::new(TerminalTool::new())).await;
-        self.agent.add_tool(Arc::new(BackgroundRunTool {
-            active_processes: background_processes.clone(),
-        })).await;
-        self.agent.add_tool(Arc::new(ProcessStatusTool {
-            active_processes: background_processes,
-            retry_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        })).await;
-        self.agent.add_tool(Arc::new(FileReadTool)).await;
-        self.agent.add_tool(Arc::new(FileWriteTool)).await;
-        self.agent.add_tool(Arc::new(ViewFileTool)).await;
-        self.agent.add_tool(Arc::new(ListDirTool)).await;
-        self.agent.add_tool(Arc::new(CodeEditTool)).await;
-        self.agent.add_tool(Arc::new(MultiCodeEditTool)).await;
-        self.agent.add_tool(Arc::new(GrepSearchTool)).await;
-        self.agent.add_tool(Arc::new(FindDefinitionTool)).await;
-        self.agent.add_tool(Arc::new(PythonInterpreterTool)).await;
-        self.agent.add_tool(Arc::new(RepoMapTool::new())).await;
-        self.agent.add_tool(Arc::new(GitStatusTool)).await;
-        self.agent.add_tool(Arc::new(GitDiffTool)).await;
-        self.agent.add_tool(Arc::new(GitCommitTool)).await;
-        self.agent.add_tool(Arc::new(BrowserTool::new(None))).await;
-
+        // Gateway-specific: Brave search with API key, if available
         if let Ok(key) = std::env::var("BRAVE_SEARCH_API_KEY") {
+            use pharmakon_tools::search::BraveSearchTool;
             self.agent.add_tool(Arc::new(BraveSearchTool::new(key))).await;
         }
-
-        self.agent.add_tool(Arc::new(WebFetchTool::new())).await;
-        self.agent.add_tool(Arc::new(WebSearchBraveSearchTool::new(
-            "".to_string(),
-        ))).await;
-        self.agent.add_tool(Arc::new(GoogleSearchTool)).await;
-        self.agent.add_tool(Arc::new(
-            CustomScoutTool,
-        )).await;
-        self.agent.add_tool(Arc::new(
-            HydrateContextTool::new(),
-        )).await;
-        self.agent.add_tool(Arc::new(PlaybookTool::new())).await;
-        self.agent.add_tool(Arc::new(
-            TaskTrackerTool::new(),
-        )).await;
-        self.agent.add_tool(Arc::new(
-            WorkspacePerceptionTool::new(),
-        )).await;
-        self.agent.add_tool(Arc::new(EnvironmentProbeTool::new())).await;
-        self.agent.add_tool(Arc::new(
-            LinkUnderstandingTool::new(),
-        )).await;
-        self.agent.add_tool(Arc::new(CargoQualityTool)).await;
-        self.agent.add_tool(Arc::new(ToolMarketTool)).await;
-        
-        // --- High-Performance Core Tools ---
-        let agent_weak = Arc::downgrade(&self.agent);
-        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::ExecutionTraceTool::new(agent_weak.clone()))).await;
-        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::ToolReliabilityTool::new(agent_weak.clone()))).await;
-        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::InsightTool::new(agent_weak.clone()))).await;
-        self.agent.add_tool(Arc::new(pharmakon_core::trajectory::tool::SemanticGrepTool::new(agent_weak.clone()))).await;
-        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::mcts::MctsSimulatorTool::new(agent_weak.clone()))).await;
-        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::rlfc::RlfcTool::new(agent_weak.clone()))).await;
-        
-        let swarm_manager = Arc::new(pharmakon_core::orchestration::swarm::SwarmManager::new(
-            Arc::new(Mutex::new((*self.agent).clone()))
-        ));
-        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::swarm::SwarmTool::new(swarm_manager.clone(), 0))).await;
-        self.agent.add_tool(Arc::new(pharmakon_core::orchestration::swarm::FractalSwarmTool::new(swarm_manager, 0))).await;
-
-        self.agent.add_tool(Arc::new(DeterministicReplayTool)).await;
-        self.agent.add_tool(Arc::new(ContextBudgetOptimizerTool)).await;
-        self.agent.add_tool(Arc::new(DryRunTool)).await;
-        self.agent.add_tool(Arc::new(WorkspaceSnapshotTool)).await;
-        self.agent.add_tool(Arc::new(WebTaskTool)).await;
-        self.agent.add_tool(Arc::new(LocalModelRouterTool)).await;
-        self.agent.add_tool(Arc::new(SkillCompositionTool)).await;
-        self.agent.add_tool(Arc::new(FailureMemoryTool)).await;
-        self.agent.add_tool(Arc::new(ProactiveInterventionTool)).await;
-        self.agent.add_tool(Arc::new(CognitiveMirrorTool)).await;
-        self.agent.add_tool(Arc::new(IntentCompilerTool)).await;
-        self.agent.add_tool(Arc::new(RegretMinimizationTool)).await;
-        self.agent.add_tool(Arc::new(
-            CounterfactualSimulatorTool,
-        )).await;
-        self.agent.add_tool(Arc::new(AttentionRouterTool)).await;
-        self.agent.add_tool(Arc::new(TemporalAwarenessTool)).await;
-        self.agent.add_tool(Arc::new(SoftDependencyGraphTool)).await;
-        self.agent.add_tool(Arc::new(AutonomyDialTool)).await;
-        self.agent.add_tool(Arc::new(FailurePredictionTool)).await;
-        self.agent.add_tool(Arc::new(AstLspBridgeTool)).await;
-        self.agent.add_tool(Arc::new(SpecFirstTestTool)).await;
-        self.agent.add_tool(Arc::new(
-            SemanticConflictResolutionTool,
-        )).await;
-        self.agent.add_tool(Arc::new(TimeTravelDebuggerTool)).await;
-        self.agent.add_tool(Arc::new(NexusVisualizerTool)).await;
-        self.agent.add_tool(Arc::new(
-            ProactiveSelfOptimizationTool,
-        )).await;
-        self.agent.add_tool(Arc::new(DiffSecurityAuditorTool)).await;
-        self.agent.add_tool(Arc::new(AstNativeMutationTool)).await;
-        self.agent.add_tool(Arc::new(MemoryActorStatusTool)).await;
-        self.agent.add_tool(Arc::new(GraphPrefetchTool)).await;
-        self.agent.add_tool(Arc::new(EphemeralRedTeamTool)).await;
-        self.agent.add_tool(Arc::new(NodeReplTool)).await;
-        self.agent.add_tool(Arc::new(CodexAutomationTool)).await;
-        self.agent.add_tool(Arc::new(CurrentTimeTool)).await;
-        self.agent.add_tool(Arc::new(WeatherLookupTool)).await;
-        self.agent.add_tool(Arc::new(FinanceLookupTool)).await;
-        self.agent.add_tool(Arc::new(SportsLookupTool)).await;
-        self.agent.add_tool(Arc::new(CodexCatalogTool)).await;
-        // MCP Tools
-        self.agent.add_tool(Arc::new(pharmakon_core::mcp_tool::ConnectMcpServerTool { 
-            tool_registry: self.agent.tools.clone()
-        })).await;
-        // Phase 3 Tools
-        self.agent.add_tool(Arc::new(CheckpointTool)).await;
-        self.agent.add_tool(Arc::new(ReflectionTool)).await;
-        self.agent.add_tool(Arc::new(ToolRouterTool)).await;
-        if let Some(nexus) = &self.agent.knowledge_nexus {
-            self.agent.add_tool(Arc::new(
-                MemoryManagementTool,
-            )).await;
-        }
-        // Add apply_patch (SAFER replacement for write_file)
-        self.agent.add_tool(Arc::new(ApplyPatchTool)).await;
 
         Ok(())
     }
@@ -558,13 +396,13 @@ async fn handle_socket(
                     }
                     Request::GetTools => {
                         let agent_lock = agent_clone_inner;
-                        let tools_lock = agent_lock.tools.lock().await;
-                        let tools = tools_lock
+                        let reg = agent_lock.registry.lock().await;
+                        let tools = reg.all_metadata()
                             .iter()
                             .map(|t| pharmakon_common::ToolInfo {
-                                name: t.name().to_string(),
-                                description: t.description().to_string(),
-                                parameters: t.parameters(),
+                                name: t.name.clone(),
+                                description: t.description.clone(),
+                                parameters: serde_json::Value::Null, 
                             })
                             .collect();
                         let event = Event::ToolList { tools };

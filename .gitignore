@@ -1,3 +1,4 @@
 /target
 .fastembed_cache/
-\nreference/
+reference/deepseektui/
+crates_backup/

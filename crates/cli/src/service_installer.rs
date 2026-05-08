@@ -20,8 +20,8 @@ fn install_macos_launchd(exe_path: PathBuf, home: PathBuf, port: u16) -> Result<
     let plist_dir = home.join("Library").join("LaunchAgents");
     fs::create_dir_all(&plist_dir)?;
 
-    let plist_path = plist_dir.join("ai.openclaw.pharmakon.plist");
-    let label = "ai.openclaw.pharmakon";
+    let plist_path = plist_dir.join("ai.pharmakon.gateway.plist");
+    let label = "ai.pharmakon.gateway";
 
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -107,7 +107,7 @@ pub fn stop_service() -> Result<()> {
             let plist_path = home
                 .join("Library")
                 .join("LaunchAgents")
-                .join("ai.openclaw.pharmakon.plist");
+                .join("ai.pharmakon.gateway.plist");
 
             if plist_path.exists() {
                 let _ = Command::new("launchctl")
@@ -116,7 +116,7 @@ pub fn stop_service() -> Result<()> {
             }
 
             // Force cleanup: kill any process listening on standard pharmakon ports
-            let ports = vec!["18789", "19999"];
+            let ports = vec!["19999"];
             for port in ports {
                 if let Ok(output) = Command::new("lsof")
                     .args(["-ti", &format!(":{}", port)])
@@ -139,7 +139,7 @@ pub fn stop_service() -> Result<()> {
                 .status();
 
             // Force cleanup: kill any process listening on standard pharmakon ports
-            let ports = vec!["18789", "19999"];
+            let ports = vec!["19999"];
             for port in ports {
                 if let Ok(output) = Command::new("fuser")
                     .args(["-k", &format!("{}/tcp", port)])
@@ -159,7 +159,7 @@ pub fn get_service_status() -> Result<()> {
     let os = env::consts::OS;
     match os {
         "macos" => {
-            let label = "ai.openclaw.pharmakon";
+            let label = "ai.pharmakon.gateway";
             let output = std::process::Command::new("launchctl")
                 .args(["list", label])
                 .output()?;

@@ -48,6 +48,50 @@ impl Policy for DefaultSecurityPolicy {
     }
 }
 
+/// Constitutional policy: immutable safety rules that cannot be bypassed.
+/// These form the agent's "constitution" — rules that protect the system
+/// from self-modification, destruction of critical files, and policy bypass.
+pub struct ConstitutionalPolicy;
+
+impl Policy for ConstitutionalPolicy {
+    fn name(&self) -> &str {
+        "constitutional"
+    }
+
+    fn evaluate_tool_call(&self, tool_name: &str, args: &Value) -> PolicyAction {
+        // Rule 1: No self-modification of the agent's own source
+        if tool_name == "write_file" || tool_name == "apply_patch" || tool_name == "mutate_ast" {
+            if let Some(path) = args["path"].as_str() {
+                let path_lower = path.to_lowercase();
+                if path_lower.contains("crates/core/src/") || path_lower.contains("crates/common/src/")
+                    || path_lower.contains("crates/memory/src/") || path_lower.contains("crates/tools/src/")
+                {
+                    return PolicyAction::Deny(
+                        "Constitutional violation: Agent cannot modify its own source code.".to_string(),
+                    );
+                }
+                // Rule 2: Protect the policy engine itself
+                if path_lower.contains("security/policy") || path_lower.contains("constitutional") {
+                    return PolicyAction::Deny(
+                        "Constitutional violation: Cannot modify the policy enforcement system.".to_string(),
+                    );
+                }
+            }
+        }
+
+        // Rule 3: Shell commands must pass constitutional review
+        if tool_name == "shell" && args["command"].as_str().map_or(false, |c| {
+            c.contains("rm -rf /") || c.contains("sudo ") || c.contains("chmod 777")
+        }) {
+            return PolicyAction::Deny(
+                "Constitutional violation: Destructive system commands are prohibited.".to_string(),
+            );
+        }
+
+        PolicyAction::Allow
+    }
+}
+
 pub struct PolicyEngine {
     policies: Vec<Box<dyn Policy>>,
 }
@@ -60,8 +104,11 @@ impl Default for PolicyEngine {
 
 impl PolicyEngine {
     pub fn new() -> Self {
+        let mut policies: Vec<Box<dyn Policy>> = Vec::new();
+        policies.push(Box::new(ConstitutionalPolicy));
+        policies.push(Box::new(DefaultSecurityPolicy));
         Self {
-            policies: vec![Box::new(DefaultSecurityPolicy)],
+            policies,
         }
     }
 

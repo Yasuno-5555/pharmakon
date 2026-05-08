@@ -61,8 +61,9 @@ async fn test_router_tool_instantiation_failure() {
     let agent = agent_handle.lock().await;
 
     // No tools should have been added because they all failed to instantiate.
+    let reg = agent.registry.lock().await;
     assert!(
-        agent.tools.lock().await.is_empty(),
+        reg.get_loaded().is_empty(),
         "No tools should be added if instantiation fails"
     );
 }

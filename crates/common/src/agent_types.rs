@@ -271,32 +271,45 @@ impl ToolCategory {
     }
 }
 
-/// Classification of tool execution risk level.
-/// Used by PolicyEngine and CognitiveScheduler for resource governance.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ExecutionClass {
-    /// No side effects: search, read, compute
-    Pure,
-    /// Local mutations: file write, AST edit
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum SideEffectLevel {
+    None,
     Local,
-    /// Shell execution, git push, network calls
-    Dangerous,
-    /// Swarm spawn, self-modification, autonomous loops
-    Autonomous,
+    Irreversible,
 }
 
-impl ExecutionClass {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pure => "pure",
-            Self::Local => "local",
-            Self::Dangerous => "dangerous",
-            Self::Autonomous => "autonomous",
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum FilesystemScope {
+    None,
+    Confined,
+    Unrestricted,
+}
 
-    pub fn requires_default_approval(&self) -> bool {
-        matches!(self, Self::Dangerous | Self::Autonomous)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Reversibility {
+    Trivial,
+    Possible,
+    Impractical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ExecutionProfile {
+    pub side_effect_level: SideEffectLevel,
+    pub network_access: bool,
+    pub filesystem_scope: FilesystemScope,
+    pub reversibility: Reversibility,
+    pub requires_human_approval: bool,
+}
+
+impl Default for ExecutionProfile {
+    fn default() -> Self {
+        Self {
+            side_effect_level: SideEffectLevel::None,
+            network_access: false,
+            filesystem_scope: FilesystemScope::None,
+            reversibility: Reversibility::Trivial,
+            requires_human_approval: false,
+        }
     }
 }
 
@@ -308,7 +321,7 @@ pub struct ToolMeta {
     pub name: String,
     pub description: String,
     pub category: ToolCategory,
-    pub execution_class: ExecutionClass,
+    pub profile: ExecutionProfile,
 }
 
 #[async_trait]
@@ -321,8 +334,8 @@ pub trait Tool: Send + Sync {
         ToolCategory::Custom("generic".to_string())
     }
     /// Classification for safety and resource governance.
-    fn execution_class(&self) -> ExecutionClass {
-        ExecutionClass::Pure
+    fn execution_profile(&self) -> ExecutionProfile {
+        ExecutionProfile::default()
     }
     fn metadata(&self) -> std::collections::HashMap<String, String> {
         std::collections::HashMap::new()
@@ -339,7 +352,7 @@ pub trait Tool: Send + Sync {
             name: self.name().to_string(),
             description: self.description().to_string(),
             category: self.category(),
-            execution_class: self.execution_class(),
+            profile: self.execution_profile(),
         }
     }
 }

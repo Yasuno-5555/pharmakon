@@ -5,6 +5,7 @@ use std::time::Duration;
 // --- 1. Core Budget and Policy Definitions ---
 
 /// Defines the execution resources allocated to a task.
+#[derive(Debug, Clone)]
 pub struct ExecutionBudget {
     /// A hard safety net to prevent absolute runaways.
     pub hard_max_wall_time: Duration,
@@ -13,6 +14,7 @@ pub struct ExecutionBudget {
 }
 
 /// Defines the rules for when an agent's execution loop should stop.
+#[derive(Debug, Clone)]
 pub enum TerminationPolicy {
     /// For simple, predictable tasks.
     FixedIterations(usize),
@@ -54,9 +56,10 @@ pub struct ProgressTracker {
     max_history: usize,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum TerminationSignal {
     Continue,
+    EntropyOverflow { score: f32 },
     Stalled,
     LoopDetected,
     PolicyFinished,
@@ -73,6 +76,16 @@ impl ProgressTracker {
             stall_count: 0,
             stall_threshold,
             max_history: 10,
+        }
+    }
+
+    /// Check entropy and return a termination signal if the score exceeds the threshold.
+    /// This integrates the rich entropy from EventLog into the progress tracking pipeline.
+    pub fn check_entropy(&self, entropy: f32, threshold: f32) -> TerminationSignal {
+        if entropy > threshold {
+            TerminationSignal::EntropyOverflow { score: entropy }
+        } else {
+            TerminationSignal::Continue
         }
     }
 
@@ -128,6 +141,7 @@ impl ProgressTracker {
 
 // --- 3. Task Classification (Placeholder) ---
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskComplexity {
     Simple,   // e.g., one-shot command
     Standard, // e.g., file modification and check

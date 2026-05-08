@@ -59,8 +59,10 @@ impl Tool for RlfcTool {
         let max_iters = args["max_iterations"].as_u64().unwrap_or(3);
 
         if let Some(agent) = self.agent_ref.upgrade() {
+            // Index initial code state before the fix loop
+            let initial_code = std::fs::read_to_string(path).unwrap_or_default();
             let mut current_iteration = 0;
-            let mut last_error = String::new();
+            let mut last_error = String::from("No errors detected yet");
 
             while current_iteration < max_iters {
                 current_iteration += 1;
@@ -71,6 +73,24 @@ impl Tool for RlfcTool {
                 if success {
                     let success_msg = format!("RLFC: Successfully optimized {} after {} iterations.", path, current_iteration);
                     
+                    // Record causal edge: error_code → fixed_code (fixed_by)
+                    if let Some(nexus) = &agent.knowledge_nexus {
+                        // Index the code that was fixed
+                        let code_id = format!("rlfc:code:{}", path);
+                        let _ = nexus.remember_batch(vec![(
+                            code_id.clone(),
+                            format!("RLFC-optimized code for {}:\n\n{}", path, initial_code)
+                        )]).await;
+                        let error_id = format!("rlfc:error:{}-iter{}", path, current_iteration);
+                        let success_id = format!("rlfc:success:{}", path);
+                        let _ = nexus.record_causal_edge(
+                            &error_id,
+                            &success_id,
+                            pharmakon_memory::graph::Edge::FIXED_BY,
+                            1.0,
+                        ).await;
+                    }
+
                     // Index success pattern into Nexus
                     if let Some(nexus) = &agent.knowledge_nexus {
                         let content = std::fs::read_to_string(path).unwrap_or_default();
@@ -130,6 +150,20 @@ impl Tool for RlfcTool {
                     }
                     std::fs::write(path, clean_code).map_err(|e| AgentError(e.to_string()))?;
                 }
+            }
+
+            // Record causal edge on failure: code → error (caused_by)
+            if let Some(nexus) = &agent.knowledge_nexus {
+                let code_id = format!("rlfc:code:{}", path);
+                let error_id = format!("rlfc:error:{}", path);
+                // Index the error for future reference
+                let _ = nexus.remember_batch(vec![(
+                    error_id.clone(),
+                    format!("RLFC error for {}:\n\n{}", path, last_error)
+                )]).await;
+                let _ = nexus.record_causal_edge(
+                    &error_id, &code_id, pharmakon_memory::graph::Edge::CAUSED_BY, 0.8,
+                ).await;
             }
 
             Err(AgentError(format!("RLFC: Failed to optimize {} after {} iterations. Last error: {}", path, max_iters, last_error)))

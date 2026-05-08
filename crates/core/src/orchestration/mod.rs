@@ -1,8 +1,14 @@
 pub mod budget;
+pub mod codeact;
 pub mod crestodian;
+pub mod governor;
 pub mod health_monitor;
 pub mod mcts;
+pub mod parallel;
 pub mod rlfc;
+pub mod retry;
+pub mod scheduler;
+pub mod skill_library;
 pub mod research;
 pub mod spawner;
 pub mod supervisor;

@@ -1,8 +1,90 @@
 use crate::agent::Agent;
+use crate::orchestration::scheduler::{ManagedTask, classify_task_complexity};
 use async_trait::async_trait;
 use pharmakon_common::AgentSpawner;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+// --- Spawn Decision (Cost-Benefit Analysis) ---
+
+/// Decision about whether and how to spawn sub-agents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpawnDecision {
+    /// Tasks are independent and parallelizable — spawn sub-agents.
+    Parallel {
+        /// Number of sub-agents to spawn.
+        count: usize,
+        /// Estimated token savings from parallel execution.
+        estimated_savings_tokens: usize,
+    },
+    /// Tasks have dependencies — execute sequentially.
+    Sequential,
+    /// Overhead exceeds benefit — execute inline (no spawn).
+    Inline {
+        /// Why spawning would be wasteful.
+        reason: String,
+    },
+}
+
+/// Analyze whether spawning sub-agents is worth the overhead.
+///
+/// The break-even formula:
+///   benefit = parallelism_gain - spawn_overhead - context_dependency_cost
+///
+/// Where:
+///   - parallelism_gain: tokens saved by running tasks in parallel (vs sequential)
+///   - spawn_overhead: tokens burned to set up each sub-agent (~500 tokens)
+///   - context_dependency_cost: tokens needed to share state between agents
+pub fn analyze_spawn_decision(
+    sub_tasks: &[String],
+    shared_context_size: usize,
+) -> SpawnDecision {
+    const SPAWN_OVERHEAD_PER_AGENT: usize = 500; // ~500 tokens to set up a sub-agent
+    const MIN_TASK_SIZE_FOR_SPAWN: usize = 200; // Don't spawn for trivial tasks
+
+    let task_count = sub_tasks.len();
+
+    // Rule 1: Single task → never spawn
+    if task_count <= 1 {
+        return SpawnDecision::Inline {
+            reason: "Single task — no parallelism benefit".to_string(),
+        };
+    }
+
+    // Rule 2: Any task too small → inline
+    if sub_tasks.iter().any(|t| t.len() < MIN_TASK_SIZE_FOR_SPAWN) {
+        return SpawnDecision::Inline {
+            reason: "Sub-tasks too small — spawn overhead exceeds benefit".to_string(),
+        };
+    }
+
+    // Rule 3: Calculate break-even
+    let spawn_overhead = task_count * SPAWN_OVERHEAD_PER_AGENT;
+
+    // Parallelism gain: rough estimate — if executed sequentially,
+    // each sub-task burns its own context. In parallel, they share none.
+    let avg_task_tokens = sub_tasks.iter().map(|t| t.len() / 4).sum::<usize>() / task_count;
+    let sequential_cost = task_count * avg_task_tokens;
+    let parallel_cost = avg_task_tokens + spawn_overhead;
+    let net_savings = sequential_cost.saturating_sub(parallel_cost + shared_context_size);
+
+    if net_savings > 0 {
+        SpawnDecision::Parallel {
+            count: task_count,
+            estimated_savings_tokens: net_savings,
+        }
+    } else if shared_context_size < avg_task_tokens * 2 {
+        // Context dependency is manageable → run sequentially (no spawn, but not wasted)
+        SpawnDecision::Sequential
+    } else {
+        SpawnDecision::Inline {
+            reason: format!(
+                "Context dependency ({}) exceeds benefit — inline execution preferred",
+                shared_context_size
+            ),
+        }
+    }
+}
 
 pub struct SwarmManager {
     parent: Arc<Mutex<Agent>>,
@@ -34,7 +116,7 @@ impl AgentSpawner for SwarmManager {
         let (
             model,
             session_store,
-            tools,
+            registry,
             knowledge_nexus,
             semantic_search,
             fact_memory,
@@ -44,22 +126,13 @@ impl AgentSpawner for SwarmManager {
             (
                 parent_lock.model.clone(),
                 parent_lock.session_store.clone(),
-                parent_lock.tools.clone(),
+                parent_lock.registry.clone(),
                 parent_lock.knowledge_nexus.clone(),
                 parent_lock.semantic_search.clone(),
                 parent_lock.fact_memory.clone(),
                 parent_lock.territory_manager.clone(),
             )
         };
-
-        let mut sub_agent_tools: Vec<Arc<dyn pharmakon_common::Tool>> = {
-            let t = tools.lock().await;
-            t.iter().cloned().collect()
-        };
-
-        // Remove tools that might be dangerous for sub-agents or cause infinite recursion
-        sub_agent_tools
-            .retain(|t| t.name() != "spawn_sub_agent" && t.name() != "run_shell_command");
 
         let session_id = format!("swarm-depth{}-{}", depth, rand::random::<u32>());
 
@@ -82,14 +155,13 @@ impl AgentSpawner for SwarmManager {
 
         sub_agent.fact_memory = fact_memory;
         sub_agent.territory_manager = territory_manager;
-        sub_agent.tools = Arc::new(Mutex::new(sub_agent_tools));
 
-        // Apply specialized Soul based on role
         let soul = crate::soul::Soul::expert(&role_str);
         sub_agent.set_soul(soul).await;
 
         let sub_agent_arc = Arc::new(Mutex::new(sub_agent));
         let task_clone = task.to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let session_id_clone = session_id.clone();
 
         tokio::spawn(async move {
@@ -102,11 +174,10 @@ impl AgentSpawner for SwarmManager {
             match response {
                 Ok(res) => {
                     log::info!(
-                        "Sub-agent {} completed task. Response snippet: {:.100}",
+                        "Sub-agent {} completed task. Response length: {} chars",
                         session_id_clone,
-                        res
+                        res.len()
                     );
-                    // Commit isolated knowledge back to global store upon success
                     let agent_lock = sub_agent_arc.lock().await;
                     if let Err(e) = agent_lock.commit_knowledge().await {
                         log::error!(
@@ -115,18 +186,76 @@ impl AgentSpawner for SwarmManager {
                             e
                         );
                     }
+                    let _ = tx.send(Ok(res));
                 }
                 Err(e) => {
                     log::error!("Sub-agent {} failed: {}", session_id_clone, e);
+                    let _ = tx.send(Err(e));
                 }
             }
         });
 
+        // Return deployment confirmation immediately (sub-agent runs in background).
+        // Use spawn_with_handle() if you need the actual result.
         Ok(format!(
             "Sub-agent [{}] deployed successfully as a {}.",
             session_id, role_str
         ))
     }
+
+    /// Return a SpawnHandle that resolves when the sub-agent completes.
+    async fn spawn_with_handle(
+        &self,
+        task: &str, soul: Option<String>, depth: u8,
+    ) -> anyhow::Result<pharmakon_common::SpawnHandle> {
+        if depth > 2 {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = tx.send(Ok(
+                "Swarm depth limit reached. Task aborted to prevent recursion loop.".to_string(),
+            ));
+            return Ok(pharmakon_common::SpawnHandle::new(rx));
+        }
+
+        // Clone parent resources for the background spawn
+        let task_owned = task.to_string();
+        let soul_owned = soul;
+        let parent = self.parent.clone();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            // Build and run sub-agent directly (avoids recursive Arc<dyn AgentSpawner>)
+            let result = run_swarm_sub_agent(&parent, &task_owned, soul_owned, depth).await;
+            let _ = tx.send(result.map_err(|e| anyhow::anyhow!(e)));
+        });
+
+        Ok(pharmakon_common::SpawnHandle::new(rx))
+    }
+}
+
+/// Run a swarm sub-agent with all parent resources cloned.
+async fn run_swarm_sub_agent(
+    parent: &Arc<Mutex<Agent>>,
+    task: &str,
+    role: Option<String>,
+    depth: u8,
+) -> anyhow::Result<String> {
+    let role_str = role.unwrap_or_else(|| "researcher".to_string());
+    let (model, session_store, registry, knowledge_nexus, semantic_search, fact_memory, territory_manager) = {
+        let parent_lock = parent.lock().await;
+        (parent_lock.model.clone(), parent_lock.session_store.clone(), parent_lock.registry.clone(),
+         parent_lock.knowledge_nexus.clone(), parent_lock.semantic_search.clone(),
+         parent_lock.fact_memory.clone(), parent_lock.territory_manager.clone())
+    };
+    let session_id = format!("swarm-depth{}-{}", depth, rand::random::<u32>());
+    let inner = { let m = model.lock().await; m.clone() };
+    let mut sub = Agent::new(inner, session_id.clone());
+    if let Some(s) = session_store { sub = sub.with_store(s); }
+    if let Some(n) = knowledge_nexus { sub = sub.with_knowledge_nexus(n).with_isolated_knowledge(); }
+    if let Some(s) = semantic_search { sub = sub.with_semantic_search(s); }
+    sub.fact_memory = fact_memory;
+    sub.territory_manager = territory_manager;
+    sub.set_soul(crate::soul::Soul::expert(&role_str)).await;
+    sub.chat(task).await
 }
 
 pub struct SwarmTool {
@@ -222,28 +351,31 @@ impl pharmakon_common::Tool for FractalSwarmTool {
 
         log::info!("FractalSwarm: Processing goal '{}' with {} sub-tasks", goal, sub_tasks.len());
 
-        let mut futures = Vec::new();
+        let mut handles = Vec::new();
         for task_val in sub_tasks {
             let task = task_val["task"].as_str().unwrap_or_default().to_string();
             let role = task_val["role"].as_str().map(|s| s.to_string());
             let spawner = self.spawner.clone();
             let depth = self.depth;
 
-            futures.push(async move {
-                // In a real fractal swarm, we'd want to WAIT for the spawn result if it's sync,
-                // but here 'spawn' is async and backgrounded. 
-                // To implement 'wait', we need a more advanced spawner that returns a handle.
-                // For now, we simulate by saying the deployment was successful.
-                spawner.spawn(&task, role, depth + 1).await
+            // Use spawn_with_handle to get actual results from sub-agents
+            handles.push(async move {
+                match spawner.spawn_with_handle(&task, role, depth + 1).await {
+                    Ok(handle) => match handle.await_result().await {
+                        Ok(result) => Ok(result),
+                        Err(e) => Err(e),
+                    },
+                    Err(e) => Err(e),
+                }
             });
         }
 
-        let results = futures::future::join_all(futures).await;
+        let results = futures::future::join_all(handles).await;
         let mut summary = format!("Fractal Swarm execution for: {}\n\n", goal);
         for (i, res) in results.into_iter().enumerate() {
             match res {
-                Ok(msg) => summary.push_str(&format!("Task {}: OK - {}\n", i + 1, msg)),
-                Err(e) => summary.push_str(&format!("Task {}: FAILED - {}\n", i + 1, e)),
+                Ok(msg) => summary.push_str(&format!("Task {}: OK — {}\n", i + 1, msg)),
+                Err(e) => summary.push_str(&format!("Task {}: FAILED — {}\n", i + 1, e)),
             }
         }
 

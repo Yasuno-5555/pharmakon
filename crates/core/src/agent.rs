@@ -43,7 +43,6 @@ pub struct Agent {
     pub approval_tx: broadcast::Sender<(String, bool)>,
     pub trajectory: Arc<Mutex<crate::trajectory::Trajectory>>,
     pub compactor: Arc<Mutex<crate::memory::compactor::ContextCompactor>>,
-    pub tools: Arc<Mutex<Vec<Arc<dyn pharmakon_common::Tool>>>>,
     pub hooks: Arc<crate::hooks::HookRegistry>,
     pub fact_memory: Option<Arc<Mutex<crate::memory::BeliefSystem>>>,
     pub semantic_search: Option<Arc<pharmakon_memory::semantic_search::SemanticSearch>>,
@@ -65,6 +64,9 @@ pub struct Agent {
     pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
     pub event_log: Arc<crate::event_log::EventLog>,
     pub snapshot_store: Arc<crate::snapshot_store::SnapshotStore>,
+    pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
+    pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
+    pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
 }
 
 impl Clone for Agent {
@@ -80,7 +82,6 @@ impl Clone for Agent {
             approval_tx: self.approval_tx.clone(),
             trajectory: self.trajectory.clone(),
             compactor: self.compactor.clone(),
-            tools: self.tools.clone(),
             hooks: self.hooks.clone(),
             fact_memory: self.fact_memory.clone(),
             semantic_search: self.semantic_search.clone(),
@@ -102,6 +103,9 @@ impl Clone for Agent {
             usage_history: self.usage_history.clone(),
             event_log: self.event_log.clone(),
             snapshot_store: self.snapshot_store.clone(),
+            registry: self.registry.clone(),
+            governor: self.governor.clone(),
+            vision_stream: self.vision_stream.clone(),
         }
     }
 }
@@ -135,6 +139,22 @@ impl Agent {
             crate::hooks::token_economy::TokenEconomyHook::new(0.8, 100_000),
         )); // 100k token default budget
 
+        let total_tokens = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let total_cost = Arc::new(Mutex::new(0.0));
+
+        let registry = Arc::new(Mutex::new(pharmakon_tools::registry::ToolMetaRegistry::new(
+            pharmakon_tools::registry::ToolDependencies {
+                model: Some(model.clone()),
+                store: None,
+                soul_manager: None,
+                event_tx: Some(event_tx.clone()),
+                nexus: None,
+                vision_stream: None,
+                total_tokens: Some(total_tokens.clone()),
+                total_cost: Some(total_cost.clone()),
+            }
+        )));
+
         Self {
             model: Arc::new(Mutex::new(model.clone())),
             session_id: Arc::new(Mutex::new(session_id)),
@@ -147,7 +167,6 @@ impl Agent {
 
             trajectory,
             compactor,
-            tools: Arc::new(Mutex::new(Vec::new())),
             hooks: Arc::new(hooks),
             fact_memory: None,
             semantic_search: None,
@@ -159,8 +178,8 @@ impl Agent {
             graph_store: None,
             interaction_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             fallback_models: Arc::new(StdMutex::new(Vec::new())),
-            total_tokens: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            total_cost: Arc::new(Mutex::new(0.0)),
+            total_tokens,
+            total_cost,
             start_time: std::time::Instant::now(),
             dry_run: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tool_call_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -175,6 +194,9 @@ impl Agent {
             snapshot_store: Arc::new(crate::snapshot_store::SnapshotStore::new(
                 home.join(".pharmakon").join("snapshots"),
             )),
+            registry,
+            governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
+            vision_stream: None,
         }
     }
 
@@ -227,12 +249,20 @@ impl Agent {
     }
 
     pub fn with_store(mut self, store: Arc<crate::persistence::DbSessionStore>) -> Self {
-        self.session_store = Some(store);
+        self.session_store = Some(store.clone());
+        // Update registry deps
+        {
+            let mut reg = self.registry.try_lock().expect("Failed to lock registry during init");
+            reg.update_deps(|deps| {
+                deps.store = Some(store);
+            });
+        }
         self
     }
 
     pub fn with_fact_memory(mut self, fact_memory: Arc<Mutex<BeliefSystem>>) -> Self {
         self.fact_memory = Some(fact_memory);
+        // Note: ToolDependencies doesn't currently have fact_memory, but it has nexus
         self
     }
 
@@ -248,18 +278,19 @@ impl Agent {
         mut self,
         nexus: Arc<pharmakon_memory::weaver::KnowledgeNexus>,
     ) -> Self {
-        self.knowledge_nexus = Some(nexus);
+        self.knowledge_nexus = Some(nexus.clone());
+        {
+            let mut reg = self.registry.try_lock().expect("Failed to lock registry during init");
+            reg.update_deps(|deps| {
+                deps.nexus = Some(nexus);
+            });
+        }
         self
     }
 
     pub async fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
-        let mut tools = self.tools.lock().await;
-        let name = tool.name().to_string();
-        if tools.iter().any(|existing| existing.name() == name) {
-            log::debug!("Skipping duplicate tool registration: {}", name);
-            return;
-        }
-        tools.push(tool);
+        let mut reg = self.registry.lock().await;
+        reg.add_tool(tool);
     }
 
 
@@ -426,7 +457,7 @@ impl Agent {
 
 
 
-        let tools_count = self.tools.lock().await.len();
+        let tools_count = self.registry.lock().await.all_metadata().len();
         log::info!(
             "Agent entering decision loop with {} tools and session: {}",
             tools_count,
@@ -434,14 +465,14 @@ impl Agent {
         );
 
         //--- Budgeted Execution Model Start ---
-        let complexity = if ["refactor", "implement", "debug", "test", "fix", "add", "create"]
-            .iter()
-            .any(|s| user_message.to_lowercase().contains(s))
-        {
-            budget::TaskComplexity::Standard
-        } else {
-            budget::TaskComplexity::Simple
+        let model = {
+            let m = self.model.lock().await;
+            Some((*m).clone())
         };
+        let complexity = crate::orchestration::scheduler::classify_task_complexity(
+            user_message,
+            model.as_ref(),
+        ).await;
 
         let budget = budget::estimate_budget(complexity);
         let mut progress_tracker = ProgressTracker::new(&budget.policy);
@@ -453,6 +484,43 @@ impl Agent {
         loop {
             // --- Start of Loop: Budget and Progress Checks ---
             current_iteration += 1;
+            
+            // --- Entropy Check (Loop Detection) ---
+            let entropy = self.event_log.recent_tool_entropy(10).await;
+            if entropy > 0.8 {
+                log::warn!("[SESSION: {}] High entropy detected ({:.2}). Possible loop.", session_id, entropy);
+                self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {
+                    score: entropy,
+                    pattern: "high_repetition".to_string(),
+                }).await;
+                
+                let mut state = state_arc.lock().await;
+                state.history.push(Message {
+                    role: "system".to_string(),
+                    content: Some(MessageContent::Text(format!(
+                        "WARNING: High tool call repetition detected ({:.2}). You might be in a loop. Please reconsider your strategy and try a different approach.",
+                        entropy
+                    ))),
+                    ..Default::default()
+                });
+                
+                // Hard termination if entropy exceeds critical threshold
+                // (integrated via ProgressTracker for unified signal handling)
+                let entropy_signal = progress_tracker.check_entropy(entropy, 0.95);
+                if entropy_signal != TerminationSignal::Continue {
+                    let reason = format!(
+                        "Entropy overflow detected ({:.2}). Agent is in a pathological loop with no progress. Task aborted.",
+                        entropy
+                    );
+                    log::error!("CRITICAL: {}", reason);
+                    self.event_log.append(session_id, crate::event_log::EventKind::SessionEvent {
+                        action: "failed".to_string(),
+                        detail: reason.clone(),
+                    }).await;
+                    return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
+                }
+            }
+
             if start_time.elapsed() > budget.hard_max_wall_time {
                 let reason = format!(
                     "Wall time limit exceeded ({:?}). Task aborted.",
@@ -523,7 +591,12 @@ impl Agent {
                     ctx_mgr.render_prompt_context()
                 };
 
+                let cap_summary = {
+                    let reg = self.registry.lock().await;
+                    reg.catalog.capability_summary()
+                };
                 let layout = crate::system_prompt::PromptLayout {
+                    capability_summary: cap_summary,
                     dynamic_context,
                     system_rules: prompt_manager.soul().system_prompt.clone(),
                     playbooks: {
@@ -548,26 +621,46 @@ impl Agent {
                     current_task: user_message.to_string(),
                 };
 
-                messages_to_send.push(Message {
-                    role: "system".to_string(),
-                    content: Some(MessageContent::Text(layout.render())),
-                    ..Default::default()
-                });
-
-                messages_to_send.extend(state.history.clone());
+                // Use PromptLayers for cache-optimal prompt topology:
+                // Layer 0 (cacheable) = system prompt + capability summary (never changes)
+                // Layer 1 (semi-static) = playbook + goal
+                // Layer 2 (dynamic) = conversation history
+                // Layer 3 (actionable) = current task (already in history as last user msg)
+                let layers = crate::context::topology::PromptLayers {
+                    cacheable_prefix: layout.render(),
+                    semi_static: String::new(),
+                    dynamic: state.history.clone(),
+                    actionable: String::new(),
+                };
+                messages_to_send = layers.assemble();
             }
 
             let tool_definitions = {
-                let tools_lock = self.tools.lock().await;
-                let active_cats: tokio::sync::MutexGuard<'_, std::collections::HashSet<ToolCategory>> = self.active_categories.lock().await;
+                let mut reg = self.registry.lock().await;
+                let active_cats = self.active_categories.lock().await;
 
-                if tools_lock.is_empty() {
-                    None
-                } else {
-                    let active_tools: Vec<_> = tools_lock
-                        .iter()
-                        .filter(|t| active_cats.contains(&t.category()))
-                        .map(|t| ToolDefinition {
+                // 1. Start with core tools and any already loaded tools
+                let mut tools_to_inject = reg.all_metadata()
+                    .iter()
+                    .filter(|m| m.category == ToolCategory::Core)
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                // 2. Search for relevant tools based on the current task/query
+                // We use the last message or the whole task as query
+                let search_results = reg.search(user_message, 15);
+                for meta in search_results {
+                    if !tools_to_inject.iter().any(|t| t.name == meta.name) {
+                        tools_to_inject.push(meta);
+                    }
+                }
+
+                let active_tools: Vec<_> = tools_to_inject
+                    .into_iter()
+                    .filter(|m| m.category == ToolCategory::Core || active_cats.contains(&m.category))
+                    .filter_map(|m| {
+                        // On-demand hydration to get parameters
+                        reg.hydrate(&m.name).map(|t| ToolDefinition {
                             r#type: "function".to_string(),
                             function: crate::model::FunctionDefinition {
                                 name: t.name().to_string(),
@@ -575,13 +668,13 @@ impl Agent {
                                 parameters: t.parameters(),
                             },
                         })
-                        .collect();
+                    })
+                    .collect();
 
-                    if active_tools.is_empty() {
-                        None
-                    } else {
-                        Some(active_tools)
-                    }
+                if active_tools.is_empty() {
+                    None
+                } else {
+                    Some(active_tools)
                 }
             };
 
@@ -699,13 +792,10 @@ impl Agent {
                         intent_id: None,
                         timestamp: chrono::Utc::now(),
                     }).await;
-                    let tool = self
-                        .tools
-                        .lock()
-                        .await
-                        .iter()
-                        .find(|t| t.name() == tool_call.function.name)
-                        .cloned();
+                    let tool = {
+                        let mut reg = self.registry.lock().await;
+                        reg.hydrate(&tool_call.function.name)
+                    };
                     let event_tx = self.event_tx.clone();
                     let mut approval_rx = self.approval_tx.subscribe();
                     let hooks = self.hooks.clone();
@@ -718,6 +808,7 @@ impl Agent {
                     let dry_run = self.dry_run.load(std::sync::atomic::Ordering::SeqCst);
                     let forensic_id = uuid::Uuid::new_v4().to_string();
                     let el = self.event_log.clone();
+                    let ss = self.snapshot_store.clone();
                     let el_session = session_id.to_string();
 
                     tool_tasks.push(tokio::spawn(async move {
@@ -832,8 +923,43 @@ impl Agent {
                             tool: tool.name().to_string(),
                             args_hash,
                         }).await;
-                        let result = tool.call(args).await;
+
+                        // --- Snapshot Before Mutation ---
+                        let mut snapshot_before_id = None;
+                        let is_file_mutation = (tool.name() == "write_file" || tool.name() == "apply_patch" || tool.name() == "mutate_ast") 
+                            && args["path"].is_string();
+                        
+                        if is_file_mutation {
+                            if let Some(path_str) = args["path"].as_str() {
+                                let path = std::path::Path::new(path_str);
+                                if path.exists() {
+                                    if let Ok(id) = ss.snapshot_file(path).await {
+                                        snapshot_before_id = Some(id);
+                                    }
+                                } else {
+                                    snapshot_before_id = Some("none".to_string());
+                                }
+                            }
+                        }
+
+                        let result = tool.call(args.clone()).await;
                         let latency_ms = start.elapsed().as_millis() as u64;
+
+                        // --- Snapshot After Mutation ---
+                        if let Some(before_id) = snapshot_before_id {
+                            if result.is_ok() {
+                                if let Some(path_str) = args["path"].as_str() {
+                                    let path = std::path::Path::new(path_str);
+                                    if let Ok(after_id) = ss.snapshot_file(path).await {
+                                        el.append(&el_session, crate::event_log::EventKind::FileMutated {
+                                            path: path_str.to_string(),
+                                            snapshot_before_id: before_id,
+                                            snapshot_after_id: after_id,
+                                        }).await;
+                                    }
+                                }
+                            }
+                        }
 
                         let mut result_str = match &result {
                             Ok(s) => s.clone(),
@@ -959,6 +1085,13 @@ impl Agent {
                     state.history.push(rescue_message);
                 }
 
+                // Record iteration completion in event log
+                self.event_log.append(session_id, crate::event_log::EventKind::IterationCompleted {
+                    iteration: current_iteration,
+                    progress_delta: 0.0,
+                    entropy,
+                }).await;
+
                 // --- Progress Tracking and Termination ---
                 if let TerminationPolicy::ProgressBased {..} = budget.policy {
                     let signal = progress_tracker.record(snapshot);
@@ -1003,8 +1136,12 @@ impl Agent {
 
                     // Send thought event
                     let _ = self.event_tx.send(Event::AgentThought {
-                        content: MessageContent::Text(thought_content),
+                        content: MessageContent::Text(thought_content.clone()),
                     });
+
+                    self.event_log.append(session_id, crate::event_log::EventKind::ThoughtEmitted {
+                        content_hash: crate::event_log::short_hash(&thought_content),
+                    }).await;
 
                     final_content.replace_range(start..absolute_end, "");
                 } else {
@@ -1204,19 +1341,26 @@ impl Agent {
 
     async fn handle_model_command(&self, cmd: &str) -> Result<String> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
+        let available = crate::providers::registry::ModelRegistry::list_available_models();
         if parts.len() < 2 {
-            return Ok("Usage: /model <model_id>".to_string());
+            let mut resp = format!("Current model: {}\n\nAvailable models:\n", self.model_name().await);
+            for m in &available {
+                let marker = if m == &self.model_name().await { "●" } else { "○" };
+                resp.push_str(&format!("  {} {}\n", marker, m));
+            }
+            resp.push_str("\nUsage: /model <model_id>");
+            return Ok(resp);
         }
         let model_id = parts[1];
         if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
             let mut model = self.model.lock().await;
             *model = new_model;
-            let _ = self.event_tx.send(Event::ModelSwitched {
-                model_id: model_id.to_string(),
-            });
+            let _ = self.event_tx.send(Event::ModelSwitched { model_id: model_id.to_string() });
             Ok(format!("Switched to model: {}", model_id))
         } else {
-            Ok(format!("Model not found: {}", model_id))
+            let mut resp = format!("Model not found: {}\n\nAvailable:\n", model_id);
+            for m in &available { resp.push_str(&format!("  {}\n", m)); }
+            Ok(resp)
         }
     }
 
@@ -1330,6 +1474,82 @@ impl Agent {
 
     pub async fn perform_maintenance(&self) -> Result<()> {
         log::info!("Agent: Performing autonomous maintenance...");
+        Ok(())
+    }
+
+    /// Rollback a single file to a previously snapshotted state.
+    ///
+    /// Uses the SnapshotStore's content-addressed storage to restore
+    /// the file to its exact state at the time the snapshot was taken.
+    /// Safe: does not touch uncommitted changes outside the target file.
+    pub async fn rollback_to_snapshot(
+        &self,
+        path: &std::path::Path,
+        snapshot_id: &str,
+    ) -> Result<()> {
+        if snapshot_id == "none" {
+            // File didn't exist before the mutation — remove it
+            if path.exists() {
+                tokio::fs::remove_file(path).await?;
+                log::info!(
+                    "Rollback: removed {} (file did not exist before mutation)",
+                    path.display()
+                );
+            }
+            return Ok(());
+        }
+
+        self.snapshot_store.restore(snapshot_id, path).await.map_err(|e| {
+            anyhow!(
+                "Rollback failed for {} (snapshot {}): {}",
+                path.display(),
+                snapshot_id,
+                e
+            )
+        })?;
+
+        log::info!(
+            "Rollback: restored {} to snapshot {}",
+            path.display(),
+            &snapshot_id[..snapshot_id.len().min(8)]
+        );
+        Ok(())
+    }
+
+    /// Rollback all file mutations that occurred after a given event ID.
+    ///
+    /// Walks the event log in reverse from the latest event back to `event_id`,
+    /// restoring each mutated file to its pre-mutation snapshot.
+    /// This provides atomic rollback of an entire agent session segment.
+    pub async fn rollback_to_event(&self, event_id: u64) -> Result<()> {
+        let events = self.event_log.events_since(event_id).await;
+
+        if events.is_empty() {
+            log::info!("Rollback: no events to roll back (event_id={})", event_id);
+            return Ok(());
+        }
+
+        // Process in reverse chronological order for correct restoration
+        let mut rollback_count = 0;
+        for event in events.iter().rev() {
+            if let crate::event_log::EventKind::FileMutated {
+                path,
+                snapshot_before_id,
+                ..
+            } = &event.kind
+            {
+                let file_path = std::path::Path::new(path);
+                self.rollback_to_snapshot(file_path, snapshot_before_id)
+                    .await?;
+                rollback_count += 1;
+            }
+        }
+
+        log::info!(
+            "Rollback complete: restored {} file(s) to state before event_id={}",
+            rollback_count,
+            event_id
+        );
         Ok(())
     }
 }

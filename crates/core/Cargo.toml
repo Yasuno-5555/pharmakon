@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 pharmakon-common.workspace = true
 pharmakon-memory.workspace = true
+pharmakon-tools.workspace = true
 bollard = "0.18.1"
 serde.workspace = true
 serde_json.workspace = true
@@ -36,4 +37,5 @@ sysinfo = "0.38.4"
 tokio-util = { version = "0.7.13", features = ["codec"] }
 tower = { workspace = true }
 diffy = "0.4.0"
+rhai = { version = "1", features = ["sync"] }
 tempfile = "3.10"

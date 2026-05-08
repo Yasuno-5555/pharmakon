@@ -26,6 +26,14 @@ pub struct Edge {
     pub metadata: serde_json::Value,
 }
 
+/// Well-known causal edge relation types for KnowledgeNexus.
+/// These enable causal memory chains for debugging and reasoning.
+impl Edge {
+    pub const CAUSED_BY: &'static str = "caused_by";
+    pub const FIXED_BY: &'static str = "fixed_by";
+    pub const INVALIDATED_BY: &'static str = "invalidated_by";
+}
+
 pub struct GraphStore {
     pool: SqlitePool,
 }

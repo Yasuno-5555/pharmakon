@@ -5,13 +5,13 @@ use std::sync::Arc;
 #[tokio::test]
 async fn test_agent_basic_chat() {
     let model = Arc::new(MockModel);
-    let mut agent = Agent::new(model, "test-session".to_string());
+    let agent = Agent::new(model, "test-session".to_string());
 
     let response = agent.chat("Hello from integration test!").await.unwrap();
 
     assert!(response.contains("Mock stream response"));
     // History should have user message and assistant message
-    let history = agent.history.lock().await;
+    let history = agent.get_history().await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].role, "user");
     assert_eq!(history[1].role, "assistant");
@@ -20,11 +20,11 @@ async fn test_agent_basic_chat() {
 #[tokio::test]
 async fn test_agent_history_reset() {
     let model = Arc::new(MockModel);
-    let mut agent = Agent::new(model, "test-session".to_string());
+    let agent = Agent::new(model, "test-session".to_string());
 
-    agent.chat("Message 1").await.unwrap();
-    assert_eq!(agent.history.lock().await.len(), 2);
+    let _ = agent.chat("Message 1").await;
+    assert_eq!(agent.get_history().await.len(), 2);
 
-    agent.reset_history().await;
-    assert_eq!(agent.history.lock().await.len(), 0);
+    let _ = agent.reset_history().await;
+    assert_eq!(agent.get_history().await.len(), 0);
 }

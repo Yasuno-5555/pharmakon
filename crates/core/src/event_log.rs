@@ -319,6 +319,8 @@ mod tests {
     #[tokio::test]
     async fn test_entropy_high_for_loop() {
         let log = EventLog::new(None);
+        // Simulate a realistic loop: apply_patch → cargo_check → same error → repeat
+        // Key: output_hashes are identical across iterations = stagnation
         for _ in 0..10 {
             log.append(
                 "s",
@@ -330,14 +332,38 @@ mod tests {
             .await;
             log.append(
                 "s",
+                EventKind::ToolResult {
+                    tool: "apply_patch".to_string(),
+                    success: true,
+                    latency_ms: 50,
+                    output_hash: "same_output".to_string(),
+                },
+            )
+            .await;
+            log.append(
+                "s",
                 EventKind::ToolCalled {
                     tool: "cargo_check".to_string(),
                     args_hash: "y".to_string(),
                 },
             )
             .await;
+            log.append(
+                "s",
+                EventKind::ToolResult {
+                    tool: "cargo_check".to_string(),
+                    success: false,
+                    latency_ms: 200,
+                    output_hash: "same_error".to_string(),
+                },
+            )
+            .await;
         }
-        let entropy = log.recent_tool_entropy(20).await;
-        assert!(entropy > 0.4, "Looping tools should have high entropy: {}", entropy);
+        let entropy = log.recent_tool_entropy(40).await;
+        assert!(
+            entropy > 0.4,
+            "Looping tools with stagnant output should have high entropy: {}",
+            entropy
+        );
     }
 }

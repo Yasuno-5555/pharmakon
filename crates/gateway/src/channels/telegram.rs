@@ -110,7 +110,7 @@ impl Channel for TelegramChannel {
                             let mut sessions = chat_sessions.lock().await;
                             sessions.insert(msg.chat.id, new_id.clone());
                         }
-                        agent.reset_session_history(&session_id).await;
+                        let _ = agent.reset_session_history(&session_id).await;
                         let _ = bot.send_message(msg.chat.id, "🔄 New session started. Previous context has been cleared for this chat.").await;
                         return Ok(());
                     }
