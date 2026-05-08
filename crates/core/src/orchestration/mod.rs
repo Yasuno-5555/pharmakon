@@ -15,6 +15,7 @@ pub mod research;
 pub mod spawner;
 pub mod supervisor;
 pub mod swarm;
+pub mod swarm_economy;
 pub mod territory;
 pub mod territory_tools;
 

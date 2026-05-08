@@ -1,5 +1,8 @@
 use crate::agent::Agent;
 use crate::orchestration::scheduler::{ManagedTask, classify_task_complexity};
+use crate::orchestration::swarm_economy::SwarmEconomy;
+use crate::orchestration::cognitive_economics::AgentSpecialization;
+use crate::orchestration::dsge_integration::AgentEconomy;
 use async_trait::async_trait;
 use pharmakon_common::AgentSpawner;
 use std::sync::Arc;
@@ -302,11 +305,15 @@ impl pharmakon_common::Tool for SwarmTool {
 pub struct FractalSwarmTool {
     spawner: Arc<dyn AgentSpawner>,
     depth: u8,
+    parent_economy: Option<Arc<std::sync::Mutex<AgentEconomy>>>,
 }
 
 impl FractalSwarmTool {
     pub fn new(spawner: Arc<dyn AgentSpawner>, depth: u8) -> Self {
-        Self { spawner, depth }
+        Self { spawner, depth, parent_economy: None }
+    }
+    pub fn with_economy(mut self, economy: Arc<std::sync::Mutex<AgentEconomy>>) -> Self {
+        self.parent_economy = Some(economy); self
     }
 }
 
@@ -345,40 +352,91 @@ impl pharmakon_common::Tool for FractalSwarmTool {
 
     async fn call(&self, args: serde_json::Value) -> pharmakon_common::AgentResult<String> {
         let goal = args["goal"].as_str().unwrap_or_default();
-        let sub_tasks = args["sub_tasks"]
-            .as_array()
-            .ok_or_else(|| pharmakon_common::AgentError("Missing sub_tasks".to_string()))?;
+        let sub_tasks = args["sub_tasks"].as_array().ok_or_else(|| pharmakon_common::AgentError("Missing sub_tasks".to_string()))?;
+
+        // ── DSGE: Market-based token allocation ──
+        let (allocations, model_assignments) = if let Some(ref economy) = self.parent_economy {
+            let parent = economy.lock().unwrap();
+            let mut swarm = SwarmEconomy::from_parent(&parent);
+            for (i, task_val) in sub_tasks.iter().enumerate() {
+                let task = task_val["task"].as_str().unwrap_or_default();
+                let role = task_val["role"].as_str().unwrap_or("fast");
+                let spec = match role {
+                    "researcher"|"analyst" => AgentSpecialization::Researcher,
+                    "coder"|"engineer" => AgentSpecialization::Deep,
+                    "verifier"|"reviewer" => AgentSpecialization::Verifier,
+                    "planner"|"architect" => AgentSpecialization::Planner,
+                    _ => AgentSpecialization::Fast,
+                };
+                swarm.register_task(&format!("swarm-{}", i), task, spec);
+            }
+            let budgets = swarm.allocate_budgets();
+            let mut models = std::collections::HashMap::new();
+            for (i, task_val) in sub_tasks.iter().enumerate() {
+                let task = task_val["task"].as_str().unwrap_or_default();
+                let role = task_val["role"].as_str().unwrap_or("fast");
+                let spec = match role {
+                    "researcher"|"analyst" => AgentSpecialization::Researcher,
+                    "coder"|"engineer" => AgentSpecialization::Deep,
+                    "verifier"|"reviewer" => AgentSpecialization::Verifier,
+                    "planner"|"architect" => AgentSpecialization::Planner,
+                    _ => AgentSpecialization::Fast,
+                };
+                let budget = *budgets.get(&format!("swarm-{}", i)).unwrap_or(&5000);
+                if let Some(model_id) = swarm.select_model_for(task, &spec, budget) {
+                    models.insert(format!("swarm-{}", i), model_id);
+                }
+            }
+            (budgets, models)
+        } else {
+            (std::collections::HashMap::new(), std::collections::HashMap::new())
+        };
 
         log::info!("FractalSwarm: Processing goal '{}' with {} sub-tasks", goal, sub_tasks.len());
 
         let mut handles = Vec::new();
-        for task_val in sub_tasks {
+        for (i, task_val) in sub_tasks.iter().enumerate() {
             let task = task_val["task"].as_str().unwrap_or_default().to_string();
             let role = task_val["role"].as_str().map(|s| s.to_string());
             let spawner = self.spawner.clone();
             let depth = self.depth;
+            let task_id = format!("swarm-{}", i);
+            let budget = *allocations.get(&task_id).unwrap_or(&10000);
+            let _model = model_assignments.get(&task_id).cloned();
+            let task_with_budget = format!("{} [BUDGET: {} tokens]", task, budget);
 
-            // Use spawn_with_handle to get actual results from sub-agents
             handles.push(async move {
-                match spawner.spawn_with_handle(&task, role, depth + 1).await {
+                match spawner.spawn_with_handle(&task_with_budget, role, depth + 1).await {
                     Ok(handle) => match handle.await_result().await {
-                        Ok(result) => Ok(result),
-                        Err(e) => Err(e),
+                        Ok(result) => Ok((task_id, result)),
+                        Err(e) => Err((task_id, e)),
                     },
-                    Err(e) => Err(e),
+                    Err(e) => Err((task_id, e)),
                 }
             });
         }
 
-        let results = futures::future::join_all(handles).await;
-        let mut summary = format!("Fractal Swarm execution for: {}\n\n", goal);
-        for (i, res) in results.into_iter().enumerate() {
-            match res {
-                Ok(msg) => summary.push_str(&format!("Task {}: OK — {}\n", i + 1, msg)),
-                Err(e) => summary.push_str(&format!("Task {}: FAILED — {}\n", i + 1, e)),
-            }
-        }
+        let results_raw: Vec<(String, Result<String, anyhow::Error>)> = futures::future::join_all(handles).await
+            .into_iter()
+            .map(|r| match r {
+                Ok((id, output)) => (id, Ok(output)),
+                Err((id, e)) => (id, Err(e)),
+            })
+            .collect();
 
-        Ok(summary)
+        if let Some(ref economy) = self.parent_economy {
+            let parent = economy.lock().unwrap();
+            let swarm = SwarmEconomy::from_parent(&parent);
+            Ok(swarm.merge_results(&results_raw))
+        } else {
+            let mut summary = format!("Fractal Swarm: {}\n\n", goal);
+            for (i, (task_id, res)) in results_raw.iter().enumerate() {
+                match res {
+                    Ok(msg) => summary.push_str(&format!("Task {}: OK — {}\n", i + 1, msg)),
+                    Err(e) => summary.push_str(&format!("Task {}: FAILED — {}\n", i + 1, e)),
+                }
+            }
+            Ok(summary)
+        }
     }
 }

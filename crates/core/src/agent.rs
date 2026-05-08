@@ -1,4 +1,5 @@
 use crate::orchestration::budget::{self, IterationSnapshot, ProgressTracker, TerminationSignal, TerminationPolicy};
+use crate::orchestration::dsge_integration::AgentEconomy;
 use crate::model::{
     AgentError, AgentErrorCode, AgentModel, CompletionRequest,
     Message, MessageContent, ToolDefinition, ToolCategory,
@@ -66,6 +67,7 @@ pub struct Agent {
     pub snapshot_store: Arc<crate::snapshot_store::SnapshotStore>,
     pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
     pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
+    pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
     pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
 }
 
@@ -105,6 +107,7 @@ impl Clone for Agent {
             snapshot_store: self.snapshot_store.clone(),
             registry: self.registry.clone(),
             governor: self.governor.clone(),
+            economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
             vision_stream: self.vision_stream.clone(),
         }
     }
@@ -195,6 +198,7 @@ impl Agent {
                 home.join(".pharmakon").join("snapshots"),
             )),
             registry,
+            economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
             governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
             vision_stream: None,
         }
@@ -487,6 +491,7 @@ impl Agent {
             
             // --- Entropy Check (Loop Detection) ---
             let entropy = self.event_log.recent_tool_entropy(10).await;
+            self.economy.lock().unwrap().update_inflation(current_iteration as u64 * 400, 4000);
             if entropy > 0.8 {
                 log::warn!("[SESSION: {}] High entropy detected ({:.2}). Possible loop.", session_id, entropy);
                 self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {
@@ -633,6 +638,7 @@ impl Agent {
                     actionable: String::new(),
                 };
                 messages_to_send = layers.assemble();
+            { let shadow = self.economy.lock().unwrap().shadow_directive(); if !shadow.is_empty() && !messages_to_send.is_empty() { if let Some(ref mut c) = messages_to_send[0].content { let text = c.as_text().unwrap_or(""); *c = pharmakon_common::agent_types::MessageContent::Text(format!("{}\n{}", text, shadow)); } } }
             }
 
             let tool_definitions = {
@@ -756,6 +762,7 @@ impl Agent {
 
             let response: pharmakon_common::agent_types::CompletionResponse =
                 response_result.unwrap().unwrap();
+            self.economy.lock().unwrap().observe_latency(start_time.elapsed().as_millis() as u64);
 
             log::debug!(
                 "[SESSION: {}] Model response received. Content: {}, Tool calls: {}",

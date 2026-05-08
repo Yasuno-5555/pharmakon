@@ -114,7 +114,7 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
         Arc::new(Mutex::new(agent.clone())),
     ));
     agent.add_tool(Arc::new(crate::orchestration::swarm::SwarmTool::new(swarm_manager.clone(), 0))).await;
-    agent.add_tool(Arc::new(crate::orchestration::swarm::FractalSwarmTool::new(swarm_manager, 0))).await;
+    agent.add_tool(Arc::new(crate::orchestration::swarm::FractalSwarmTool::new(swarm_manager, 0).with_economy(agent.economy.clone()))).await;
 
     // --- Codex Suite ---
     agent.add_tool(Arc::new(DeterministicReplayTool)).await;
