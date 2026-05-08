@@ -476,7 +476,7 @@ async fn main() -> Result<()> {
                 }
                 SecretsCommands::List => {
                     println!("Secrets are stored in OS keyring.");
-                    for p in &["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "PERPLEXITY_API_KEY", "TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN"] {
+                    for p in &["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "PERPLEXITY_API_KEY", "DEEPSEEK_API_KEY", "TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN"] {
                         if store.get_secret(p).is_ok() {
                             println!("  ✓ {}", p);
                         }

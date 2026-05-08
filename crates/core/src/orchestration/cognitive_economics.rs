@@ -246,7 +246,7 @@ impl ModelMarketQuote {
 pub fn model_market_quotes() -> Vec<ModelMarketQuote> {
     vec![
         ModelMarketQuote {
-            model_id: "deepseek/deepseek-chat".into(),
+            model_id: "deepseek/deepseek-v4-flash".into(),
             input_cost_per_1k: 0.000014,   // $0.014/M input
             output_cost_per_1k: 0.000028,  // $0.028/M output
             avg_success_rate: 0.88,
@@ -363,7 +363,7 @@ mod tests {
         let best = select_model_by_roi(&quotes, 1000, 200, None);
         assert!(best.is_some());
         // DeepSeek should have highest ROI due to low cost
-        assert_eq!(best.unwrap().model_id, "deepseek/deepseek-chat");
+        assert_eq!(best.unwrap().model_id, "deepseek/deepseek-v4-flash");
     }
 }
 
@@ -568,16 +568,22 @@ impl BellmanPlanner {
         let investment_return = productivity_growth * 0.5;
         (1.0 / reserves.max(1.0)) + precautionary - investment_return
     }
-    pub fn bellman_iteration(&mut self, budget: u64, complexity: f64, production: &ProductionFunction) -> f64 {
+    pub fn bellman_iteration(&mut self, budget: u64, _complexity: f64, production: &ProductionFunction) -> f64 {
         if let Some(v) = self.value_table.get(&budget) { return *v; }
-        let v = (0..budget.min(1000)).map(|t| {
-            let q = production.quality(t);
-            let remaining = budget - t;
-            let future_v = self.discount_factor * self.bellman_iteration(remaining, complexity, production);
-            q + future_v
-        }).fold(0.0f64, f64::max);
-        self.value_table.insert(budget, v);
-        v
+        let limit = budget.min(5000);
+        let mut dp = vec![0.0f64; limit as usize + 1];
+        for b in 1..=limit {
+            let mut best = 0.0f64;
+            for t in 0..=b.min(200) {
+                let q = production.quality(t);
+                let future_v = self.discount_factor * dp[(b - t) as usize];
+                best = best.max(q + future_v);
+            }
+            dp[b as usize] = best;
+        }
+        let result = dp[limit as usize];
+        self.value_table.insert(budget, result);
+        result
     }
 }
 
@@ -610,17 +616,24 @@ pub struct ProviderPortfolio {
 impl ProviderPortfolio {
     pub fn new() -> Self { Self { allocations: Vec::new(), correlation_matrix: std::collections::HashMap::new() } }
     pub fn markowitz_allocation(&self, risk_aversion: f64) -> Vec<(String, f64)> {
-        let mut result = Vec::new();
         let n = self.allocations.len();
-        if n == 0 { return result; }
-        for (id, expected_return) in &self.allocations {
-            let variance = 0.01;
-            let w = (expected_return / (risk_aversion * variance)).clamp(0.0, 1.0);
-            result.push((id.clone(), w));
+        if n == 0 { return Vec::new(); }
+        let mut weights = vec![1.0 / n as f64; n];
+        for _ in 0..20 {
+            let mut grad = vec![0.0; n];
+            for i in 0..n {
+                let mut cov_term = 0.0;
+                for j in 0..n {
+                    let corr = if i == j { 1.0 } else { self.correlated_providers(&self.allocations[i].0, &self.allocations[j].0) };
+                    cov_term += corr * weights[j] * 0.01;
+                }
+                grad[i] = self.allocations[i].1 - risk_aversion * cov_term;
+            }
+            for w in &mut weights { *w = (*w + 0.1 * grad.iter().zip(weights.iter()).map(|(g,w)| g*w).sum::<f64>() / n as f64).clamp(0.01, 1.0); }
+            let sum: f64 = weights.iter().sum();
+            for w in &mut weights { *w /= sum; }
         }
-        let total: f64 = result.iter().map(|(_, w)| w).sum();
-        for (_, w) in &mut result { *w /= total.max(0.001); }
-        result
+        self.allocations.iter().enumerate().map(|(i, (id, _))| (id.clone(), weights[i])).collect()
     }
     pub fn correlated_providers(&self, a: &str, b: &str) -> f64 { self.correlation_matrix.get(&(a.to_string(),b.to_string())).copied().unwrap_or(0.3) }
 }
@@ -639,7 +652,7 @@ impl ExpectationSimulator {
         self.future_token_prices.clear();
         let mut price = current_price;
         for _ in 0..steps {
-            let shock = (rand_fast() - 0.5) * self.volatility_estimate;
+            let shock = (rand::random::<f64>() - 0.5) * self.volatility_estimate;
             price = (price + shock).max(0.001);
             self.future_token_prices.push(price);
         }
@@ -651,7 +664,7 @@ impl ExpectationSimulator {
         self.future_token_prices.iter().take(n).sum::<f64>() / n as f64
     }
 }
-fn rand_fast() -> f64 { let x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos() as f64; (x.sin() * 0.5 + 0.5) }
+
 
 
 // ═══════════════════════════════════════════════════════
@@ -676,17 +689,18 @@ impl RegimeSwitcher {
         Self { current: MacroRegime::Normal, transition_matrix: tm, regime_durations: std::collections::HashMap::new() }
     }
     pub fn update(&mut self, macro_state: &CognitiveMacroState, rate_limit_prob: f64, api_unavailable: bool) {
-        let probs = self.transition_matrix[self.current as usize];
-        let base = probs[0];
-        let cp = macro_state.context_inflation.max(0.0) * 0.3;
-        let crp = if macro_state.crisis_mode { 0.5 } else { 0.0 } + rate_limit_prob * 0.3;
-        let op = if api_unavailable { 0.8 } else { 0.0 };
-        let total = base + cp + crp + op;
-        let r: f64 = rand_fast();
-        self.current = if r < base / total { MacroRegime::Normal }
-            else if r < (base + cp) / total { MacroRegime::Congestion }
-            else if r < (base + cp + crp) / total { MacroRegime::Crisis }
-            else { MacroRegime::Offline };
+        let row = self.transition_matrix[self.current as usize];
+        let mut adjusted = row;
+        if macro_state.context_inflation > 0.5 { adjusted[1] += 0.2; adjusted[0] -= 0.2; }
+        if macro_state.crisis_mode || rate_limit_prob > 0.5 { adjusted[2] += 0.3; adjusted[0] -= 0.3; }
+        if api_unavailable { adjusted[3] += 0.5; adjusted[0] -= 0.5; }
+        for v in &mut adjusted { *v = v.clamp(0.0, 1.0); }
+        let r: f64 = rand::random::<f64>();
+        let mut cum = 0.0;
+        for (i, p) in adjusted.iter().enumerate() {
+            cum += p;
+            if r < cum { self.current = match i { 0=>MacroRegime::Normal, 1=>MacroRegime::Congestion, 2=>MacroRegime::Crisis, _=>MacroRegime::Offline }; break; }
+        }
         *self.regime_durations.entry(self.current).or_insert(0) += 1;
     }
     pub fn policy(&self) -> RegimePolicy {

@@ -39,7 +39,7 @@ pub fn run_wizard() -> Result<()> {
         .interact_text()?;
 
     // 4. Provider & API Key
-    let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity", "openrouter"];
+    let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity", "deepseek", "openrouter"];
     let mut selected_providers = Vec::new();
 
     println!(
@@ -95,14 +95,14 @@ pub fn run_wizard() -> Result<()> {
     }
 
     // 6. Advanced settings (Port, Auth)
-    let mut gateway_port = 18789;
+    let mut gateway_port = 19999;
     let mut auth_mode = "token".to_string();
     let mut auth_value = "pharmakon-secret-token".to_string();
 
     if is_advanced {
         gateway_port = Input::with_theme(&theme)
             .with_prompt(t!("gateway_port_prompt").to_string())
-            .default(18789)
+            .default(19999)
             .interact_text()?;
 
         let auth_options = vec![t!("auth_token"), t!("auth_password")];
@@ -140,7 +140,8 @@ pub fn run_wizard() -> Result<()> {
     config.default_agent.model = match default_provider.as_str() {
         "openai" => "gpt-4o".to_string(),
         "anthropic" => "claude-3-5-sonnet-latest".to_string(),
-        "gemini" => "gemini-1.5-pro".to_string(),
+        "gemini" => "gemini-2.5-flash".to_string(),
+        "deepseek" => "deepseek-v4-flash".to_string(),
         "openrouter" => "openai/gpt-4o".to_string(),
         _ => "default".to_string(),
     };

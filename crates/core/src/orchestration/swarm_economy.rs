@@ -94,7 +94,7 @@ impl SwarmEconomy {
                 }
                 AgentSpecialization::Fast | AgentSpecialization::Verifier => {
                     if q.avg_latency_ms < 500 { q.model_id.clone() }
-                    else { "deepseek/deepseek-chat".into() }
+                    else { "deepseek/deepseek-v4-flash".into() }
                 }
                 _ => q.model_id.clone(),
             }

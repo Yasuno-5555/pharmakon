@@ -124,8 +124,8 @@ impl ModelRegistry {
 
         let deepseek_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
         if !deepseek_key.is_empty() {
-            models.push("deepseek/deepseek-chat".to_string());
-            models.push("deepseek/deepseek-reasoner".to_string());
+            models.push("deepseek/deepseek-v4-flash".to_string());
+            models.push("deepseek/deepseek-v4-pro".to_string());
         }
         }
 

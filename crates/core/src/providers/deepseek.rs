@@ -2,8 +2,8 @@
 //!
 //! DeepSeek's API (api.deepseek.com) is fully compatible with the OpenAI
 //! chat completions format. Special features:
-//! - `deepseek-reasoner` model emits `reasoning_content` (thinking tokens)
-//! - `deepseek-chat` model for general-purpose tasks
+//! - `deepseek-v4-pro` model emits `reasoning_content` (thinking tokens)
+//! - `deepseek-v4-flash` model for general-purpose tasks
 //! - Supports function calling with the same tool schema
 
 use crate::model::{

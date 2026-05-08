@@ -686,7 +686,8 @@ impl Agent {
 
             let mut target_model = {
                 let m = self.model.lock().await;
-                (*m).clone()
+                let default_model = (*m).clone();
+                self.economy.lock().unwrap().select_model(user_message).unwrap_or(default_model)
             };
 
             log::info!("[SESSION: {}] Sending completion request to model...", session_id);
@@ -751,6 +752,7 @@ impl Agent {
                             }
                         }
 
+                        { let mn = target_model.name().to_string(); self.economy.lock().unwrap().record_model_result(&mn, 0, false, is_rate_limit); }
                         let _ = self.event_tx.send(Event::Error {
                             message: format!("Model error: {}", e),
                         });
@@ -762,6 +764,7 @@ impl Agent {
 
             let response: pharmakon_common::agent_types::CompletionResponse =
                 response_result.unwrap().unwrap();
+            { let mn = target_model.name().to_string(); let lat = start_time.elapsed().as_millis() as u64; self.economy.lock().unwrap().record_model_result(&mn, lat, true, false); }
             self.economy.lock().unwrap().observe_latency(start_time.elapsed().as_millis() as u64);
 
             log::debug!(
@@ -1359,9 +1362,14 @@ impl Agent {
             return Ok(resp);
         }
         let model_id = parts[1];
+        if model_id == "auto" {
+            self.economy.lock().unwrap().set_auto();
+            return Ok("Switched to AUTO mode.".to_string());
+        }
         if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(model_id) {
             let mut model = self.model.lock().await;
             *model = new_model;
+            self.economy.lock().unwrap().set_manual(model_id);
             let _ = self.event_tx.send(Event::ModelSwitched { model_id: model_id.to_string() });
             Ok(format!("Switched to model: {}", model_id))
         } else {

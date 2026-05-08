@@ -60,7 +60,7 @@ impl Default for DefaultAgentConfig {
 fn default_fallback_models() -> Vec<String> {
     vec![
         "gemini/gemini-2.5-flash".to_string(),
-        "deepseek/deepseek-chat".to_string(),
+        "deepseek/deepseek-v4-flash".to_string(),
         "groq/llama-3.3-70b-versatile".to_string(),
     ]
 }
