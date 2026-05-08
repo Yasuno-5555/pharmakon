@@ -5,7 +5,7 @@
 
 **Pharmakon** is a high-performance, local-first Rust AI engineering OS. It serves as a unified control plane for autonomous AI engineering, tool orchestration, and multi-channel communication.
 
-**Status:** Phase 0–4 complete (2026-05-08). Skill Genome, Python CodeAct, Multi-Provider Fallback, Xilem Desktop GUI.
+**Status:** Phase 0–4 complete (2026-05-09). DSGE Economics, Model Auto-Routing, Swarm Economy, DeepSeek V4, Plugin SDK v3.
 
 ## Key Features
 
@@ -25,7 +25,7 @@
 - **Swarm Return Channel**: `SpawnHandle` with `oneshot::Receiver` — sub-agent results are verified, not hallucinated. `FractalSwarmTool` awaits all handles.
 
 ### Advanced Features (Phase 3)
-- **CodeAct Hybrid Mode**: Python + Rhai scripting. Rhai tried first; falls back to Python on error for higher LLM fluency. 1 LLM turn = 10+ tool calls. Marked as Core — PRIMARY execution mode for all multi-step tasks.
+- **CodeAct Hybrid Mode**: Python + Rhai scripting. Rhai tried first; falls back to Python on error for higher LLM fluency. 1 LLM turn = 10+ tool calls. Marked as Core — PRIMARY for compound file/code ops. Regular tools for context/DB/SOUL.
 - **Constitutional Engine**: Immutable safety rules preventing self-modification, critical file deletion, and destructive shell commands. Cannot be bypassed.
 - **Durable Task Runtime**: `suspend()` / `resume()` with `TaskSnapshot` serialization and EventLog integration.
 
@@ -34,6 +34,11 @@
 - **Primitive Darwinism**: Lifecycle management (experimental → stable → core → deprecated → removed). Auto-promotion by usage count.
 - **AntiPattern Extraction**: Cluster script failures → positive guidance → system prompt injection. Never "don't do X" — always "✅ correct way".
 - **Dream Mode**: Background self-play — generates tasks, writes/executes scripts, verifies via cheap LLM, labels and stores. Fully autonomous skill acquisition.
+- **Model Auto-Routing**: `ModelMode::Auto` scores all providers by live ROI each turn. `ModelPerformanceTracker` records real-time success/latency. `/model auto` switches to optimal routing.
+- **Swarm Economy**: `FractalSwarmTool` uses `GeneralEquilibrium.market_clearing()` to allocate token budgets. Specialization-aware model selection (Deep→accuracy, Fast→latency).
+- **Plugin SDK v3**: Updated  trait with , .  trait with , .  event bridge.  with 11 variants.
+- **DeepSeek V4**: Models updated to /. Onboarding wizard supports DeepSeek. Default port corrected to 19999.
+- **DSGE Economics Engine**: 30+ structures in `cognitive_economics.rs` — `CognitiveBudget` with shadow price, `BellmanPlanner` (iterative DP),  (Markov chain), `ProviderPortfolio` (Markowitz),  (Walrasian tâtonnement). 6 injection points wired into agent loop.
 - **Skill Crystallization**: Auto-suggests Rhai→Rust native compilation for stable high-usage skills via `suggest_crystallizations()`.
 - **Multi-Provider Fallback**: Auto-switches on API rate limits. Configurable via `~/.pharmakon/config.json`. DeepSeek as first-class provider.
 - **Xilem+Vello Desktop GUI**: 8-tab native dashboard (Chat, Stats, Automation, Skills, Research, Graph, Logs, Config). Vello-powered animated SwarmVisualizer. Event bridge with 18+ event types.

@@ -1,26 +1,43 @@
-# Tutorial: Building Your First Plugin for Pharmakon
+# Tutorial: Building a Plugin for Pharmakon
 
-This tutorial will guide you through creating a simple **Tool** (external action) and a **Hook** (lifecycle monitor) using the Pharmakon SDK V2.
+This tutorial guides you through creating a Tool using the Pharmakon Plugin SDK.
 
-## 1. Creating a Custom Tool
+## 1. Project Setup
 
-We'll build a `WeatherTool` that "simulates" fetching weather data.
+Create a new Rust library crate:
 
-### Implementation
+```bash
+cargo new --lib pharmakon-plugin-weather
+cd pharmakon-plugin-weather
+```
+
+Add dependencies to `Cargo.toml`:
+
+```toml
+[dependencies]
+pharmakon-plugin-sdk = { path = "../Pharmakon/crates/plugin-sdk" }
+serde_json = "1"
+async-trait = "0.1"
+```
+
+## 2. Implementing a Tool
 
 ```rust
+use pharmakon_plugin_sdk::{
+    Tool, ToolCategory, ExecutionProfile, SideEffectLevel,
+    FilesystemScope, Reversibility, AgentResult, AgentError,
+};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use pharmakon_common::{Tool, ToolCategory, AgentResult, AgentError};
 
 pub struct WeatherTool;
 
 #[async_trait]
 impl Tool for WeatherTool {
     fn name(&self) -> &str { "get_weather" }
-    
-    fn description(&self) -> &str { 
-        "Get the current weather for a specific location." 
+
+    fn description(&self) -> &str {
+        "Get the current weather for a specific city."
     }
 
     fn parameters(&self) -> Value {
@@ -33,78 +50,87 @@ impl Tool for WeatherTool {
         })
     }
 
-    fn category(&self) -> ToolCategory { 
-        ToolCategory::Network 
+    fn category(&self) -> ToolCategory { ToolCategory::Network }
+
+    fn execution_profile(&self) -> ExecutionProfile {
+        ExecutionProfile {
+            side_effect_level: SideEffectLevel::None,
+            network_access: true,
+            filesystem_scope: FilesystemScope::None,
+            reversibility: Reversibility::Trivial,
+            requires_human_approval: false,
+        }
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
         let location = args["location"].as_str().unwrap_or("unknown");
-        // In a real plugin, you would call an API here.
-        Ok(format!("The weather in {} is Sunny, 25°C.", location))
+        Ok(format!("Weather in {}: Sunny, 25°C", location))
     }
 }
 ```
 
-## 2. Creating a Custom Hook
+## 3. Implementing a Plugin Bundle
 
-We'll build an `InsightLogger` that saves the agent's autonomous reflections to a local file.
-
-### Implementation
+If your crate provides multiple tools, bundle them:
 
 ```rust
-use async_trait::async_trait;
-use pharmakon_core::hooks::Hook;
-use anyhow::Result;
-use std::fs::OpenOptions;
-use std::io::Write;
+use pharmakon_plugin_sdk::{Plugin, PluginHealth, AgentResult};
+use std::sync::Arc;
 
-pub struct InsightLogger {
-    log_path: String,
-}
+pub struct WeatherPlugin;
 
-#[async_trait]
-impl Hook for InsightLogger {
-    fn name(&self) -> &str { "insight_logger" }
+impl Plugin for WeatherPlugin {
+    fn plugin_id(&self) -> &str { "pharmakon-plugin-weather" }
+    fn plugin_version(&self) -> &str { "0.1.0" }
 
-    async fn on_reflection_complete(&self, insights: &[String]) -> Result<()> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.log_path)?;
+    fn tools(&self) -> Vec<Arc<dyn pharmakon_plugin_sdk::Tool>> {
+        vec![Arc::new(WeatherTool)]
+    }
 
-        for insight in insights {
-            writeln!(file, "[INSIGHT] {}", insight)?;
-        }
-        
-        println!("✅ InsightLogger: Saved {} insights to {}", insights.len(), self.log_path);
+    fn initialize(&self) -> AgentResult<()> {
+        println!("Weather plugin initialized");
         Ok(())
     }
 }
 ```
 
-## 3. Registering Your Plugin
+## 4. Emitting Events
 
-To enable your plugins, add them during agent initialization in `main.rs`.
+Tools can emit events back to the agent:
 
 ```rust
-// In main.rs
-let agent = Agent::new(model, session_id);
+use pharmakon_plugin_sdk::{PluginEventTx, PluginEvent};
 
-// Register Tool
-agent.add_tool(Arc::new(WeatherTool));
+async fn call(&self, args: Value) -> AgentResult<String> {
+    // Emit a log event
+    if let Some(tx) = &self.event_tx {
+        tx.send(PluginEvent::Log {
+            level: "info".into(),
+            message: "Fetching weather...".into(),
+        })?;
+    }
 
-// Register Hook
-agent.hooks.register(Arc::new(InsightLogger { 
-    log_path: "insights.log".to_string() 
-})).await;
+    // ... tool logic ...
+    Ok("Weather: Sunny".to_string())
+}
 ```
 
-## 4. Best Practices
+## 5. Registration
 
-1.  **Use Async Everywhere**: Always use `.await` for I/O to avoid blocking the parallel engine.
-2.  **Thread Safety**: Plugins must be `Send + Sync`. Use `Arc<Mutex<T>>` if you need internal state.
-3.  **Error Handling**: Return `AgentError` for tools to give the LLM clear feedback on why a command failed.
-4.  **Batching**: If your hook processes data, consider batching if the trigger frequency is high (e.g., `on_message_received`).
+In the agent initialization code:
 
-## Next Steps
-Check the [Plugin SDK V2 Specification](./plugin_sdk_v2.md) for deeper details on `PluginContext` and advanced lifecycle events.
+```rust
+// Register individual tools
+agent.add_tool(Arc::new(WeatherTool)).await;
+
+// Or register a plugin bundle
+agent.register_plugin(Arc::new(WeatherPlugin)).await;
+```
+
+## 6. Best Practices
+
+1. **Execution Profile**: Always set accurate safety metadata — the governor uses it for approval gating.
+2. **Error Handling**: Return `AgentError::new(AgentErrorCode::ToolExecutionFailed, msg)` with clear messages so the LLM can self-correct.
+3. **Category**: Use existing categories (`ToolCategory::FileSystem`, `ToolCategory::Network`, etc.) rather than `Custom` unless truly new.
+4. **Thread Safety**: Plugins must be `Send + Sync`. Use `Arc<Mutex<T>>` for internal mutable state.
+5. **Idempotency**: Tool calls may be retried. Design tools to be safe when called multiple times with the same arguments.

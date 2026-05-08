@@ -629,7 +629,7 @@ impl ProviderPortfolio {
                 }
                 grad[i] = self.allocations[i].1 - risk_aversion * cov_term;
             }
-            for w in &mut weights { *w = (*w + 0.1 * grad.iter().zip(weights.iter()).map(|(g,w)| g*w).sum::<f64>() / n as f64).clamp(0.01, 1.0); }
+            let old_weights = weights.clone(); for (wi, w) in weights.iter_mut().enumerate() { *w = (*w + 0.1 * grad[wi] * old_weights[wi]).clamp(0.01, 1.0); }
             let sum: f64 = weights.iter().sum();
             for w in &mut weights { *w /= sum; }
         }

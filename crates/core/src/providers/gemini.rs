@@ -563,7 +563,9 @@ impl AgentModel for GeminiModel {
                     candidate.finish_reason
                 );
                 if let Some(reason) = &candidate.finish_reason {
-                    content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
+                    if reason != "STOP" {
+                        content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
+                    }
                 }
             }
 
