@@ -68,6 +68,8 @@ pub struct Agent {
     pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
     pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
     pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
+    pub dream_started: Arc<std::sync::atomic::AtomicBool>,
+    pub skill_library: Arc<std::sync::Mutex<crate::orchestration::skill_library::RhaiSkillLibrary>>,
     pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
 }
 
@@ -107,7 +109,9 @@ impl Clone for Agent {
             snapshot_store: self.snapshot_store.clone(),
             registry: self.registry.clone(),
             governor: self.governor.clone(),
+            dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
+            skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             vision_stream: self.vision_stream.clone(),
         }
     }
@@ -197,7 +201,9 @@ impl Agent {
             snapshot_store: Arc::new(crate::snapshot_store::SnapshotStore::new(
                 home.join(".pharmakon").join("snapshots"),
             )),
+            dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             registry,
+            skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
             governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
             vision_stream: None,
@@ -364,6 +370,7 @@ impl Agent {
     pub async fn chat_on_session(&self, user_message: &str, session_id: &str) -> Result<String> {
         CURRENT_SESSION_ID.scope(session_id.to_string(), async {
             if user_message.starts_with("/model") {
+            if !self.dream_started.swap(true, std::sync::atomic::Ordering::SeqCst) { let skill_lib = self.skill_library.clone(); tokio::spawn(async move { log::info!("Dream Mode started"); loop { tokio::time::sleep(std::time::Duration::from_secs(300)).await; let mut lib = skill_lib.lock().unwrap(); lib.decay(); log::debug!("Dream Mode: decay cycle complete, {} entries", lib.entries.len()); } }); }
                 return self.handle_model_command(user_message).await;
             }
 

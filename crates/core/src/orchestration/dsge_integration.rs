@@ -8,6 +8,7 @@
 
 use crate::orchestration::cognitive_economics::{
     CognitiveBudget, CognitiveMacroState, KnowledgeCapital,
+    BellmanPlanner, ProductionFunction,
     model_market_quotes, select_model_by_roi, ModelMarketQuote,
 };
 use crate::model::AgentModel;
@@ -91,6 +92,8 @@ pub struct AgentEconomy {
     pub market_quotes: Vec<ModelMarketQuote>,
     pub model_perf: ModelPerformanceTracker,
     pub mode: ModelMode,
+    pub bellman: BellmanPlanner,
+    pub production: ProductionFunction,
 }
 
 impl AgentEconomy {
@@ -102,6 +105,8 @@ impl AgentEconomy {
             market_quotes: model_market_quotes(),
             model_perf: ModelPerformanceTracker::new(),
             mode: ModelMode::Auto,
+            bellman: BellmanPlanner::new(0.95),
+            production: ProductionFunction { alpha: 0.95, beta: 0.5, theta: complexity.max(0.1) },
         }
     }
 
@@ -193,4 +198,11 @@ impl AgentEconomy {
 
     /// Switch to auto mode.
     pub fn set_auto(&mut self) { self.mode = ModelMode::Auto; }
+
+    pub fn compute_optimal_budget(&mut self, complexity: f64) -> u64 {
+        self.production.theta = complexity.max(0.1);
+        let budget = self.budget.remaining();
+        let optimal = self.bellman.bellman_iteration(budget, complexity, &self.production);
+        (budget as f64 * (1.0 - 1.0 / (1.0 + optimal))).min(budget as f64) as u64
+    }
 }

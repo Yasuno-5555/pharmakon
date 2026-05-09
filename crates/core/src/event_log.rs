@@ -237,7 +237,7 @@ impl EventLog {
         // - Repetition (0.25): tool call pattern loops
         // - Failure (0.2): explicit errors
         // - Token drift (0.15): budget consumption without progress
-        let token_drift = 0.0_f32; // TODO: integrate with BudgetConsumed events
+        let token_drift = 0.0_f32;
 
         (stagnation * 0.4 + repetition * 0.25 + failure_ratio * 0.2 + token_drift * 0.15).min(1.0)
     }

@@ -164,12 +164,22 @@ impl AgentModel for AnthropicModel {
 
     async fn stream_complete(
         &self,
-        _request: CompletionRequest,
+        request: CompletionRequest,
     ) -> AgentResult<
         std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
     > {
-        // ... (Streaming implementation - simplified for now as it's less critical for tools)
-        unimplemented!("Streaming not yet updated for tools")
+        // Non-streaming fallback: wrap complete() result in a single-element stream
+        let result = self.complete(request).await;
+        let stream = futures::stream::once(async move {
+            match result {
+                Ok(resp) => {
+                    let text = resp.content.as_ref().map(|c| c.to_string()).unwrap_or_default();
+                    Ok(text)
+                }
+                Err(e) => Err(e),
+            }
+        });
+        Ok(Box::pin(stream))
     }
 
     fn name(&self) -> &str {
