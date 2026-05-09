@@ -54,6 +54,7 @@ impl AgentModel for PerplexityModel {
             content,
             tool_calls: None,
             usage: None,
+            finish_reason: None,
         })
     }
 

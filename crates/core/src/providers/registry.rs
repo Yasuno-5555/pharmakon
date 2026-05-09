@@ -130,6 +130,7 @@ impl ModelRegistry {
         }
 
         models.push("ollama/llama3.2".to_string());
+        models.push("ollama/pharmakon-distilled".to_string());
 
         let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
         if !openrouter_key.is_empty() {

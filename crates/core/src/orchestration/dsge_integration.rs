@@ -27,6 +27,7 @@ pub struct ModelStats {
     pub successes: u64,
     pub total_latency_ms: u64,
     pub last_latency_ms: u64,
+    pub latency_ema_ms: f64,
     pub rate_limits: u64,
     pub errors: u64,
 }
@@ -36,7 +37,15 @@ impl ModelPerformanceTracker {
 
     pub fn record_success(&mut self, model_id: &str, latency_ms: u64) {
         let e = self.entries.entry(model_id.to_string()).or_default();
-        e.calls += 1; e.successes += 1; e.total_latency_ms += latency_ms; e.last_latency_ms = latency_ms;
+        e.calls += 1;
+        e.successes += 1;
+        e.total_latency_ms += latency_ms;
+        e.last_latency_ms = latency_ms;
+        if e.calls == 1 {
+            e.latency_ema_ms = latency_ms as f64;
+        } else {
+            e.latency_ema_ms = 0.7 * e.latency_ema_ms + 0.3 * (latency_ms as f64);
+        }
     }
 
     pub fn record_error(&mut self, model_id: &str, is_rate_limit: bool) {
@@ -50,9 +59,9 @@ impl ModelPerformanceTracker {
         self.entries.get(model_id).map(|s| if s.calls > 0 { s.successes as f64 / s.calls as f64 } else { 0.9 }).unwrap_or(0.9)
     }
 
-    /// Live average latency in ms.
+    /// Live average latency in ms (EMA based).
     pub fn avg_latency(&self, model_id: &str) -> u64 {
-        self.entries.get(model_id).map(|s| if s.calls > 0 { s.total_latency_ms / s.calls } else { 500 }).unwrap_or(500)
+        self.entries.get(model_id).map(|s| if s.calls > 0 { s.latency_ema_ms.round() as u64 } else { 500 }).unwrap_or(500)
     }
 
     /// Rate limit probability (0.0–1.0).
@@ -62,12 +71,15 @@ impl ModelPerformanceTracker {
 
     /// Live ROI: success_rate / (estimated_cost) — higher is better.
     /// Lower cost + higher success = better live ROI.
+    /// Discounted by latency EMA to prefer faster models when ROI is close.
     pub fn live_roi(&self, model_id: &str, input_tokens: u64, output_tokens: u64) -> f64 {
         let sr = self.success_rate(model_id);
         let rl = self.rate_limit_prob(model_id);
+        let lat = self.avg_latency(model_id) as f64;
         let cost = (input_tokens as f64 * 0.00002 + output_tokens as f64 * 0.00006) / 1000.0; // rough
         if cost <= 0.0 { return sr; }
-        sr / cost * (1.0 - rl * 0.5)
+        let latency_discount = 1.0 / (1.0 + (lat / 5000.0));
+        (sr / cost * (1.0 - rl * 0.5)) * latency_discount
     }
 }
 

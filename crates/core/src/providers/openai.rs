@@ -97,6 +97,7 @@ struct OpenAIResponse {
 #[derive(Deserialize)]
 struct Choice {
     message: OpenAIMessage,
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -248,6 +249,7 @@ impl AgentModel for OpenAIModel {
                 total_tokens: u.total_tokens,
                 thoughts_tokens: None,
             }),
+            finish_reason: choice.finish_reason.clone(),
         })
     }
 

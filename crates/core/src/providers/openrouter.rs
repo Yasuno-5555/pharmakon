@@ -78,6 +78,7 @@ struct ORResponse {
 #[derive(Deserialize)]
 struct ORChoice {
     message: ORMessage,
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -251,6 +252,7 @@ impl AgentModel for OpenRouterModel {
                 total_tokens: u.total_tokens,
                 thoughts_tokens: None,
             }),
+            finish_reason: choice.finish_reason.clone(),
         })
     }
 

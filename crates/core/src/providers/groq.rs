@@ -75,10 +75,13 @@ impl AgentModel for GroqModel {
                     })
                     .collect());
 
+        let finish_reason = choice["finish_reason"].as_str().map(|s| s.to_string());
+
         Ok(CompletionResponse {
             content,
             tool_calls,
             usage: None,
+            finish_reason,
         })
     }
 

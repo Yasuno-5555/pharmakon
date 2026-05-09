@@ -71,6 +71,7 @@ impl AgentModel for OllamaModel {
             content: Some(MessageContent::Text(content.to_string())),
             tool_calls: None,
             usage: None,
+            finish_reason: None,
         })
     }
 

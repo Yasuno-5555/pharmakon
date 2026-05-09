@@ -35,6 +35,7 @@ impl AgentModel for ParallelMockModel {
                 )),
                 tool_calls: None,
                 usage: None,
+                finish_reason: None,
             });
         }
 
@@ -71,12 +72,14 @@ impl AgentModel for ParallelMockModel {
                     },
                 ]),
                 usage: None,
+                finish_reason: None,
             })
         } else {
             Ok(CompletionResponse {
                 content: Some(MessageContent::Text("Ok.".to_string())),
                 tool_calls: None,
                 usage: None,
+                finish_reason: None,
             })
         }
     }

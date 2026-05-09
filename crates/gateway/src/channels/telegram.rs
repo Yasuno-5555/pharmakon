@@ -137,15 +137,41 @@ impl Channel for TelegramChannel {
                             Err(e) => { let _ = bot.send_message(msg.chat.id, format!("Error: {}", e)).await; }
                         }
                     } else {
-                        let _ = bot.send_message(msg.chat.id, "🟢 Task dispatched to worker agent.
-You can /model, /new, /status while it runs.").await;
-                        let w = agent.clone(); let b = bot.clone(); let cid = msg.chat.id;
-                        tokio::spawn(async move {
-                            match w.chat_on_session(&text_owned, &session_id).await {
-                                Ok(r) => { if !r.is_empty() { let _ = b.send_message(cid, r).await; } }
-                                Err(e) => { let _ = b.send_message(cid, format!("💀 {}", e)).await; }
+                        let active_model = {
+                            let m = agent.model.lock().await;
+                            m.clone()
+                        };
+
+                        let complexity = pharmakon_core::orchestration::scheduler::classify_task_complexity(
+                            &text_owned,
+                            Some(&active_model),
+                        ).await;
+
+                        log::info!("Telegram message complexity: {:?}", complexity);
+
+                        let w = agent.clone();
+                        let b = bot.clone();
+                        let cid = msg.chat.id;
+
+                        match complexity {
+                            pharmakon_core::orchestration::budget::TaskComplexity::Simple => {
+                                // Simple conversational query: answer immediately
+                                match w.chat_on_session(&text_owned, &session_id).await {
+                                    Ok(r) => { if !r.is_empty() { let _ = b.send_message(cid, r).await; } }
+                                    Err(e) => { let _ = b.send_message(cid, format!("💀 {}", e)).await; }
+                                }
                             }
-                        });
+                            _ => {
+                                // Complex engineering task: notify and run in background thread
+                                let _ = b.send_message(cid, "🟢 Task dispatched to worker agent.\nYou can /model, /new, /status while it runs.").await;
+                                tokio::spawn(async move {
+                                    match w.chat_on_session(&text_owned, &session_id).await {
+                                        Ok(r) => { if !r.is_empty() { let _ = b.send_message(cid, r).await; } }
+                                        Err(e) => { let _ = b.send_message(cid, format!("💀 {}", e)).await; }
+                                    }
+                                });
+                            }
+                        }
                     }
                 }
                 anyhow::Result::<()>::Ok(())

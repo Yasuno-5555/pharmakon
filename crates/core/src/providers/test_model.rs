@@ -10,6 +10,7 @@ impl AgentModel for TestModel {
             content: None,
             tool_calls: None,
             usage: None,
+            finish_reason: None,
         })
     }
 

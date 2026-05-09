@@ -110,6 +110,18 @@ impl InsightSynthesizer {
         );
         std::fs::write(&path, new_content)?;
 
+        // Trigger background Ollama distillation automatically on insight synthesis
+        if let Some(store) = &agent.session_store {
+            let store_clone = store.clone();
+            tokio::spawn(async move {
+                let distiller = crate::orchestration::ollama_distiller::OllamaDistiller::new(store_clone);
+                // Distill from default llama3.2 to our target pharmakon-distilled
+                if let Err(e) = distiller.distill("llama3.2", "pharmakon-distilled").await {
+                    log::warn!("Auto background Ollama distillation skipped/failed: {}", e);
+                }
+            });
+        }
+
         Ok(insight)
     }
 }

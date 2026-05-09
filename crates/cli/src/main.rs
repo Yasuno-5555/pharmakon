@@ -108,6 +108,16 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ServiceCommands,
     },
+    /// Run Ollama background distillation based on successful trajectories
+    Distill {
+        /// Base model to distill from (default: llama3.2)
+        #[arg(long, default_value = "llama3.2")]
+        base_model: String,
+
+        /// Name of the compiled local model (default: pharmakon-distilled)
+        #[arg(long, default_value = "pharmakon-distilled")]
+        target_model: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -555,6 +565,17 @@ async fn main() -> Result<()> {
                 ServiceCommands::Install { port } => { service_installer::install_service(port)?; }
                 ServiceCommands::Stop => { service_installer::stop_service()?; }
                 ServiceCommands::Status => { service_installer::get_service_status()?; }
+            }
+        }
+
+        Some(Commands::Distill { base_model, target_model }) => {
+            println!("🧬 Starting manual Ollama Trajectory Distillation...");
+            println!("  Base model: {}", base_model);
+            println!("  Target model: {}", target_model);
+            let distiller = pharmakon_core::orchestration::ollama_distiller::OllamaDistiller::new(session_store);
+            match distiller.distill(&base_model, &target_model).await {
+                Ok(name) => println!("🎉 Distillation successful! Model '{}' compiled and registered inside Ollama.", name),
+                Err(e) => println!("❌ Distillation failed: {}", e),
             }
         }
 

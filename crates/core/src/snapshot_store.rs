@@ -132,6 +132,47 @@ impl SnapshotStore {
         }
         Ok(count)
     }
+
+    /// Snapshot a directory recursively. Returns a map of relative path -> snapshot_id.
+    pub async fn snapshot_dir(&self, dir_path: &Path) -> Result<HashMap<PathBuf, String>> {
+        let mut snapshots = HashMap::new();
+        self.snapshot_dir_recursive(dir_path, dir_path, &mut snapshots).await?;
+        Ok(snapshots)
+    }
+
+    async fn snapshot_dir_recursive(&self, root: &Path, current: &Path, snapshots: &mut HashMap<PathBuf, String>) -> Result<()> {
+        let skip_dirs = ["target", ".git", ".pharmakon", "node_modules", ".fastembed_cache"];
+        let mut entries = tokio::fs::read_dir(current).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if path.is_dir() {
+                if skip_dirs.contains(&name_str.as_ref()) { continue; }
+                if name_str.starts_with('.') { continue; }
+                Box::pin(self.snapshot_dir_recursive(root, &path, snapshots)).await?;
+            } else if path.is_file() {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    if let Ok(id) = self.snapshot_file(&path).await {
+                        snapshots.insert(rel.to_path_buf(), id);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore a directory from a previous snapshot map.
+    pub async fn restore_dir(&self, root: &Path, snapshots: &HashMap<PathBuf, String>) -> Result<()> {
+        for (rel_path, id) in snapshots {
+            let full_path = root.join(rel_path);
+            if let Some(parent) = full_path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            let _ = self.restore(id, &full_path).await;
+        }
+        Ok(())
+    }
 }
 
 /// Compute a content-addressed hash (SHA-256, truncated to 16 hex chars for ergonomics).
@@ -188,5 +229,33 @@ mod tests {
 
         assert_eq!(id1, id2);
         assert_eq!(store.len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_dir() {
+        let tmp = TempDir::new().unwrap();
+        let store = SnapshotStore::new(tmp.path().join("snapshots"));
+
+        // Setup a directory structure
+        let root = tmp.path().join("project");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(root.join("main.rs"), b"main contents").await.unwrap();
+        tokio::fs::create_dir_all(root.join("src")).await.unwrap();
+        tokio::fs::write(root.join("src/lib.rs"), b"lib contents").await.unwrap();
+
+        // Snapshot directory
+        let snap = store.snapshot_dir(&root).await.unwrap();
+        assert_eq!(snap.len(), 2);
+
+        // Mutate files
+        tokio::fs::write(root.join("main.rs"), b"mutated main").await.unwrap();
+        tokio::fs::write(root.join("src/lib.rs"), b"mutated lib").await.unwrap();
+
+        // Restore directory
+        store.restore_dir(&root, &snap).await.unwrap();
+
+        // Verify restoration
+        assert_eq!(tokio::fs::read_to_string(root.join("main.rs")).await.unwrap(), "main contents");
+        assert_eq!(tokio::fs::read_to_string(root.join("src/lib.rs")).await.unwrap(), "lib contents");
     }
 }

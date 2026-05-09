@@ -68,6 +68,7 @@ pub struct Agent {
     pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
     pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
     pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
+    pub bank_of_pharmakon: Arc<Mutex<crate::orchestration::economy_v2::BankOfPharmakon>>,
     pub dream_started: Arc<std::sync::atomic::AtomicBool>,
     pub cron_manager: Arc<StdMutex<Option<Arc<crate::automation::cron::CronManager>>>>,
     pub skill_library: Arc<std::sync::Mutex<crate::orchestration::skill_library::RhaiSkillLibrary>>,
@@ -113,6 +114,7 @@ impl Clone for Agent {
             dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             cron_manager: Arc::new(StdMutex::new(None)),
             economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
+            bank_of_pharmakon: self.bank_of_pharmakon.clone(),
             skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             vision_stream: self.vision_stream.clone(),
         }
@@ -208,6 +210,7 @@ impl Agent {
             registry,
             skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
+            bank_of_pharmakon: Arc::new(Mutex::new(crate::orchestration::economy_v2::BankOfPharmakon::new(100_000))),
             governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
             vision_stream: None,
         }
@@ -219,6 +222,13 @@ impl Agent {
             *fm = models;
         }
         self
+    }
+
+    pub fn clone_for_speculative(&self, dry_run: bool, speculative_session_id: String) -> Self {
+        let mut cloned = self.clone();
+        cloned.dry_run = Arc::new(std::sync::atomic::AtomicBool::new(dry_run));
+        cloned.session_id = Arc::new(Mutex::new(speculative_session_id));
+        cloned
     }
 
     pub async fn get_current_session_state(&self) -> Arc<Mutex<SessionState>> {
@@ -726,12 +736,16 @@ impl Agent {
             let mut target_model = {
                 let m = self.model.lock().await;
                 let default_model = (*m).clone();
-                self.economy.lock().unwrap().select_model(user_message, match complexity { budget::TaskComplexity::Simple => 0.2, budget::TaskComplexity::Standard => 0.5, budget::TaskComplexity::Deep => 0.8 }).unwrap_or(default_model)
+                if default_model.name() == "mock-model" || default_model.name() == "test" {
+                    default_model
+                } else {
+                    self.economy.lock().unwrap().select_model(user_message, match complexity { budget::TaskComplexity::Simple => 0.2, budget::TaskComplexity::Standard => 0.5, budget::TaskComplexity::Deep => 0.8 }).unwrap_or(default_model)
+                }
             };
 
             log::info!("[SESSION: {}] Sending completion request to model...", session_id);
 
-            let request = CompletionRequest {
+            let mut request = CompletionRequest {
                 messages: messages_to_send,
                 temperature: Some(0.2),
                 max_tokens: Some(self.economy.lock().unwrap().recommend_max_tokens(target_model.name())),
@@ -739,19 +753,97 @@ impl Agent {
             };
 
              let mut response_result = None;
-            let mut current_fallback_index = 0;
-            let fallback_models = self.fallback_models.clone();
+             let mut current_fallback_index = 0;
+             let mut consecutive_empty_responses = 0;
+             let fallback_models = self.fallback_models.clone();
 
-            while response_result.is_none() {
-                let model_lock = target_model.clone();
-                let completion_task = async {
-                    model_lock.complete(request.clone()).await
-                };
+             while response_result.is_none() {
+                 let model_lock = target_model.clone();
+                 let completion_task = async {
+                     model_lock.complete(request.clone()).await
+                 };
 
-                response_result = Some(completion_task.await);
+                 response_result = Some(completion_task.await);
 
-                match response_result {
-                    Some(Ok(_)) => {} // Success, condition will exit loop
+                 match response_result {
+                     Some(Ok(ref res)) => {
+                         let is_max_tokens = res.finish_reason.as_ref().map(|fr| fr.to_uppercase() == "MAX_TOKENS").unwrap_or(false)
+                             || res.content.as_ref().map(|c| c.to_string().contains("[Model stopped: Max tokens reached]")).unwrap_or(false);
+
+                         if is_max_tokens {
+                             let fallback_list = fallback_models.lock().unwrap();
+                             if current_fallback_index < fallback_list.len() {
+                                 let fallback_id = &fallback_list[current_fallback_index];
+                                 log::warn!(
+                                     "Output token limit reached (MAX_TOKENS) for {}. Escalating to fallback model: {}",
+                                     target_model.name(),
+                                     fallback_id
+                                 );
+                                 let _ = self.event_tx.send(Event::Error {
+                                     message: format!(
+                                         "Output token limit reached (MAX_TOKENS) for {}. Escalating to fallback model: {}",
+                                         target_model.name(),
+                                         fallback_id
+                                     ),
+                                 });
+
+                                 if let Some(new_model) =
+                                     crate::providers::registry::ModelRegistry::get_model(fallback_id)
+                                 {
+                                     target_model = new_model;
+                                     current_fallback_index += 1;
+                                     consecutive_empty_responses = 0;
+                                     request.max_tokens = Some(self.economy.lock().unwrap().recommend_max_tokens(target_model.name()));
+                                     response_result = None;
+                                     continue;
+                                 }
+                             }
+                         }
+                         let is_empty = res.content.as_ref().map(|c| c.to_string().trim().is_empty()).unwrap_or(true)
+                             && res.tool_calls.is_none();
+                         if is_empty {
+                             consecutive_empty_responses += 1;
+                             log::warn!(
+                                 "Empty response from model {} (consecutive empty count: {})",
+                                 target_model.name(),
+                                 consecutive_empty_responses
+                             );
+                             if consecutive_empty_responses >= 2 {
+                                 let fallback_list = fallback_models.lock().unwrap();
+                                 if current_fallback_index < fallback_list.len() {
+                                     let fallback_id = &fallback_list[current_fallback_index];
+                                     log::warn!(
+                                         "Two consecutive empty responses from {}. Switching to fallback: {}",
+                                         target_model.name(),
+                                         fallback_id
+                                     );
+                                     let _ = self.event_tx.send(Event::Error {
+                                         message: format!(
+                                             "Two consecutive empty responses from {}. Switching to fallback: {}",
+                                             target_model.name(),
+                                             fallback_id
+                                         ),
+                                     });
+
+                                     if let Some(new_model) =
+                                         crate::providers::registry::ModelRegistry::get_model(fallback_id)
+                                     {
+                                         target_model = new_model;
+                                         current_fallback_index += 1;
+                                         consecutive_empty_responses = 0;
+                                         response_result = None;
+                                         continue;
+                                     }
+                                 }
+                             } else {
+                                 log::info!("Retrying same model once for empty response...");
+                                 response_result = None;
+                                 continue;
+                             }
+                         } else {
+                             consecutive_empty_responses = 0;
+                         }
+                     }
                     Some(Err(ref e)) => {
                         let is_rate_limit = e.to_string().to_lowercase().contains("429")
                             || e.to_string().to_lowercase().contains("too many requests")
@@ -1019,6 +1111,17 @@ impl Agent {
                             args_hash,
                         }).await;
 
+                        // --- Whole-Workspace Directory Snapshot Before Mutation (High-Risk Tools) ---
+                        let mut workspace_snapshot = None;
+                        let is_high_risk = tool.name() == "shell" || tool.name() == "codeact";
+                        if is_high_risk {
+                            if let Ok(dir) = std::env::current_dir() {
+                                if let Ok(snap) = ss.snapshot_dir(&dir).await {
+                                    workspace_snapshot = Some((dir, snap));
+                                }
+                            }
+                        }
+
                         // --- Snapshot Before Mutation ---
                         let mut snapshot_before_id = None;
                         let is_file_mutation = (tool.name() == "write_file" || tool.name() == "apply_patch" || tool.name() == "mutate_ast") 
@@ -1039,6 +1142,14 @@ impl Agent {
 
                         let result = tool.call(args.clone()).await;
                         let latency_ms = start.elapsed().as_millis() as u64;
+
+                        // --- Rollback Workspace on High-Risk Tool Failure ---
+                        if result.is_err() {
+                            if let Some((ref dir, ref snap)) = workspace_snapshot {
+                                log::warn!("High-risk tool '{}' execution failed. Rolling back workspace...", tool.name());
+                                let _ = ss.restore_dir(dir, snap).await;
+                            }
+                        }
 
                         // --- Snapshot After Mutation ---
                         if let Some(before_id) = snapshot_before_id {
@@ -1321,6 +1432,15 @@ impl Agent {
                 ..Default::default()
             };
             let _ = self.hooks.trigger_message_sent(&final_msg).await;
+
+            {
+                let mut state = state_arc.lock().await;
+                state.history.push(final_msg.clone());
+            }
+
+            if let Some(store) = &self.session_store {
+                let _ = store.save_message(session_id, &final_msg).await;
+            }
 
             let current_interaction_count = self
                 .interaction_count

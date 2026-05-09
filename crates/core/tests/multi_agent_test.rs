@@ -40,6 +40,7 @@ impl AgentModel for MultiAgentMockModel {
                     },
                 }]),
                 usage: None,
+                finish_reason: None,
             })
         } else if content.contains("Find latest AI trends") {
             Ok(CompletionResponse {
@@ -60,6 +61,7 @@ impl AgentModel for MultiAgentMockModel {
                     },
                 }]),
                 usage: None,
+                finish_reason: None,
             })
         } else if content.contains("AI trends found") {
             Ok(CompletionResponse {
@@ -79,12 +81,14 @@ impl AgentModel for MultiAgentMockModel {
                     },
                 }]),
                 usage: None,
+                finish_reason: None,
             })
         } else {
             Ok(CompletionResponse {
                 content: Some(MessageContent::Text("Ok.".to_string())),
                 tool_calls: None,
                 usage: None,
+                finish_reason: None,
             })
         }
     }

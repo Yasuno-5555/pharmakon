@@ -35,6 +35,7 @@ impl AgentModel for InspectableMockModel {
             content: Some(MessageContent::Text("complete called".to_string())),
             tool_calls: None,
             usage: None,
+            finish_reason: None,
         })
     }
 
@@ -83,17 +84,16 @@ async fn setup_test_agent_with_model(
 }
 
 #[tokio::test]
-async fn test_chat_calls_stream_when_no_tools() {
+async fn test_chat_calls_complete_when_no_tools() {
     let model = Arc::new(InspectableMockModel::new());
     let mut agent = setup_test_agent_with_model(model.clone()).await;
 
     let _ = agent.chat("test message").await;
 
-    // With the new reflection engine, complete() is called once after chat.
-    // We check that stream_complete was used for the main response.
+    // With the unified cognitive execution loop, complete() is called.
     assert!(
-        model.was_stream_complete_called.load(Ordering::SeqCst),
-        "stream_complete() SHOULD have been called for the main chat response"
+        model.was_complete_called.load(Ordering::SeqCst),
+        "complete() SHOULD have been called for the main chat response"
     );
 }
 

@@ -15,6 +15,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
+use anyhow::Result;
 
 // ═══════════════════════════════════════════════════════════
 // Data Structures
@@ -77,7 +78,9 @@ pub struct CompositeSkill {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressedPattern {
     pub pattern_name: String, pub signature: String,
-    pub description: String, pub occurrence_count: usize,
+    pub description: String,
+    #[serde(default)]
+    pub occurrence_count: usize,
     pub generalized_script: String,
 }
 
@@ -252,6 +255,71 @@ impl RhaiSkillLibrary {
             .collect()
     }
 
+    /// Automatically compress a successful multi-step trajectory into a single Rhai Composite Skill.
+    pub async fn compress_trajectory(
+        &mut self,
+        trajectory: &crate::trajectory::Trajectory,
+        model: &Arc<dyn pharmakon_common::AgentModel>,
+    ) -> Result<CompressedPattern> {
+        let markdown = trajectory.to_markdown();
+        let prompt = format!(
+            "Analyze the following execution trajectory of an agent solving a task. Identify the sequence of tool calls and their successful results, and write a single, clean, robust, and general-purpose Rhai script (reusable function) that automates this workflow.\n\
+            The Rhai script should:\n\
+            - Define a reusable function with generic parameters (e.g., directory paths, target search terms, replacement contents, etc.).\n\
+            - Call available primitives: read_file(path), write_file(path, content), grep(pattern, dir), shell(cmd), list_dir(path).\n\
+            - Include standard validations.\n\n\
+            Input Trajectory:\n\
+            {}\n\n\
+            Respond ONLY with a valid JSON object matching this schema (do not wrap in markdown or anything else, return pure raw JSON):\n\
+            {{\n\
+              \"pattern_name\": \"reusable_function_name\",\n\
+              \"signature\": \"fn function_name(param1, param2)\",\n\
+              \"description\": \"Short explanation of what the compressed skill does.\",\n\
+              \"generalized_script\": \"The complete Rhai script code\"\n\
+            }}",
+            markdown
+        );
+
+        let request = pharmakon_common::CompletionRequest {
+            messages: vec![pharmakon_common::Message {
+                role: "user".into(),
+                content: Some(pharmakon_common::MessageContent::Text(prompt)),
+                ..Default::default()
+            }],
+            temperature: Some(0.2),
+            max_tokens: Some(1500),
+            tools: None,
+        };
+
+        let response = model.complete(request).await?;
+        let text = response.content.as_ref()
+            .and_then(|c| c.as_text())
+            .unwrap_or("")
+            .trim();
+
+        // Clean markdown blocks if present
+        let clean_json = if text.starts_with("```json") {
+            text.strip_prefix("```json").unwrap_or(text).strip_suffix("```").unwrap_or(text).trim()
+        } else if text.starts_with("```") {
+            text.strip_prefix("```").unwrap_or(text).strip_suffix("```").unwrap_or(text).trim()
+        } else {
+            text
+        };
+
+        let mut pattern: CompressedPattern = serde_json::from_str(clean_json)?;
+        pattern.occurrence_count = 1;
+        
+        // Add to our list of compressed patterns or update frequency
+        if let Some(existing) = self.compressed_patterns.iter_mut().find(|p| p.pattern_name == pattern.pattern_name) {
+            existing.occurrence_count += 1;
+            return Ok(existing.clone());
+        } else {
+            self.compressed_patterns.push(pattern.clone());
+        }
+
+        Ok(pattern)
+    }
+
     // ─── Internal ───
 
     fn extract_anti_pattern(&mut self, script: &LabeledScript) {
@@ -424,5 +492,44 @@ mod tests {
         lib.add(s1); lib.add(s2);
         let comp = lib.compose_skills("s1", "s2");
         assert!(comp.is_some());
+    }
+
+    struct MockCompressModel;
+    #[async_trait::async_trait]
+    impl pharmakon_common::AgentModel for MockCompressModel {
+        async fn complete(&self, _request: pharmakon_common::CompletionRequest) -> pharmakon_common::AgentResult<pharmakon_common::CompletionResponse> {
+            Ok(pharmakon_common::CompletionResponse {
+                content: Some(pharmakon_common::MessageContent::Text(
+                    "```json\n{\n  \"pattern_name\": \"batch_rename\",\n  \"signature\": \"fn batch_rename(dir, ext)\",\n  \"description\": \"Rename all files in directory\",\n  \"generalized_script\": \"let files = list_dir(dir);\"\n}\n```".to_string()
+                )),
+                tool_calls: None,
+                usage: None,
+                finish_reason: None,
+            })
+        }
+        async fn stream_complete(
+            &self,
+            _req: pharmakon_common::CompletionRequest,
+        ) -> pharmakon_common::AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = pharmakon_common::AgentResult<String>> + Send + 'static>>> {
+            unimplemented!()
+        }
+        fn name(&self) -> &str { "mock_compress" }
+    }
+
+    #[tokio::test]
+    async fn test_compress_trajectory() {
+        let mut lib = RhaiSkillLibrary::new();
+        let trajectory = crate::trajectory::Trajectory::new("session-123".to_string(), "test-model".to_string());
+        let model: Arc<dyn pharmakon_common::AgentModel> = Arc::new(MockCompressModel);
+        
+        let pattern = lib.compress_trajectory(&trajectory, &model).await.unwrap();
+        assert_eq!(pattern.pattern_name, "batch_rename");
+        assert_eq!(pattern.signature, "fn batch_rename(dir, ext)");
+        assert_eq!(pattern.description, "Rename all files in directory");
+        assert_eq!(pattern.generalized_script, "let files = list_dir(dir);");
+        assert_eq!(pattern.occurrence_count, 1);
+        
+        let second_pattern = lib.compress_trajectory(&trajectory, &model).await.unwrap();
+        assert_eq!(second_pattern.occurrence_count, 2);
     }
 }

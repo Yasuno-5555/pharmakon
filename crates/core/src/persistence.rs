@@ -644,6 +644,38 @@ impl DbSessionStore {
         Ok(rows)
     }
 
+    pub async fn load_all_trajectories(&self, limit: usize) -> Result<Vec<Trajectory>> {
+        #[derive(sqlx::FromRow)]
+        struct TrajectoryRow {
+            session_id: String,
+            steps_json: String,
+            model: Option<String>,
+            created_at: Option<DateTime<Utc>>,
+        }
+
+        let rows = sqlx::query_as::<_, TrajectoryRow>(
+            "SELECT session_id, steps_json, model, created_at FROM trajectories ORDER BY created_at DESC LIMIT ?"
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut trajectories = Vec::new();
+        for r in rows {
+            if let Ok(steps) = serde_json::from_str::<Vec<crate::trajectory::TrajectoryStep>>(&r.steps_json) {
+                trajectories.push(Trajectory {
+                    session_id: r.session_id,
+                    steps,
+                    metadata: crate::trajectory::TrajectoryMetadata {
+                        model: r.model.unwrap_or_default(),
+                        created_at: r.created_at.unwrap_or_else(Utc::now),
+                    },
+                });
+            }
+        }
+        Ok(trajectories)
+    }
+
     pub async fn save_research_cache(
         &self,
         url: &str,

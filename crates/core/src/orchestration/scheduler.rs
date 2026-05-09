@@ -226,6 +226,12 @@ async fn llm_classify(
 /// Enriched heuristic classification with extended keyword sets.
 fn heuristic_classify(description: &str) -> TaskComplexity {
     let lower = description.to_lowercase();
+    let trimmed = lower.trim();
+
+    // If message is very short (e.g., < 3 words or < 12 chars), default to Simple
+    // unless it explicitly contains strong architectural keywords like "rewrite" or "refactor"
+    let word_count = trimmed.split_whitespace().count();
+    let is_short = word_count < 3 || trimmed.len() < 12;
 
     // Deep: complex, multi-step, or architectural tasks
     const DEEP_KEYWORDS: &[&str] = &[
@@ -235,8 +241,12 @@ fn heuristic_classify(description: &str) -> TaskComplexity {
         "concurrency", "async migration", "database migration",
     ];
 
-    if DEEP_KEYWORDS.iter().any(|k| lower.contains(k)) {
+    if DEEP_KEYWORDS.iter().any(|k| trimmed.contains(k)) {
         return TaskComplexity::Deep;
+    }
+
+    if is_short {
+        return TaskComplexity::Simple;
     }
 
     // Standard: file/code modifications
@@ -246,7 +256,7 @@ fn heuristic_classify(description: &str) -> TaskComplexity {
         "optimize", "improve", "review", "analyze",
     ];
 
-    if STANDARD_KEYWORDS.iter().any(|k| lower.contains(k)) {
+    if STANDARD_KEYWORDS.iter().any(|k| trimmed.contains(k)) {
         return TaskComplexity::Standard;
     }
 

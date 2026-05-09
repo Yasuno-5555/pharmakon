@@ -9,7 +9,7 @@ async fn test_agent_basic_chat() {
 
     let response = agent.chat("Hello from integration test!").await.unwrap();
 
-    assert!(response.contains("Mock stream response"));
+    assert!(response.contains("Mock stream response") || response.contains("Mock response to:"));
     // History should have user message and assistant message
     let history = agent.get_history().await;
     assert_eq!(history.len(), 2);

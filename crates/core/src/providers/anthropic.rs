@@ -147,6 +147,10 @@ impl AgentModel for AnthropicModel {
             }
         }
 
+        let finish_reason = json["stop_reason"].as_str().map(|s| {
+            if s == "max_tokens" { "MAX_TOKENS" } else { s }.to_string()
+        });
+
         Ok(CompletionResponse {
             content: if content_text.is_empty() {
                 None
@@ -159,6 +163,7 @@ impl AgentModel for AnthropicModel {
                 Some(tool_calls)
             },
             usage: None,
+            finish_reason,
         })
     }
 

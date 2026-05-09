@@ -571,21 +571,29 @@ impl AgentModel for GeminiModel {
         let mut content = None;
         let mut tool_calls = Vec::new();
 
-        if let Some(cand_content) = &candidate.content {
-            if cand_content.parts.is_empty() {
-                log::warn!(
-                    "Gemini returned a candidate with no parts. Finish reason: {:?}",
-                    candidate.finish_reason
-                );
-                if let Some(reason) = &candidate.finish_reason {
-                    if reason != "STOP" {
-                        content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
-                    } else {
-                        content = Some(MessageContent::Text(String::new()));
-                    }
-                }
-            }
+        let has_parts = if let Some(cand_content) = &candidate.content {
+            !cand_content.parts.is_empty()
+        } else {
+            false
+        };
 
+        if !has_parts {
+            log::warn!(
+                "Gemini returned a candidate with no content or no parts. Finish reason: {:?}",
+                candidate.finish_reason
+            );
+            if let Some(reason) = &candidate.finish_reason {
+                if reason == "MAX_TOKENS" {
+                    content = Some(MessageContent::Text("[Model stopped: Max tokens reached]".to_string()));
+                } else if reason == "STOP" {
+                    content = Some(MessageContent::Text(String::new()));
+                } else {
+                    content = Some(MessageContent::Text(format!("[Model stopped: {}]", reason)));
+                }
+            } else {
+                content = Some(MessageContent::Text(String::new()));
+            }
+        } else if let Some(cand_content) = &candidate.content {
             for (i, part) in cand_content.parts.iter().enumerate() {
                 log::info!(
                     "Processing part {}: text={}, function_call={}, function_response={}, inline_data={}",
@@ -607,9 +615,6 @@ impl AgentModel for GeminiModel {
                 if let Some(ref th) = part.thought {
                     log::info!("Received native thought from Gemini (length: {})", th.len());
                     if content.is_none() {
-                        // For now, let's treat native thoughts as a special type of content if we want to show them
-                        // or just log them. OpenClaw wants them separate.
-                        // We'll wrap it in <think> tags if it's not already, so the agent can filter it later.
                         content = Some(MessageContent::Text(format!("<think>{}</think>", th)));
                     } else if let Some(MessageContent::Text(ref mut existing)) = content {
                         existing.push_str(&format!("\n<think>{}</think>", th));
@@ -655,6 +660,7 @@ impl AgentModel for GeminiModel {
                     None
                 },
             }),
+            finish_reason: candidate.finish_reason.clone(),
         })
     }
 
