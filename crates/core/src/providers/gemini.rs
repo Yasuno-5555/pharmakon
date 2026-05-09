@@ -286,22 +286,28 @@ impl GeminiModel {
 
                     // Pre-flight validation: Ensure the function name is not empty before sending to API
                     if function_name.is_empty() {
-                       log::error!("A tool response part has an empty function name for tool_call_id {:?}. This will be rejected by the Gemini API.", m.tool_call_id);
-                        // To prevent a crash and allow the agent to potentially recover, we are skipping this part.
-                        // A more robust solution might return an error here.
-                       continue;
+                       log::error!("A tool response part has an empty function name for tool_call_id {:?}. Falling back to text part to avoid API rejection.", m.tool_call_id);
+                        // Emit the tool result as a text part instead so the model still receives the information
+                        // and the request isn't rejected by the Gemini API for an invalid function_response.
+                        parts.push(GeminiPart {
+                            text: Some(format!("[Tool result (unknown tool)]: {}", content)),
+                            inline_data: None,
+                            function_call: None,
+                            function_response: None,
+                            thought: None,
+                        });
+                    } else {
+                        parts.push(GeminiPart {
+                            text: None,
+                            inline_data: None,
+                            function_call: None,
+                            function_response: Some(GeminiFunctionResponse {
+                                name: function_name,
+                                response: serde_json::json!({ "result": content.to_string() }),
+                            }),
+                            thought: None,
+                        });
                     }
-
-                    parts.push(GeminiPart {
-                        text: None,
-                        inline_data: None,
-                        function_call: None,
-                        function_response: Some(GeminiFunctionResponse {
-                            name: function_name,
-                            response: serde_json::json!({ "result": content.to_string() }),
-                        }),
-                        thought: None,
-                    });
                 }
 
             if !parts.is_empty() {

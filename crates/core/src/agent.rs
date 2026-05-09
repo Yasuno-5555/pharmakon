@@ -598,7 +598,7 @@ impl Agent {
                             id: format!("wm-{}", i),
                             summary: unit.summary.clone().unwrap_or_else(|| {
                                 if unit.content.len() > 100 {
-                                    format!("{}...", &unit.content[..100])
+                                    format!("{}...", unit.content.chars().take(100).collect::<String>())
                                 } else {
                                     unit.content.clone()
                                 }
@@ -1061,7 +1061,7 @@ impl Agent {
                             action: format!("Completed {}", tool.name()),
                             hypothesis: "".to_string(),
                             observation: Some(if result_str.len() > 100 {
-                                format!("{}...", &result_str[..100])
+                                format!("{}...", result_str.chars().take(100).collect::<String>())
                             } else {
                                 result_str.clone()
                             }),
@@ -1334,7 +1334,7 @@ impl Agent {
                 let mut notebook = self.research_notebook.lock().await;
                 if notebook.current_goal.is_empty() || notebook.current_goal == "Uninitialized" {
                     *notebook = pharmakon_common::ResearchNotebook::new(
-                        &user_message[..user_message.len().min(80)]
+                        &user_message.chars().take(80).collect::<String>()
                     );
                 }
                 if notebook.should_stop() {
@@ -1343,8 +1343,8 @@ impl Agent {
                 notebook.step_count += 1;
                 notebook.verified_facts.push(pharmakon_common::Fact {
                     content: format!("Task: {} → {}", 
-                        &user_message[..user_message.len().min(60)],
-                        &final_content[..final_content.len().min(100)]),
+                        user_message.chars().take(60).collect::<String>(),
+                        final_content.chars().take(100).collect::<String>()),
                     source_url: session_id.to_string(),
                     confidence: 0.7,
                     timestamp: chrono::Utc::now(),
@@ -1677,7 +1677,7 @@ impl Agent {
         log::info!(
             "Rollback: restored {} to snapshot {}",
             path.display(),
-            &snapshot_id[..snapshot_id.len().min(8)]
+            snapshot_id.chars().take(8).collect::<String>()
         );
         Ok(())
     }
