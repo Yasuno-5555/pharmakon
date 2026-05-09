@@ -104,9 +104,14 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     agent.add_tool(Arc::new(crate::orchestration::mcts::MctsSimulatorTool::new(agent_weak.clone()))).await;
     agent.add_tool(Arc::new(crate::orchestration::rlfc::RlfcTool::new(agent_weak.clone()))).await;
 
-    // --- CodeAct ---
-    agent.add_tool(Arc::new(crate::orchestration::codeact::CodeActTool::new(
+    // --- CodeAct (model-adaptive routing) ---
+    let model_name = {
+        let m = agent.model.lock().await;
+        m.name().to_string()
+    };
+    agent.add_tool(Arc::new(crate::orchestration::codeact::CodeActTool::with_model_family(
         std::env::current_dir().unwrap_or_default(),
+        &model_name,
     ))).await;
 
     // --- Swarm ---
@@ -168,6 +173,15 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     if agent.knowledge_nexus.is_some() {
         agent.add_tool(Arc::new(MemoryManagementTool)).await;
     }
+
+    // --- Cron / Automation ---
+    let cron_mgr = Arc::new(crate::automation::cron::CronManager::new().await?);
+    let agent_weak = Arc::downgrade(&Arc::new(Mutex::new(agent.clone())));
+    agent.add_tool(Arc::new(crate::automation::cron_tool::CronTool::new(
+        cron_mgr.clone(),
+        agent_weak,
+    ))).await;
+    *agent.cron_manager.lock().unwrap() = Some(cron_mgr);
 
     log::info!("All agent tools initialized.");
     Ok(())

@@ -342,11 +342,15 @@ mod tests {
     #[test]
     fn test_evpi_gating() {
         let evpi = EvpiEstimator::new(0.92, 0.3, 0.90);
-        // High similarity → low EVPI → skip LLM if cost is high
-        assert!(!evpi.should_call(3.0, 0.01));
+        // evpi = max(0.95-0.3*0.3 - 0.92*0.90, 0) = max(0.032, 0) = 0.032
+        // High similarity → low EVPI → skip LLM if cost > EVPI
+        // threshold(5.0, 0.01) = 0.05 > 0.032 → should skip
+        assert!(!evpi.should_call(5.0, 0.01));
 
         let evpi2 = EvpiEstimator::new(0.3, 0.8, 0.7);
+        // evpi = max(0.95-0.8*0.3 - 0.3*0.7, 0) = max(0.71-0.21, 0) = 0.50
         // Low similarity → high EVPI → call LLM
+        // threshold(3.0, 0.01) = 0.03 < 0.50 → should call
         assert!(evpi2.should_call(3.0, 0.01));
     }
 
@@ -645,14 +649,18 @@ impl CognitiveLoan {
     pub fn approve(&self) -> bool { self.expected_value() > 0.0 && self.default_probability < 0.3 }
 }
 
-pub struct ExpectationSimulator { pub future_token_prices: Vec<f64>, pub volatility_estimate: f64, pub regime_probabilities: std::collections::HashMap<String,f64> }
+pub struct ExpectationSimulator { pub future_token_prices: Vec<f64>, pub volatility_estimate: f64, pub regime_probabilities: std::collections::HashMap<String,f64>, pub rng: rand::rngs::StdRng }
 impl ExpectationSimulator {
-    pub fn new() -> Self { Self { future_token_prices: Vec::new(), volatility_estimate: 0.1, regime_probabilities: std::collections::HashMap::new() } }
+    pub fn new() -> Self { use rand::SeedableRng; Self { future_token_prices: Vec::new(), volatility_estimate: 0.1, regime_probabilities: std::collections::HashMap::new(), rng: rand::rngs::StdRng::seed_from_u64(42) } }
+    /// Create with a specific seed for reproducible simulations.
+    pub fn with_seed(seed: u64) -> Self { use rand::SeedableRng; Self { future_token_prices: Vec::new(), volatility_estimate: 0.1, regime_probabilities: std::collections::HashMap::new(), rng: rand::rngs::StdRng::seed_from_u64(seed) } }
     pub fn simulate(&mut self, current_price: f64, steps: usize) -> Vec<f64> {
+        use rand::Rng;
         self.future_token_prices.clear();
         let mut price = current_price;
         for _ in 0..steps {
-            let shock = (rand::random::<f64>() - 0.5) * self.volatility_estimate;
+            let r: f64 = self.rng.gen_range(0.0..1.0);
+            let shock = (r - 0.5) * self.volatility_estimate;
             price = (price + shock).max(0.001);
             self.future_token_prices.push(price);
         }
@@ -726,9 +734,19 @@ impl GeneralEquilibrium {
     pub fn add(&mut self, a: AgentProfile) { self.agents.push(a); }
     pub fn clear(&mut self, iters: usize) -> f64 {
         for _ in 0..iters {
-            let demand: f64 = self.agents.iter().map(|a| a.allocated_token_share * self.total_supply as f64 / self.shadow_price.max(0.001)).sum();
+            // Bounded linear demand: each agent demands share * supply adjusted by urgency
+            // When p < 1.0 (tokens cheap): demand rises with risk_tolerance * elasticity
+            // When p > 1.0 (tokens expensive): demand falls toward 0
+            let demand: f64 = self.agents.iter().map(|a| {
+                let base = a.allocated_token_share * self.total_supply as f64;
+                let price_gap = 1.0 - self.shadow_price;
+                let elasticity = a.risk_tolerance * 0.5;
+                (base + elasticity * price_gap * base).max(0.0).min(self.total_supply as f64 * 2.0)
+            }).sum();
             let excess = demand - self.total_supply as f64;
-            self.shadow_price = (self.shadow_price + 0.1 * excess / self.total_supply as f64).clamp(0.001, 10.0);
+            // Damped Walrasian tâtonnement
+            let step = 0.05 * excess / self.total_supply.max(1) as f64;
+            self.shadow_price = (self.shadow_price + step).clamp(0.001, 10.0);
             if excess.abs() < 1.0 { break; }
         }
         self.shadow_price

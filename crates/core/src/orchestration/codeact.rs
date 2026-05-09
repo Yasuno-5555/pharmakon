@@ -1,13 +1,19 @@
-//! CodeAct Hybrid Mode — Rhai + Python scripting engine for compound tool execution.
+//! CodeAct Hybrid Mode — Model-Adaptive Scripting Engine for compound tool execution.
 //!
-//! Architecture:
-//!   1st attempt: Rhai (fast, sandboxed)
-//!   2nd attempt: Python via system `python3` (higher LLM fluency)
+//! Architecture (model-agnostic harness):
+//!   1. Auto-detect script language (Python vs Rhai) from syntax
+//!   2. Route to native engine: Python → python3, Rhai → embedded engine
+//!   3. Model-family preference: Gemini → Python-first, others → Rhai-first
+//!   4. Silent fallback: engine failures degrade to the other engine (DEBUG level)
+//!
+//! Design principle (Cursor/OpenHands style):
+//!   The *harness* absorbs model quirks. The model sees a single unified `codeact`
+//!   tool accepting any scripting language; the harness routes to the best engine.
 //!
 //! Benefits:
 //!   - 1 LLM turn = 10+ tool calls (control flow in script)
 //!   - Intermediate results stay in script scope, not token-wasting context
-//!   - Self-debugging: errors are fed back for the LLM to fix
+//!   - Model-agnostic: works with any provider without prompt engineering
 
 use anyhow::Result;
 use rhai::{Engine, Scope, Dynamic, EvalAltResult};
@@ -85,13 +91,73 @@ impl CodeActToolbox {
     }
 }
 
+/// Detected script language for model-adaptive routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptLanguage { Python, Rhai, Ambiguous }
+
+/// Model family for adaptive routing preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFamily { Gemini, OpenAI, Anthropic, Groq, Generic }
+
+impl ModelFamily {
+    /// Detect model family from model ID string.
+    pub fn from_model_id(id: &str) -> Self {
+        let lower = id.to_lowercase();
+        if lower.contains("gemini") { ModelFamily::Gemini }
+        else if lower.contains("gpt") || lower.contains("o1") || lower.contains("o3") { ModelFamily::OpenAI }
+        else if lower.contains("claude") { ModelFamily::Anthropic }
+        else if lower.contains("groq") || lower.contains("llama") { ModelFamily::Groq }
+        else { ModelFamily::Generic }
+    }
+
+    /// Preferred execution order for this model family.
+    /// Gemini generates Python-like syntax → Python-first.
+    /// Others may generate valid Rhai → Rhai-first (fast, sandboxed).
+    pub fn preferred_order(&self) -> (ScriptLanguage, ScriptLanguage) {
+        match self {
+            ModelFamily::Gemini => (ScriptLanguage::Python, ScriptLanguage::Rhai),
+            _ => (ScriptLanguage::Rhai, ScriptLanguage::Python),
+        }
+    }
+}
+
+/// Auto-detect script language from syntax clues.
+pub fn detect_language(script: &str) -> ScriptLanguage {
+    let trimmed = script.trim();
+    // Strong Python signals
+    let python_indicators = [
+        "print(", "def ", "import ", "from ", "class ",
+        "elif ", "except ", "finally ", "with ", "yield ",
+        "lambda ", "async ", "await ",
+        "# ",  // Python comments (Rhai uses //)
+    ];
+    // Strong Rhai signals
+    let rhai_indicators = [
+        "let ", "const ", "fn ", "// ",
+        "loop {", "while ", "for ", "break;",
+        "continue;", "return;",
+    ];
+
+    let has_python = python_indicators.iter().any(|kw| trimmed.contains(kw));
+    let has_rhai = rhai_indicators.iter().any(|kw| trimmed.contains(kw));
+
+    if has_python && !has_rhai { ScriptLanguage::Python }
+    else if has_rhai && !has_python { ScriptLanguage::Rhai }
+    else { ScriptLanguage::Ambiguous }
+}
+
 pub struct CodeActEngine {
     engine: Engine,
     toolbox: Arc<CodeActToolbox>,
+    /// Model family for adaptive routing preference.
+    model_family: ModelFamily,
 }
 
 impl CodeActEngine {
-    pub fn new(workspace_root: PathBuf) -> Self {
+    pub fn new(workspace_root: PathBuf) -> Self { Self::with_model_family(workspace_root, ModelFamily::Generic) }
+
+    /// Create engine with model-family-aware routing preference.
+    pub fn with_model_family(workspace_root: PathBuf, model_family: ModelFamily) -> Self {
         let mut engine = Engine::new();
         let toolbox = Arc::new(CodeActToolbox::new(workspace_root));
 
@@ -113,29 +179,68 @@ impl CodeActEngine {
         engine.register_fn("list_dir", move |path: &str| -> Result<Vec<String>, Box<EvalAltResult>> { tb.list_dir(path) });
 
         engine.set_max_modules(0);
-        Self { engine, toolbox }
+        Self { engine, toolbox, model_family }
     }
 
-    /// Execute a script. 1st: Rhai (fast, sandboxed). 2nd: Python (higher LLM fluency).
+    /// Execute a script with model-adaptive routing.
+    ///   1. Detect language (Python/Rhai/Ambiguous)
+    ///   2. Route to preferred engine (model-family aware)
+    ///   3. Silent fallback to other engine on failure
     pub fn execute(&self, script: &str) -> CodeActResult {
+        let lang = detect_language(script);
+        let (first, second) = self.model_family.preferred_order();
+
+        // Resolve execution order: detected language overrides model preference
+        let order = match (lang, first) {
+            (ScriptLanguage::Python, _) => (ScriptLanguage::Python, ScriptLanguage::Rhai),
+            (ScriptLanguage::Rhai, _) => (ScriptLanguage::Rhai, ScriptLanguage::Python),
+            (ScriptLanguage::Ambiguous, pref) => (pref, if pref == ScriptLanguage::Python { ScriptLanguage::Rhai } else { ScriptLanguage::Python }),
+        };
+
+        // 1st attempt
+        let first_result = match order.0 {
+            ScriptLanguage::Python => self.execute_python(script),
+            ScriptLanguage::Rhai => self.execute_rhai(script),
+            ScriptLanguage::Ambiguous => unreachable!(),
+        };
+
+        if first_result.success { return first_result; }
+
+        log::debug!(
+            "CodeAct: {:?} failed ({}), falling back to {:?}",
+            order.0,
+            first_result.error.as_deref().unwrap_or("unknown"),
+            order.1
+        );
+
+        // 2nd attempt (fallback)
+        match order.1 {
+            ScriptLanguage::Python => self.execute_python(script),
+            ScriptLanguage::Rhai => self.execute_rhai(script),
+            ScriptLanguage::Ambiguous => unreachable!(),
+        }
+    }
+
+    /// Try Rhai execution (returns error on failure, does NOT fall back).
+    fn execute_rhai(&self, script: &str) -> CodeActResult {
         let mut scope = Scope::new();
         scope.push_constant("WORKSPACE", self.toolbox.workspace_root.to_string_lossy().to_string());
 
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
             Ok(value) => {
                 let result_str = format!("{}", value);
-                return CodeActResult {
+                CodeActResult {
                     success: true,
                     output: if result_str.is_empty() || result_str == "()" { String::new() } else { result_str },
                     error: None,
-                };
+                }
             }
-            Err(rhai_err) => {
-                log::warn!("Rhai failed ({}), falling back to Python", rhai_err);
-            }
+            Err(rhai_err) => CodeActResult {
+                success: false,
+                output: String::new(),
+                error: Some(rhai_err.to_string()),
+            },
         }
-
-        self.execute_python(script)
     }
 
     /// Execute via system Python with built-in function wrappers.
@@ -193,6 +298,15 @@ def list_dir(path):
 
     /// Execute with pre-bound variables (Rhai only, falls back to Python without context).
     pub fn execute_with_context(&self, script: &str, context: Vec<(&str, Dynamic)>) -> CodeActResult {
+        let lang = detect_language(script);
+
+        // Rhai supports context variables; Python doesn't (would need preamble injection)
+        // If language is clearly Python, skip Rhai attempt entirely
+        if lang == ScriptLanguage::Python {
+            return self.execute_python(script);
+        }
+
+        // Try Rhai with context first
         let mut scope = Scope::new();
         scope.push_constant("WORKSPACE", self.toolbox.workspace_root.to_string_lossy().to_string());
         for (name, value) in context { scope.push_constant(name, value); }
@@ -206,7 +320,9 @@ def list_dir(path):
                     error: None,
                 };
             }
-            Err(rhai_err) => { log::warn!("Rhai failed ({}), falling back to Python", rhai_err); }
+            Err(rhai_err) => {
+                log::debug!("CodeAct with_context: Rhai failed ({}), falling back to Python", rhai_err);
+            }
         }
 
         self.execute_python(script)
@@ -229,6 +345,12 @@ impl CodeActTool {
     pub fn new(workspace_root: std::path::PathBuf) -> Self {
         Self { engine: Arc::new(CodeActEngine::new(workspace_root)) }
     }
+
+    /// Create with model-family-aware routing.
+    pub fn with_model_family(workspace_root: std::path::PathBuf, model_id: &str) -> Self {
+        let family = ModelFamily::from_model_id(model_id);
+        Self { engine: Arc::new(CodeActEngine::with_model_family(workspace_root, family)) }
+    }
 }
 
 #[async_trait::async_trait]
@@ -237,8 +359,9 @@ impl pharmakon_common::Tool for CodeActTool {
     fn name(&self) -> &str { "codeact" }
 
     fn description(&self) -> &str {
-        "Execute a script (Python or Rhai) that orchestrates multiple operations in one turn. \
-         Python preferred for LLM fluency; Rhai tried first, falls back to Python on error. \
+        "Execute a Python or Rhai script that orchestrates multiple operations in one turn. \
+         The engine auto-detects your script language and routes to the best runtime. \
+         Write in whichever language you're most fluent in. \
          Functions: read_file(path)->String, write_file(path,content), grep(pattern,dir)->[String], \
          shell(cmd)->String, list_dir(path)->[String]. Use for compound flows."
     }

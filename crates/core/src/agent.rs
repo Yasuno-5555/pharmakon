@@ -69,6 +69,7 @@ pub struct Agent {
     pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
     pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
     pub dream_started: Arc<std::sync::atomic::AtomicBool>,
+    pub cron_manager: Arc<StdMutex<Option<Arc<crate::automation::cron::CronManager>>>>,
     pub skill_library: Arc<std::sync::Mutex<crate::orchestration::skill_library::RhaiSkillLibrary>>,
     pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
 }
@@ -110,6 +111,7 @@ impl Clone for Agent {
             registry: self.registry.clone(),
             governor: self.governor.clone(),
             dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            cron_manager: Arc::new(StdMutex::new(None)),
             economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
             skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             vision_stream: self.vision_stream.clone(),
@@ -202,6 +204,7 @@ impl Agent {
                 home.join(".pharmakon").join("snapshots"),
             )),
             dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            cron_manager: Arc::new(StdMutex::new(None)),
             registry,
             skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
@@ -485,7 +488,17 @@ impl Agent {
             model.as_ref(),
         ).await;
 
+        // --- World Model Agent fork: simulate-before-acting for Deep tasks ---
+        if complexity == budget::TaskComplexity::Deep {
+            log::info!("[SESSION: {}] World Model activated for Deep task", session_id);
+            match crate::orchestration::world::execute_world_model(self, session_id, user_message).await {
+                Ok(result) => return Ok(result),
+                Err(e) => log::warn!("World Model failed ({}), falling back to standard CodeAct", e),
+            }
+        }
+
         let budget = budget::estimate_budget(complexity);
+
         let mut progress_tracker = ProgressTracker::new(&budget.policy);
         let mut current_iteration = 0;
 
@@ -607,10 +620,16 @@ impl Agent {
                     let reg = self.registry.lock().await;
                     reg.catalog.capability_summary()
                 };
+                // Inject skill library guidance (few-shot examples + anti-patterns)
+                let skill_guidance = {
+                    let lib = self.skill_library.lock().unwrap();
+                    crate::orchestration::skill_library::build_codeact_system_prompt(&lib, user_message)
+                };
+
                 let layout = crate::system_prompt::PromptLayout {
                     capability_summary: cap_summary,
                     dynamic_context,
-                    system_rules: prompt_manager.soul().system_prompt.clone(),
+                    system_rules: format!("{}\n{}", prompt_manager.soul().system_prompt, skill_guidance),
                     playbooks: {
                         if state.active_playbooks.is_empty() {
                             "No specialized playbooks active.".to_string()
@@ -660,11 +679,30 @@ impl Agent {
                     .collect::<Vec<_>>();
 
                 // 2. Search for relevant tools based on the current task/query
-                // We use the last message or the whole task as query
                 let search_results = reg.search(user_message, 15);
                 for meta in search_results {
                     if !tools_to_inject.iter().any(|t| t.name == meta.name) {
                         tools_to_inject.push(meta);
+                    }
+                }
+
+                // 3. Serendipity injection: randomly sample 3 non-core tools
+                // to increase codex tool discovery (66 tools otherwise invisible to BM25)
+                let non_core: Vec<_> = reg.all_metadata().iter()
+                    .filter(|m| m.category != ToolCategory::Core)
+                    .cloned()
+                    .collect();
+                if !non_core.is_empty() {
+                    let n_sample = 3.min(non_core.len());
+                    let mut sampled: Vec<_> = non_core.iter()
+                        .filter(|m| !tools_to_inject.iter().any(|t| t.name == m.name))
+                        .collect();
+                    // Rotating sample: use interaction count as seed for variety
+                    let seed = self.interaction_count.load(std::sync::atomic::Ordering::SeqCst) as usize;
+                    let start = seed % sampled.len().max(1);
+                    for i in 0..n_sample {
+                        let idx = (start + i * 7 + i * i) % sampled.len().max(1);
+                        tools_to_inject.push(sampled[idx].clone());
                     }
                 }
 
@@ -702,7 +740,7 @@ impl Agent {
             let request = CompletionRequest {
                 messages: messages_to_send,
                 temperature: Some(0.2),
-                max_tokens: Some(4096),
+                max_tokens: Some(self.economy.lock().unwrap().recommend_max_tokens()),
                 tools: tool_definitions,
             };
 
@@ -771,6 +809,25 @@ impl Agent {
 
             let response: pharmakon_common::agent_types::CompletionResponse =
                 response_result.unwrap().unwrap();
+            // Feed actual API token consumption into the DSGE economy layer
+            if let Some(ref usage) = response.usage {
+                let mut economy = self.economy.lock().unwrap();
+                economy.record_token_usage(usage.prompt_tokens as u64, usage.completion_tokens as u64);
+                self.total_tokens.fetch_add(usage.total_tokens as u64, std::sync::atomic::Ordering::SeqCst);
+                // Record per-call observation for online production function fitting
+                let quality_proxy = if response.content.is_some() { 0.8 } else { 0.3 };
+                economy.record_observation(crate::orchestration::dsge_integration::CallObservation {
+                    tokens_spent: usage.total_tokens as u64,
+                    latency_ms: start_time.elapsed().as_millis() as u64,
+                    success: response.content.is_some() || response.tool_calls.is_some(),
+                    model_id: target_model.name().to_string(),
+                    quality_proxy,
+                });
+                // Periodic online fit: every 8 observations
+                if economy.observations.len() % 8 == 0 {
+                    economy.update_production_from_observations();
+                }
+            }
             { let mn = target_model.name().to_string(); let lat = start_time.elapsed().as_millis() as u64; self.economy.lock().unwrap().record_model_result(&mn, lat, true, false); }
             self.economy.lock().unwrap().observe_latency(start_time.elapsed().as_millis() as u64);
 
@@ -838,6 +895,7 @@ impl Agent {
                                     Err(anyhow!("Tool not found: {}", tool_call.function.name)),
                                     tool_name_from_call,
                                     0,
+                                    String::new(),
                                 );
                             }
                         };
@@ -865,6 +923,7 @@ impl Agent {
                                     Ok(format!("Tool '{}' is not allowed.", tool.name())),
                                     tool_name,
                                     0,
+                                    String::new(),
                                 );
                             }
 
@@ -877,6 +936,7 @@ impl Agent {
                                     Ok(format!("Denied by policy: {}", reason)),
                                     tool_name,
                                     0,
+                                    String::new(),
                                 );
                             }
                             crate::security::policy::PolicyAction::RequireApproval(reason) => {
@@ -915,6 +975,7 @@ impl Agent {
                                     Ok("Denied by user.".to_string()),
                                     tool_name,
                                     0,
+                                    String::new(),
                                 );
                             }
                         }
@@ -1019,7 +1080,7 @@ impl Agent {
                             output_hash: crate::event_log::short_hash(&result_str),
                         }).await;
                         
-                        (tool_call.id.clone(), result.map_err(|e| anyhow!(e.0)), tool_name, latency_ms)
+                        (tool_call.id.clone(), result.map_err(|e| anyhow!(e.0)), tool_name, latency_ms, tool_call.function.arguments.clone())
                     }));
                 }
 
@@ -1027,13 +1088,53 @@ impl Agent {
                 let mut tool_errors = Vec::new();
 
                 for task_res in task_results {
-                    if let Ok((tool_call_id, result_res, tool_name, latency_ms)) = task_res {
+                    if let Ok((tool_call_id, result_res, tool_name, latency_ms, tool_args)) = task_res {
                         let success = result_res.is_ok();
                          if success {
                             snapshot.successful_tool_calls += 1;
                         }
                         let error = result_res.as_ref().err().map(|e: &anyhow::Error| e.to_string());
-                        
+
+                        // Record codeact scripts to skill library (before error is moved)
+                        if tool_name == "codeact" {
+                            if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&tool_args) {
+                                if let Some(script) = args_val.get("script").and_then(|s| s.as_str()) {
+                                    let mut lib = self.skill_library.lock().unwrap();
+                                    if success {
+                                        lib.add(crate::orchestration::skill_library::LabeledScript {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            task_description: user_message.to_string(),
+                                            script: script.to_string(),
+                                            label: crate::orchestration::skill_library::Label::Success {
+                                                verified_by: "runtime".to_string()
+                                            },
+                                            category: "codeact".to_string(),
+                                            timestamp: chrono::Utc::now(),
+                                            function_signature: None,
+                                            usage_count: 1,
+                                            lifecycle: crate::orchestration::skill_library::PrimitiveStage::Experimental,
+                                            genome: Default::default(),
+                                        });
+                                    } else {
+                                        lib.add(crate::orchestration::skill_library::LabeledScript {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            task_description: user_message.to_string(),
+                                            script: script.to_string(),
+                                            label: crate::orchestration::skill_library::Label::RuntimeError {
+                                                message: error.clone().unwrap_or_default(),
+                                            },
+                                            category: "codeact".to_string(),
+                                            timestamp: chrono::Utc::now(),
+                                            function_signature: None,
+                                            usage_count: 0,
+                                            lifecycle: crate::orchestration::skill_library::PrimitiveStage::Experimental,
+                                            genome: Default::default(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
                         if let Some(store) = &self.session_store {
                             let _ = store.save_tool_metric(&tool_name, success, latency_ms, error).await;
                         }
@@ -1049,6 +1150,7 @@ impl Agent {
                         };
                         
                         // ... (rest of tool result handling is the same)
+
                         if result.contains("### INJECTED PLAYBOOK") {
                             if let Some(line) = result.lines().next() {
                                 let name = line.replace("### INJECTED PLAYBOOK: ", "").trim().to_string();
@@ -1087,13 +1189,33 @@ impl Agent {
                 }
 
                 if !tool_errors.is_empty() {
-                    let error_summary = tool_errors.join("
-");
+                    // Classify each failure for strategic retry decisions
+                    let classified: Vec<_> = tool_errors.iter().map(|err| {
+                        let tool_name = err.split('\'').nth(1).unwrap_or("unknown");
+                        let class = crate::orchestration::retry::classify_failure(err, tool_name, current_iteration > 1);
+                        (tool_name.to_string(), class, err.clone())
+                    }).collect();
+
+                    let terminal: Vec<_> = classified.iter()
+                        .filter(|(_, c, _)| matches!(c, crate::orchestration::retry::FailureClass::Terminal))
+                        .map(|(t, _, e)| format!("{}: {}", t, e))
+                        .collect();
+                    let strategic: Vec<_> = classified.iter()
+                        .filter(|(_, c, _)| matches!(c, crate::orchestration::retry::FailureClass::Strategic))
+                        .map(|(t, _, e)| format!("{}: {}", t, e))
+                        .collect();
+
+                    let error_summary = if !terminal.is_empty() {
+                        format!("TERMINAL (do not retry):\n{}\nSTRATEGIC (consider alternative):\n{}",
+                            terminal.join("\n"), strategic.join("\n"))
+                    } else {
+                        tool_errors.join("\n")
+                    };
+
                     let rescue_message = Message {
                         role: "system".to_string(),
                         content: Some(MessageContent::Text(format!(
-                            "Some tools failed to execute. Please review the errors and try a different approach. Errors:
-{}",
+                            "Tool failures classified:\n{}",
                             error_summary
                         ))),
                         ..Default::default()
@@ -1204,6 +1326,28 @@ impl Agent {
                     let _ = nexus
                         .remember_batch(vec![(id, content_to_index)])
                         .await;
+                });
+            }
+
+            // Record task outcome to research notebook for context reuse
+            {
+                let mut notebook = self.research_notebook.lock().await;
+                if notebook.current_goal.is_empty() || notebook.current_goal == "Uninitialized" {
+                    *notebook = pharmakon_common::ResearchNotebook::new(
+                        &user_message[..user_message.len().min(80)]
+                    );
+                }
+                if notebook.should_stop() {
+                    notebook.max_steps += 5; // extend for continued use
+                }
+                notebook.step_count += 1;
+                notebook.verified_facts.push(pharmakon_common::Fact {
+                    content: format!("Task: {} → {}", 
+                        &user_message[..user_message.len().min(60)],
+                        &final_content[..final_content.len().min(100)]),
+                    source_url: session_id.to_string(),
+                    confidence: 0.7,
+                    timestamp: chrono::Utc::now(),
                 });
             }
 

@@ -8,7 +8,7 @@
 
 use crate::orchestration::cognitive_economics::{
     CognitiveBudget, CognitiveMacroState, KnowledgeCapital,
-    BellmanPlanner, ProductionFunction,
+    BellmanPlanner, ProductionFunction, RegimeSwitcher,
     model_market_quotes, select_model_by_roi, ModelMarketQuote,
 };
 use crate::model::AgentModel;
@@ -85,6 +85,33 @@ impl Default for ModelMode {
     fn default() -> Self { ModelMode::Auto }
 }
 
+/// Per-API-call observation for online production function fitting.
+#[derive(Debug, Clone)]
+pub struct CallObservation {
+    pub tokens_spent: u64,
+    pub latency_ms: u64,
+    pub success: bool,
+    pub model_id: String,
+    /// Proxy for output quality: 1.0 = task completed, 0.5 = partial, 0.0 = failure
+    pub quality_proxy: f64,
+}
+
+/// Trajectory-level telemetry for offline DSGE parameter estimation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TrajectoryTelemetry {
+    pub task_id: String,
+    pub model_id: String,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_latency_ms: u64,
+    pub retry_count: u64,
+    pub tool_call_count: u64,
+    pub success: bool,
+    pub human_correction_needed: bool,
+    pub downstream_reuse: bool,
+    pub failure_category: Option<String>,
+}
+
 pub struct AgentEconomy {
     pub budget: CognitiveBudget,
     pub macro_state: CognitiveMacroState,
@@ -94,6 +121,12 @@ pub struct AgentEconomy {
     pub mode: ModelMode,
     pub bellman: BellmanPlanner,
     pub production: ProductionFunction,
+    /// Tracks macro regime (Normal/Congestion/Crisis/Offline) for policy decisions.
+    pub regime: RegimeSwitcher,
+    /// Rolling observation buffer for online production function fitting.
+    pub observations: Vec<CallObservation>,
+    /// Accumulated trajectory telemetry for the current task.
+    pub current_telemetry: Option<TrajectoryTelemetry>,
 }
 
 impl AgentEconomy {
@@ -107,6 +140,9 @@ impl AgentEconomy {
             mode: ModelMode::Auto,
             bellman: BellmanPlanner::new(0.95),
             production: ProductionFunction { alpha: 0.95, beta: 0.5, theta: complexity.max(0.1) },
+            regime: RegimeSwitcher::new(),
+            observations: Vec::with_capacity(64),
+            current_telemetry: None,
         }
     }
 
@@ -204,5 +240,115 @@ impl AgentEconomy {
         let budget = self.budget.remaining();
         let optimal = self.bellman.bellman_iteration(budget, complexity, &self.production);
         (budget as f64 * (1.0 - 1.0 / (1.0 + optimal))).min(budget as f64) as u64
+    }
+
+    /// Recommend a dynamic `max_tokens` for the next LLM call.
+    /// Derived from: optimal ceiling × regime policy × remaining budget × learned quality.
+    /// Returns a u32 in [256, 8192] suitable for `CompletionRequest.max_tokens`.
+    pub fn recommend_max_tokens(&mut self) -> u32 {
+        // Update regime state from current macro conditions
+        let rate_limit_prob = self.model_perf.rate_limit_prob(
+            &self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
+        );
+        self.regime.update(&self.macro_state, rate_limit_prob, self.budget.llm_gated);
+
+        let policy = self.regime.policy();
+        let regime_cap = policy.max_tokens;
+
+        // Scale optimal ceiling by learned quality: lower α → fewer tokens are effective
+        let quality_scale = self.production.alpha.clamp(0.3, 1.0);
+        let ceiling = (self.budget.optimal_ceiling as f64 * quality_scale) as u32;
+
+        // Don't spend more than 25% of remaining in one call
+        let budget_cap = (self.budget.remaining() / 4) as u32;
+
+        // Floor: never go below 256 to allow tool calls
+        let recommended = ceiling.min(regime_cap).min(budget_cap).max(256).min(8192);
+
+        log::info!(
+            "Economy: recommend max_tokens={} (ceiling={}, regime={}, budget_cap={}, α={:.3})",
+            recommended, ceiling, regime_cap, budget_cap, self.production.alpha
+        );
+        recommended
+    }
+
+    // ── Observation → Estimation → Feedback Loop ──
+
+    /// Record a per-call observation for online production function fitting.
+    pub fn record_observation(&mut self, obs: CallObservation) {
+        if self.observations.len() >= 64 {
+            self.observations.remove(0);
+        }
+        self.observations.push(obs);
+    }
+
+    /// Online update of production function α, β from observed data.
+    /// Uses EMA-updated success rate as α (asymptotic quality ceiling)
+    /// and EMA-updated quality-per-token as β (rate of quality growth).
+    pub fn update_production_from_observations(&mut self) {
+        if self.observations.is_empty() { return; }
+
+        let n = self.observations.len() as f64;
+        let weighted_success: f64 = self.observations.iter()
+            .map(|o| o.quality_proxy)
+            .sum::<f64>() / n;
+
+        // Quality per token: higher = faster growth (β)
+        let quality_per_token: f64 = self.observations.iter()
+            .filter(|o| o.tokens_spent > 0)
+            .map(|o| o.quality_proxy / o.tokens_spent.max(1) as f64)
+            .sum::<f64>() / n.max(1.0);
+
+        // EMA update with learning rate 0.15
+        let lr = 0.15;
+        self.production.alpha = (1.0 - lr) * self.production.alpha + lr * weighted_success;
+        // β bounded: [0.1, 2.0] to prevent divergence from bad observations
+        let new_beta = (1.0 - lr) * self.production.beta + lr * (quality_per_token * 500.0).min(2.0);
+        self.production.beta = new_beta.clamp(0.1, 2.0);
+
+        log::info!(
+            "Economy: production updated α={:.3} β={:.3} from {} observations",
+            self.production.alpha, self.production.beta, self.observations.len()
+        );
+    }
+
+    /// Start tracking a new task's trajectory telemetry.
+    pub fn start_telemetry(&mut self, task_id: &str, model_id: &str) {
+        self.current_telemetry = Some(TrajectoryTelemetry {
+            task_id: task_id.to_string(),
+            model_id: model_id.to_string(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_latency_ms: 0,
+            retry_count: 0,
+            tool_call_count: 0,
+            success: true,
+            human_correction_needed: false,
+            downstream_reuse: false,
+            failure_category: None,
+        });
+    }
+
+    /// Accumulate token/latency into current telemetry.
+    pub fn accumulate_telemetry(&mut self, input_tokens: u64, output_tokens: u64, latency_ms: u64, tool_calls: u64) {
+        if let Some(ref mut t) = self.current_telemetry {
+            t.total_input_tokens += input_tokens;
+            t.total_output_tokens += output_tokens;
+            t.total_latency_ms += latency_ms;
+            t.tool_call_count += tool_calls;
+        }
+    }
+
+    /// Mark the current task telemetry as failed with a category.
+    pub fn fail_telemetry(&mut self, category: &str) {
+        if let Some(ref mut t) = self.current_telemetry {
+            t.success = false;
+            t.failure_category = Some(category.to_string());
+        }
+    }
+
+    /// Finalize and return the current telemetry, resetting the tracker.
+    pub fn emit_telemetry(&mut self) -> Option<TrajectoryTelemetry> {
+        self.current_telemetry.take()
     }
 }

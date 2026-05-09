@@ -18,6 +18,7 @@ pub mod swarm;
 pub mod swarm_economy;
 pub mod territory;
 pub mod territory_tools;
+pub mod world;
 
 pub use crestodian::Crestodian;
 pub use spawner::DefaultAgentSpawner;

@@ -2,7 +2,7 @@
 
 This document describes the high-level design, component boundaries, and data flow of the Pharmakon Personal AI Engineering OS.
 
-**Last updated:** 2026-05-08 (Phase 0–4 complete)
+**Last updated:** 2026-05-09 (Phase 0–5 complete — World Model Agent, DSGE wiring, Codex discovery, Cron)
 
 ## Core Philosophy
 
@@ -61,6 +61,15 @@ Pharmakon is designed around four pillars:
 │  └──────────────────────────────────────────────────────────────┘  │
 │                                                                     │
 │  ┌──────────────────────────────────────────────────────────────┐  │
+│  │              World Model Agent (Phase 5)                      │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐  │  │
+│  │  │Plan Generator│  │MCTS Simulator│  │Commit & Rollback   │  │  │
+│  │  │(LLM→candidate│  │(temp ws +    │  │(snapshot→execute→  │  │  │
+│  │  │ plans)       │  │ cargo check) │  │ verify→rollback)   │  │  │
+│  │  └──────────────┘  └──────────────┘  └────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
 │  │              Foundation (Phase 0)                             │  │
 │  │  ┌──────────────────┐  ┌──────────────┐  ┌────────────────┐  │  │
 │  │  │ToolMetaRegistry  │  │EventLog +    │  │ExecutionProfile│  │  │
@@ -97,7 +106,7 @@ Pharmakon is designed around four pillars:
 - **Entropy Monitor**: Four-factor entropy scoring (stagnation 0.4, repetition 0.25, failure 0.2, token_drift 0.15) with `EntropyOverflow` hard termination.
 - **Atomic Rollback**: `rollback_to_snapshot()` / `rollback_to_event()` — file-level restore via content-addressed SnapshotStore.
 - **Cognitive Scheduler**: LLM-based task complexity classification (Simple/Standard/Deep) with heuristic fallback. `ManagedTask` with cognitive economics (`priority_score`, `expected_information_gain`, `retry_cost`).
-- **CodeAct Hybrid Mode** (Python + Rhai): Rhai tried first (fast, sandboxed); falls back to Python via `python3` on error for higher LLM fluency. 1 LLM turn = 10+ tool calls via control flow in scripts. Marked as Core tool, always available. System prompt explicitly instructs CodeAct as PRIMARY execution mode for multi-step tasks.
+- **CodeAct Hybrid Mode** (Python + Rhai): Model-adaptive routing auto-detects script language and selects the best execution engine. Gemini models → Python-first; other models → Rhai-first. Silent fallback on engine failure. 1 LLM turn = 10+ tool calls via control flow in scripts. System prompt includes skill library few-shot examples and anti-pattern guidance. Successful scripts auto-crystallized into SkillGenome for reuse.
 - **Constitutional PolicyEngine**: Immutable safety rules preventing self-modification, critical file deletion, and destructive shell commands.
 - **Durable Task Runtime**: `suspend()` / `resume()` with EventLog integration and `TaskSnapshot` persistence.
 - **Soul Management**: Markdown-based "Soul" files defining personality, constraints, and instructions.
@@ -129,19 +138,17 @@ Pharmakon is designed around four pillars:
 
 ## Interaction Flow: The Decision Loop
 
-1. **Input**: Message arrives via Gateway channel.
-2. **Task Classification**: Cognitive Scheduler classifies complexity (LLM primary, heuristic fallback).
-3. **Parallel Context Gathering**: Knowledge Nexus + Semantic Search + Working Memory queried concurrently.
-4. **Capability-Aware Prompt**: 10 capabilities injected instead of 65 tool schemas.
-5. **Decision Turn**:
-   - Agent sends context + goal to Model.
-   - Tool calls executed (potentially in parallel).
-   - File mutations trigger SnapshotStore capture + EventLog `FileMutated` recording.
-6. **Entropy Check**: Four-factor entropy computed from EventLog. >0.8 warns, >0.95 hard-terminates.
-7. **Progress Tracking**: `ProgressTracker` checks for stalls, loops, and entropy overflow.
-8. **Self-Correction**: Errors fed back to Model for autonomous recovery.
-9. **Response**: Final answer delivered to user.
-10. **Reflection Cycle**: Periodic reflection extracts new facts, updates PHARMAKON.md.
+1. **Input**: Message arrives via Gateway channel or CLI.
+2. **Task Classification**: Cognitive Scheduler classifies complexity (Simple/Standard/Deep).
+3. **World Model Fork** (Deep tasks): Generate 3-5 candidate plans → simulate in temp workspace → score → commit best → rollback on failure. Falls back to standard CodeAct.
+4. **Parallel Context Gathering**: Knowledge Nexus + Semantic Search + Working Memory + Skill Library queried concurrently. 3 random codex tools injected for serendipitous discovery.
+5. **DSGE Economics**: Dynamic `max_tokens` from CognitiveBudget × RegimeSwitcher × learned ProductionFunction. Shadow price directive injected into system prompt. Token consumption fed to economy for online parameter fitting.
+6. **Decision Turn**: Agent sends prompt with skill library few-shot examples to Model. Tool calls executed in parallel with `SnapshotStore` checkpointing. Failed codeact scripts fed to anti-pattern extraction.
+7. **Entropy Check**: Four-factor entropy computed. >0.8 warns, >0.95 hard-terminates.
+8. **Retry Strategy**: Tool failures classified (Transient/Terminal/Strategic) with targeted recovery.
+9. **Progress Tracking**: `ProgressTracker` checks stalls, loops, entropy overflow.
+10. **Response**: Final answer. Task outcome recorded to ResearchNotebook for context reuse.
+11. **Reflection Cycle**: Periodic reflection extracts facts, updates PHARMAKON.md, indexes to Knowledge Nexus.
 
 ## Security & Reliability
 

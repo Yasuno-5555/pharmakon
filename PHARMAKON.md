@@ -2,7 +2,7 @@
 
 This document serves as the single source of truth for architectural constraints and engineering patterns learned during autonomous operation.
 
-**Last updated:** 2026-05-08 (Phase 0–4 complete, DSGE Economics + Model Auto-Routing + Swarm Economy + DeepSeek V4)
+**Last updated:** 2026-05-09 (Phase 0–5: World Model Agent, Dynamic max_tokens, Codex Discovery, Skill Library wiring, Cron, DB migration)
 
 ## 1. Code Modification Protocol
 - **Precision First**: Never use `write_file` for modifying existing source code. Always use `apply_patch`.

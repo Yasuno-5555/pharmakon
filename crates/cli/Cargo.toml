@@ -8,6 +8,7 @@ name = "pharmakon"
 path = "src/main.rs"
 
 [dependencies]
+uuid.workspace = true
 pharmakon-common.workspace = true
 pharmakon-core.workspace = true
 pharmakon-gateway.workspace = true

@@ -5,7 +5,7 @@
 
 **Pharmakon** is a high-performance, local-first Rust AI engineering OS. It serves as a unified control plane for autonomous AI engineering, tool orchestration, and multi-channel communication.
 
-**Status:** Phase 0–4 complete (2026-05-09). DSGE Economics, Model Auto-Routing, Swarm Economy, DeepSeek V4, Plugin SDK v3.
+**Status:** Phase 0–5 complete (2026-05-09). World Model Agent, Dynamic max_tokens, Codex Serendipity, Skill Library auto-crystallization, Cron scheduling, DB migration (name column).
 
 ## Key Features
 

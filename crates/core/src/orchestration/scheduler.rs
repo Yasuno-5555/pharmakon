@@ -205,7 +205,7 @@ async fn llm_classify(
             ..Default::default()
         }],
         temperature: Some(0.0),
-        max_tokens: Some(8),
+        max_tokens: Some(64), // bumped for thinking models (Gemini Flash internally consumes some tokens for thought)
         tools: None,
     };
 

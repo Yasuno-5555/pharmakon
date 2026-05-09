@@ -29,6 +29,7 @@ impl DbSessionStore {
                 content TEXT,
                 tool_calls TEXT,
                 tool_call_id TEXT,
+                name TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
         )
@@ -174,6 +175,13 @@ impl DbSessionStore {
         .execute(&pool)
         .await?;
 
+        // Migration: add name column if missing (pre-existing DBs)
+        let _ = sqlx::query(
+            "ALTER TABLE messages ADD COLUMN name TEXT",
+        )
+        .execute(&pool)
+        .await;
+
         Ok(Self { pool })
     }
 
@@ -188,14 +196,15 @@ impl DbSessionStore {
             .map(|tc| serde_json::to_string(tc).unwrap());
 
         sqlx::query(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, name)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(session_id)
         .bind(&msg.role)
         .bind(content_json)
         .bind(tool_calls_json)
         .bind(&msg.tool_call_id)
+        .bind(&msg.name)
         .execute(&self.pool)
         .await?;
 
@@ -204,7 +213,7 @@ impl DbSessionStore {
 
     pub async fn load_history(&self, session_id: &str) -> Result<Vec<Message>> {
         let rows = sqlx::query_as::<_, MessageRow>(
-            "SELECT role, content, tool_calls, tool_call_id FROM messages
+            "SELECT role, content, tool_calls, tool_call_id, name FROM messages
              WHERE session_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id)
@@ -229,12 +238,28 @@ impl DbSessionStore {
                     content,
                     tool_calls: row.tool_calls.and_then(|tc| serde_json::from_str(&tc).ok()),
                     tool_call_id: row.tool_call_id,
+                    name: row.name,
                     ..Default::default()
                 }
             })
             .collect();
 
         Ok(messages)
+    }
+
+    /// Clean up orphaned one-shot sessions (≤2 messages, older than 1 hour).
+    pub async fn cleanup_orphan_sessions(&self) -> Result<usize> {
+        let result = sqlx::query(
+            "DELETE FROM messages WHERE session_id IN (
+                SELECT session_id FROM messages
+                GROUP BY session_id
+                HAVING COUNT(*) <= 2
+                   AND MAX(created_at) < datetime('now', '-1 hour')
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as usize)
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<String>> {
@@ -479,6 +504,7 @@ struct MessageRow {
     content: Option<String>,
     tool_calls: Option<String>,
     tool_call_id: Option<String>,
+    name: Option<String>,
 }
 
 impl DbSessionStore {

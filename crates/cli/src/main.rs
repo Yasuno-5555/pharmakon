@@ -44,7 +44,7 @@ enum Commands {
     Agent {
         #[arg(short, long)]
         message: Option<String>,
-        #[arg(long, default_value = "cli-default")]
+        #[arg(long, default_value = "")]
         session: String,
         #[arg(long)]
         soul: Option<String>,
@@ -220,7 +220,7 @@ async fn build_agent(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("warn"));
 
     let config = Config::load().unwrap_or_else(|e| {
         log::error!("Error loading config: {}. Using default.", e);
@@ -277,8 +277,16 @@ async fn main() -> Result<()> {
         }
 
         Some(Commands::Agent { message, session, soul, provider, model }) => {
+            // Generate a unique session ID for one-shot invocations to prevent
+            // cross-invocation message accumulation, unless user explicitly set one.
+            let session_id = if session.is_empty() {
+                format!("cli-{}", uuid::Uuid::new_v4().to_string().chars().take(8).collect::<String>())
+            } else {
+                session
+            };
+
             let agent = build_agent(
-                &config, session_store, &session,
+                &config, session_store, &session_id,
                 soul.as_deref(), provider.as_deref(), model.as_deref(),
             ).await?;
             let agent_arc = Arc::new(agent);
@@ -383,7 +391,7 @@ async fn main() -> Result<()> {
 
             // Tools
             println!("\n🔧 Tools:");
-            let agent = build_agent(&config, session_store, "doctor", None, None, None).await?;
+            let agent = build_agent(&config, session_store.clone(), "doctor", None, None, None).await?;
             let reg = agent.registry.lock().await;
             let tools = reg.all_metadata();
             println!("  Total tool metadata: {}", tools.len());
@@ -420,6 +428,13 @@ async fn main() -> Result<()> {
                 let _ = std::fs::create_dir_all(home.join(".pharmakon").join("context"));
                 let _ = std::fs::create_dir_all(home.join(".pharmakon").join("workspace"));
                 println!("  Created missing directories.");
+
+                // Clean up orphaned one-shot sessions
+                match session_store.cleanup_orphan_sessions().await {
+                    Ok(0) => println!("  No orphan sessions to clean."),
+                    Ok(n) => println!("  Cleaned {} orphan session messages.", n),
+                    Err(e) => log::warn!("  Orphan cleanup failed: {}", e),
+                }
             }
 
             println!("\n✅ Diagnostics complete.");
