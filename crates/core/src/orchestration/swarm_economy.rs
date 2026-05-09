@@ -11,8 +11,7 @@
 //!   → Results pooled, parent economy updated
 
 use crate::orchestration::cognitive_economics::{
-    AgentProfile, AgentSpecialization, GeneralEquilibrium, ModelMarketQuote,
-    model_market_quotes, select_model_by_roi,
+    AgentProfile, AgentSpecialization, GeneralEquilibrium, ModelMarketQuote, select_model_by_roi,
 };
 use crate::orchestration::dsge_integration::AgentEconomy;
 use std::collections::HashMap;
@@ -74,7 +73,7 @@ impl SwarmEconomy {
     /// Select the best model for a sub-agent based on task + specialization + budget.
     pub fn select_model_for(
         &self,
-        task: &str,
+        _task: &str,
         specialization: &AgentSpecialization,
         budget: u64,
     ) -> Option<String> {

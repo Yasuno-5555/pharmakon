@@ -183,7 +183,7 @@ Reply with ONLY the JSON array, no explanation."#,
 /// Simulate a single plan in an isolated temp workspace.
 /// Returns PlanValidation with scores.
 pub async fn simulate_plan(
-    agent: &Agent,
+    _agent: &Agent,
     plan: &CandidatePlan,
     workspace_root: &Path,
 ) -> Result<PlanValidation> {
@@ -299,7 +299,7 @@ fn score_plan(steps_ok: bool, cargo_ok: bool, estimated_tokens: u64) -> f64 {
 /// Main World Model execution: generate → simulate → commit → verify → rollback on failure.
 pub async fn execute_world_model(
     agent: &Agent,
-    session_id: &str,
+    _session_id: &str,
     task: &str,
 ) -> Result<String> {
     let workspace_root = std::env::current_dir().unwrap_or_default();
@@ -334,7 +334,7 @@ pub async fn execute_world_model(
     );
 
     // Phase 3: Commit best plan, fall through on failure
-    for (idx, validation) in &validations {
+    for (idx, _validation) in &validations {
         let plan = &plans[*idx];
 
         // Record event_id for rollback checkpoint
@@ -398,7 +398,7 @@ pub async fn execute_world_model(
 
         if all_ok {
             // Run RLFC validation
-            if run_rlfc_validation(&workspace_root).await.is_ok() {
+            if run_cargo_check(&workspace_root).await {
                 log::info!("WorldModel: plan '{}' committed and validated successfully", plan.id);
                 return Ok(format!(
                     "✅ Plan '{}' executed successfully ({})",

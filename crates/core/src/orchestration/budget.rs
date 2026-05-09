@@ -92,12 +92,19 @@ impl ProgressTracker {
     /// Records the latest state snapshot and returns a signal if termination is needed.
     pub fn record(&mut self, snapshot: IterationSnapshot) -> TerminationSignal {
         // Simple loop detection: check for identical consecutive tool calls
-        if let Some(prev) = self.history.back() {
-            if snapshot.last_tool_call_args.is_some() && snapshot.last_tool_call_args == prev.last_tool_call_args {
-                 // This is a very basic loop detection. A more robust version would check n-grams.
-                log::warn!("Loop detected: Same tool call arguments as previous iteration.");
-                return TerminationSignal::LoopDetected;
+        let mut loop_count: usize = 1;
+        if let Some(args) = &snapshot.last_tool_call_args {
+            for prev in self.history.iter().rev() {
+                if prev.last_tool_call_args.as_ref() == Some(args) {
+                    loop_count += 1;
+                } else {
+                    break;
+                }
             }
+        }
+        if loop_count >= 3 {
+            log::warn!("Loop detected: Same tool call args repeated {} times.", loop_count);
+            return TerminationSignal::LoopDetected;
         }
         
         let progress = self.measure_delta(&snapshot);
@@ -141,7 +148,7 @@ impl ProgressTracker {
 
 // --- 3. Task Classification (Placeholder) ---
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskComplexity {
     Simple,   // e.g., one-shot command
     Standard, // e.g., file modification and check
@@ -164,7 +171,7 @@ pub fn estimate_budget(complexity: TaskComplexity) -> ExecutionBudget {
         TaskComplexity::Deep => ExecutionBudget {
             hard_max_wall_time: Duration::from_secs(1800), // 30 minutes
             policy: TerminationPolicy::ProgressBased {
-                stall_threshold: 6, // Even more lenient for research tasks
+                stall_threshold: 10, // Very lenient for research tasks
             },
         },
     }

@@ -9,7 +9,6 @@
 //!    ↑ KV-cache hit     ↑ tolerable     ↑ where the LLM actually works
 
 use crate::model::{Message, MessageContent};
-use pharmakon_memory::context_engine::ContextEntry;
 
 // --- Prompt Layers (Token Economics via Prefix Caching) ---
 

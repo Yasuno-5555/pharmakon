@@ -9,7 +9,7 @@
 use crate::orchestration::cognitive_economics::{
     CognitiveBudget, CognitiveMacroState, KnowledgeCapital,
     BellmanPlanner, ProductionFunction, RegimeSwitcher,
-    model_market_quotes, select_model_by_roi, ModelMarketQuote,
+    model_market_quotes, ModelMarketQuote,
 };
 use crate::model::AgentModel;
 use std::collections::HashMap;
@@ -187,7 +187,7 @@ impl AgentEconomy {
 
     /// Model selection: Manual mode returns user-chosen model, Auto mode
     /// uses live performance-weighted ROI routing across all available providers.
-    pub fn select_model(&self, task: &str) -> Option<Arc<dyn AgentModel>> {
+    pub fn select_model(&self, task: &str, complexity: f64) -> Option<Arc<dyn AgentModel>> {
         match &self.mode {
             ModelMode::Manual(model_id) => {
                 crate::providers::registry::ModelRegistry::get_model(model_id)
@@ -203,14 +203,28 @@ impl AgentEconomy {
                         .and_then(|id| crate::providers::registry::ModelRegistry::get_model(id));
                 }
 
-                // Score all available models by live ROI + static ROI
+                // Complexity-aware: Deep→high-output, Simple→cheap
+let complexity_bonus = |id: &str| -> f64 {
+    if complexity > 0.7 {
+        if id.contains("deepseek-v4")||id.contains("deepseek-chat") { 0.3 }
+        else if id.contains("deepseek-reasoner")||id.contains("pro") { 0.2 }
+        else if id.contains("gemini") { 0.1 }
+        else { -0.1 }
+    } else if complexity < 0.3 {
+        if id.contains("groq")||id.contains("llama") { 0.2 }
+        else if id.contains("flash") { 0.1 }
+        else { 0.0 }
+    } else { 0.0 }
+};
+
+// Score all available models by live ROI + static ROI
                 let mut scored: Vec<(String, f64)> = available.iter().map(|id| {
                     let live = self.model_perf.live_roi(id, est_input, est_output);
                     let quote = self.market_quotes.iter()
                         .find(|q| q.model_id == *id)
                         .map(|q| q.expected_roi(est_input, est_output))
                         .unwrap_or(0.0);
-                    let combined = live * 0.7 + quote * 0.3;
+                    let combined = live * 0.7 + quote * 0.3 + complexity_bonus(id);
                     (id.clone(), combined)
                 }).collect();
 
@@ -245,7 +259,7 @@ impl AgentEconomy {
     /// Recommend a dynamic `max_tokens` for the next LLM call.
     /// Derived from: optimal ceiling × regime policy × remaining budget × learned quality.
     /// Returns a u32 in [256, 8192] suitable for `CompletionRequest.max_tokens`.
-    pub fn recommend_max_tokens(&mut self) -> u32 {
+    pub fn recommend_max_tokens(&mut self, model_id: &str) -> u32 { let _ = model_id;
         // Update regime state from current macro conditions
         let rate_limit_prob = self.model_perf.rate_limit_prob(
             &self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
@@ -263,7 +277,7 @@ impl AgentEconomy {
         let budget_cap = (self.budget.remaining() / 4) as u32;
 
         // Floor: never go below 256 to allow tool calls
-        let recommended = ceiling.min(regime_cap).min(budget_cap).max(256).min(8192);
+        let model_cap = if model_id.contains("deepseek") { 16384 } else if model_id.contains("gemini") { 8192 } else { 4096 }; let recommended = ceiling.min(regime_cap).min(budget_cap).min(model_cap).max(256);
 
         log::info!(
             "Economy: recommend max_tokens={} (ceiling={}, regime={}, budget_cap={}, α={:.3})",

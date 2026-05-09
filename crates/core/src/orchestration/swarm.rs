@@ -1,5 +1,4 @@
 use crate::agent::Agent;
-use crate::orchestration::scheduler::{ManagedTask, classify_task_complexity};
 use crate::orchestration::swarm_economy::SwarmEconomy;
 use crate::orchestration::cognitive_economics::AgentSpecialization;
 use crate::orchestration::dsge_integration::AgentEconomy;
@@ -119,7 +118,7 @@ impl AgentSpawner for SwarmManager {
         let (
             model,
             session_store,
-            registry,
+            _registry,
             knowledge_nexus,
             semantic_search,
             fact_memory,
@@ -164,7 +163,7 @@ impl AgentSpawner for SwarmManager {
 
         let sub_agent_arc = Arc::new(Mutex::new(sub_agent));
         let task_clone = task.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, _rx) = tokio::sync::oneshot::channel();
         let session_id_clone = session_id.clone();
 
         tokio::spawn(async move {
@@ -243,7 +242,7 @@ async fn run_swarm_sub_agent(
     depth: u8,
 ) -> anyhow::Result<String> {
     let role_str = role.unwrap_or_else(|| "researcher".to_string());
-    let (model, session_store, registry, knowledge_nexus, semantic_search, fact_memory, territory_manager) = {
+    let (model, session_store, _registry, knowledge_nexus, semantic_search, fact_memory, territory_manager) = {
         let parent_lock = parent.lock().await;
         (parent_lock.model.clone(), parent_lock.session_store.clone(), parent_lock.registry.clone(),
          parent_lock.knowledge_nexus.clone(), parent_lock.semantic_search.clone(),
@@ -430,7 +429,7 @@ impl pharmakon_common::Tool for FractalSwarmTool {
             Ok(swarm.merge_results(&results_raw))
         } else {
             let mut summary = format!("Fractal Swarm: {}\n\n", goal);
-            for (i, (task_id, res)) in results_raw.iter().enumerate() {
+            for (i, (_task_id, res)) in results_raw.iter().enumerate() {
                 match res {
                     Ok(msg) => summary.push_str(&format!("Task {}: OK — {}\n", i + 1, msg)),
                     Err(e) => summary.push_str(&format!("Task {}: FAILED — {}\n", i + 1, e)),

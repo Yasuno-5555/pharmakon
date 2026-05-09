@@ -128,7 +128,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                 .map(|(role, content)| {
                     let prefix = match role.as_str() {
                         "user" => "🧑 You",
-                        "assistant" => "🦞 Pharmakon",
+                        "assistant" => "💊 Pharmakon",
                         _ => "  •",
                     };
                     let style = if role == "assistant" {
@@ -231,7 +231,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
 pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
     use std::io::{self, Write};
 
-    println!("🦞 Pharmakon REPL");
+    println!("💊 Pharmakon REPL");
     println!("Type your message and press Enter. Type /quit to exit, /reset to clear history.");
     println!();
 

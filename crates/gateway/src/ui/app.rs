@@ -99,7 +99,7 @@ impl AppData {
             messages: Vec::new(), tool_trace: Vec::new(),
             active_swarms: vec![SwarmStatus { id: "supervisor".into(), role: "Supervisor".into(), status: "Active".into() }],
             health_stats: HealthStats { is_alive: true, ..Default::default() },
-            system_logs: vec!["🦞 Pharmakon Desktop — Ready".into()],
+            system_logs: vec!["💊 Pharmakon Desktop — Ready".into()],
             forensic_logs: Vec::new(), mcp_stats: Vec::new(), usage_history: Vec::new(),
             tools: Vec::new(), research_notebook: None, graph_relations: Vec::new(),
             cron_jobs: Vec::new(),
@@ -203,7 +203,7 @@ pub fn app_logic(data: &mut AppData) -> Vec<xilem::WindowView<AppData>> {
     if data.show_requested.swap(false, Ordering::SeqCst) { data.is_window_open = true; }
     let mut windows = Vec::new();
     if data.is_window_open {
-        windows.push(window(data.main_window_id, "🦞 Pharmakon", root_view(data))
+        windows.push(window(data.main_window_id, "💊 Pharmakon", root_view(data))
             .with_options(|_| xilem::WindowOptions::new("Pharmakon Desktop")
                 .on_close(|d: &mut AppData| { d.is_window_open = false; })));
     }
@@ -274,9 +274,9 @@ fn content_area(data: &mut AppData) -> impl xilem::WidgetView<AppData> + use<> {
     let mut t = String::new();
     match data.current_view {
         ViewType::Chat => {
-            t.push_str("🦞 Pharmakon Chat\n\n");
+            t.push_str("💊 Pharmakon Chat\n\n");
             for m in &data.messages {
-                let p = match m.role.as_str() { "user"=>"🧑","agent"=>"🦞","tool"=>"🔧",_=>"⚙" };
+                let p = match m.role.as_str() { "user"=>"🧑","agent"=>"💊","tool"=>"🔧",_=>"⚙" };
                 t.push_str(&format!("{}: ", p));
                 if let Some(th) = &m.thought { t.push_str(&format!("[{}] ", th)); }
                 t.push_str(&m.content);

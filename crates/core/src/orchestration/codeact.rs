@@ -167,7 +167,7 @@ impl CodeActEngine {
         engine.register_fn("write_file", move |path: &str, content: &str| -> Result<(), Box<EvalAltResult>> { tb.write_file(path, content) });
         let tb = toolbox.clone();
         engine.register_fn("grep", move |pattern: &str, dir: &str| -> Result<Vec<String>, Box<EvalAltResult>> { tb.grep_files(pattern, dir) });
-        let tb = toolbox.clone();
+        let _tb = toolbox.clone();
         engine.register_fn("shell", move |cmd: &str| -> Result<String, Box<EvalAltResult>> {
             use std::process::Command;
             let output = Command::new("sh").arg("-c").arg(cmd).output().map_err(|e| format!("shell failed: {}", e))?;
@@ -188,7 +188,7 @@ impl CodeActEngine {
     ///   3. Silent fallback to other engine on failure
     pub fn execute(&self, script: &str) -> CodeActResult {
         let lang = detect_language(script);
-        let (first, second) = self.model_family.preferred_order();
+        let (first, _second) = self.model_family.preferred_order();
 
         // Resolve execution order: detected language overrides model preference
         let order = match (lang, first) {

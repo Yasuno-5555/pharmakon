@@ -38,7 +38,7 @@ pub enum FailureClass {
 }
 
 /// Classify a tool failure based on the error message and context.
-pub fn classify_failure(error: &str, tool_name: &str, is_consecutive: bool) -> FailureClass {
+pub fn classify_failure(error: &str, _tool_name: &str, is_consecutive: bool) -> FailureClass {
     let lower = error.to_lowercase();
 
     // --- Transient signals ---

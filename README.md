@@ -1,4 +1,4 @@
-# 🦞 Pharmakon — Personal AI Engineering OS
+# 💊 Pharmakon — Personal AI Engineering OS
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

@@ -18,7 +18,7 @@ rust_i18n::i18n!("locales");
 
 #[derive(Parser)]
 #[command(name = "pharmakon")]
-#[command(about = "🦞 Pharmakon — Personal AI Engineering OS", long_about = None)]
+#[command(about = "💊 Pharmakon — Personal AI Engineering OS", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -567,7 +567,7 @@ async fn main() -> Result<()> {
 
             let cron_manager = Arc::new(pharmakon_core::automation::cron::CronManager::new().await?);
 
-            println!("🦞 Launching Pharmakon Desktop...");
+            println!("💊 Launching Pharmakon Desktop...");
             if let Err(e) = pharmakon_gateway::ui::run_app(agent_arc, session_store, cron_manager) {
                 log::error!("Desktop app error: {}", e);
                 println!("Falling back to web UI at http://localhost:19999");

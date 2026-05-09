@@ -15,9 +15,8 @@
 //!   cargo_check ─────────────────┘
 
 use anyhow::Result;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

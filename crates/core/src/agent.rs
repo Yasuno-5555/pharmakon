@@ -373,8 +373,11 @@ impl Agent {
     pub async fn chat_on_session(&self, user_message: &str, session_id: &str) -> Result<String> {
         CURRENT_SESSION_ID.scope(session_id.to_string(), async {
             if user_message.starts_with("/model") {
-            if !self.dream_started.swap(true, std::sync::atomic::Ordering::SeqCst) { let skill_lib = self.skill_library.clone(); tokio::spawn(async move { log::info!("Dream Mode started"); loop { tokio::time::sleep(std::time::Duration::from_secs(300)).await; let mut lib = skill_lib.lock().unwrap(); lib.decay(); log::debug!("Dream Mode: decay cycle complete, {} entries", lib.entries.len()); } }); }
+                if !self.dream_started.swap(true, std::sync::atomic::Ordering::SeqCst) { let skill_lib = self.skill_library.clone(); tokio::spawn(async move { log::info!("Dream Mode started"); loop { tokio::time::sleep(std::time::Duration::from_secs(300)).await; let mut lib = skill_lib.lock().unwrap(); lib.decay(); log::debug!("Dream Mode: decay cycle complete, {} entries", lib.entries.len()); } }); }
                 return self.handle_model_command(user_message).await;
+            }
+            if user_message.starts_with("/plan") {
+                return self.handle_plan_command(user_message).await;
             }
 
             let state_arc = self.get_session_state(session_id).await;
@@ -487,15 +490,6 @@ impl Agent {
             user_message,
             model.as_ref(),
         ).await;
-
-        // --- World Model Agent fork: simulate-before-acting for Deep tasks ---
-        if complexity == budget::TaskComplexity::Deep {
-            log::info!("[SESSION: {}] World Model activated for Deep task", session_id);
-            match crate::orchestration::world::execute_world_model(self, session_id, user_message).await {
-                Ok(result) => return Ok(result),
-                Err(e) => log::warn!("World Model failed ({}), falling back to standard CodeAct", e),
-            }
-        }
 
         let budget = budget::estimate_budget(complexity);
 
@@ -694,7 +688,7 @@ impl Agent {
                     .collect();
                 if !non_core.is_empty() {
                     let n_sample = 3.min(non_core.len());
-                    let mut sampled: Vec<_> = non_core.iter()
+                    let sampled: Vec<_> = non_core.iter()
                         .filter(|m| !tools_to_inject.iter().any(|t| t.name == m.name))
                         .collect();
                     // Rotating sample: use interaction count as seed for variety
@@ -732,7 +726,7 @@ impl Agent {
             let mut target_model = {
                 let m = self.model.lock().await;
                 let default_model = (*m).clone();
-                self.economy.lock().unwrap().select_model(user_message).unwrap_or(default_model)
+                self.economy.lock().unwrap().select_model(user_message, match complexity { budget::TaskComplexity::Simple => 0.2, budget::TaskComplexity::Standard => 0.5, budget::TaskComplexity::Deep => 0.8 }).unwrap_or(default_model)
             };
 
             log::info!("[SESSION: {}] Sending completion request to model...", session_id);
@@ -740,7 +734,7 @@ impl Agent {
             let request = CompletionRequest {
                 messages: messages_to_send,
                 temperature: Some(0.2),
-                max_tokens: Some(self.economy.lock().unwrap().recommend_max_tokens()),
+                max_tokens: Some(self.economy.lock().unwrap().recommend_max_tokens(target_model.name())),
                 tools: tool_definitions,
             };
 
@@ -1552,6 +1546,18 @@ impl Agent {
             Ok(resp)
         }
     }
+
+
+    async fn handle_plan_command(&self, cmd: &str) -> Result<String> {
+        let task = if cmd.len() > 5 { cmd[5..].trim().to_string() } else { String::new() };
+        let session_id = self.session_id.lock().await.clone();
+        let task = if task.is_empty() { "Perform a structural codebase overview and verify compilation".to_string() } else { task };
+        match crate::orchestration::world::execute_world_model(self, &session_id, &task).await {
+            Ok(result) => Ok(format!("World Model plan executed:\n{}", result)),
+            Err(e) => Err(anyhow::anyhow!("World Model plan failed: {}", e)),
+        }
+    }
+
 
     pub async fn soul(&self) -> crate::soul::Soul {
         let pm = self.prompt_manager.lock().await;

@@ -250,7 +250,7 @@ impl AgentModel for DeepSeekModel {
     ) -> AgentResult<
         std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
     > {
-        let mut body = DeepSeekRequest {
+        let body = DeepSeekRequest {
             model: self.model_id.clone(),
             messages: self.map_messages(request.messages),
             temperature: request.temperature,

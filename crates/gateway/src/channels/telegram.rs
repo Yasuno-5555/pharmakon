@@ -128,39 +128,25 @@ impl Channel for TelegramChannel {
                         }
                     }
 
-                    let agent_spawn = agent.clone();
-                    let chat_id = msg.chat.id;
                     let text_owned = text.to_string();
-                    tokio::spawn(async move {
-                        let agent_lock = agent_spawn;
-                        // Trim session history for Telegram to keep context lean
-                        {
-                            let state_arc = agent_lock.get_session_state(&session_id).await;
-                            let mut state = state_arc.lock().await;
-                            let max_telegram_history = 10usize;
-                            if state.history.len() > max_telegram_history {
-                                let keep_from = state.history.len() - max_telegram_history;
-                                state.history = state.history.split_off(keep_from);
-                                log::debug!(
-                                    "Telegram: trimmed session history to {} messages (removed {})",
-                                    state.history.len(), keep_from
-                                );
-                            }
+                    let is_command = text_owned.starts_with("/");
+                    if is_command {
+                        let al = agent.clone();
+                        match al.chat_on_session(&text_owned, &session_id).await {
+                            Ok(r) => { if !r.is_empty() { let _ = bot.send_message(msg.chat.id, r).await; } }
+                            Err(e) => { let _ = bot.send_message(msg.chat.id, format!("Error: {}", e)).await; }
                         }
-                        match agent_lock.chat_on_session(&text_owned, &session_id).await {
-                            Ok(response) => {
-                                log::info!("Telegram sending response to {}: {}", chat_id, response);
-                                match bot.send_message(chat_id, response).await {
-                                    Ok(_) => log::info!("Telegram message sent successfully."),
-                                    Err(e) => log::error!("Telegram failed to send message: {}", e),
-                                }
+                    } else {
+                        let _ = bot.send_message(msg.chat.id, "🟢 Task dispatched to worker agent.
+You can /model, /new, /status while it runs.").await;
+                        let w = agent.clone(); let b = bot.clone(); let cid = msg.chat.id;
+                        tokio::spawn(async move {
+                            match w.chat_on_session(&text_owned, &session_id).await {
+                                Ok(r) => { if !r.is_empty() { let _ = b.send_message(cid, r).await; } }
+                                Err(e) => { let _ = b.send_message(cid, format!("💀 {}", e)).await; }
                             }
-                            Err(e) => {
-                                log::error!("Agent error in Telegram: {}", e);
-                                let _ = bot.send_message(chat_id, format!("Error: {}", e)).await;
-                            }
-                        }
-                    });
+                        });
+                    }
                 }
                 anyhow::Result::<()>::Ok(())
             }));

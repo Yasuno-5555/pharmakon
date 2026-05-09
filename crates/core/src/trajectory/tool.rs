@@ -74,19 +74,19 @@ impl Tool for ExecutionTraceTool {
 
     async fn call(&self, args: Value) -> AgentResult<String> {
         if let Some(agent) = self.agent_ref.upgrade() {
-            let session_id = args["session_id"]
+            let _session_id = args["session_id"]
                 .as_str()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| {
-                    let mut id = "default".to_string();
+                    let id = "default".to_string();
                     // Try to get current session ID
-                    if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                    if let Ok(_rt) = tokio::runtime::Handle::try_current() {
                          // We can't easily access task_local here without the scope
                     }
                     id
                 });
             
-            if let Some(store) = &agent.session_store {
+            if let Some(_store) = &agent.session_store {
                  // We need a method in store to load trajectory events
                  // For now, let's assume we can get them.
                  // Actually, let's just return the Markdown representation from the Agent's current trajectory

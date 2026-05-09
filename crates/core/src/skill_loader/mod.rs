@@ -58,11 +58,11 @@ impl SkillLoader {
         Self::load_skills_internal(&self.skills_dir, agent).await
     }
 
-    async fn load_skills_internal(skills_dir: &PathBuf, agent: &Arc<Mutex<Agent>>) -> Result<()> {
+    async fn load_skills_internal(skills_dir: &PathBuf, _agent: &Arc<Mutex<Agent>>) -> Result<()> {
         let entries = fs::read_dir(skills_dir)?;
         for entry in entries {
             let entry = entry?;
-            let path = entry.path();
+            let _path = entry.path();
 
         }
         Ok(())

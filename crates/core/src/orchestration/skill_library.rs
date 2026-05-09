@@ -12,9 +12,8 @@
 //!   Trajectory Compression — extract safe_refactor() patterns from traces
 //!   Skill Crystallization — suggest Rhai→Rust native translation
 
-use pharmakon_common::agent_types::MessageContent;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 // ═══════════════════════════════════════════════════════════

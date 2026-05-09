@@ -58,7 +58,7 @@ impl Hook for AutoIndexHook {
 
         for url in urls {
             let url = url.to_string();
-            let agent_clone = agent_ref.clone();
+            let _agent_clone = agent_ref.clone();
 
             tokio::spawn(async move {
                 log::info!("Auto-indexing background task started for: {}", url);

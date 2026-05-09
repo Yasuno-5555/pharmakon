@@ -16,7 +16,7 @@ impl RlfcTool {
         Self { agent_ref: agent }
     }
 
-    async fn run_linter(&self, path: &str) -> Result<(bool, String)> {
+    async fn run_linter(&self, _path: &str) -> Result<(bool, String)> {
         let output = Command::new("cargo")
             .arg("clippy")
             .arg("--fix")

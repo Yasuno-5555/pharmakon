@@ -397,7 +397,7 @@ impl ContextTax {
     pub fn total_pollution(&self) -> f64 { self.scores.iter().sum() }
 }
 
-pub fn crystallization_variance_adjusted(skill_id: &str, avg_saved: f64, failure_rate: f32, retry_cost: f64, risk_aversion: f64) -> f64 { (avg_saved - risk_aversion*failure_rate as f64*retry_cost).max(0.0) }
+pub fn crystallization_variance_adjusted(_skill_id: &str, avg_saved: f64, failure_rate: f32, retry_cost: f64, risk_aversion: f64) -> f64 { (avg_saved - risk_aversion*failure_rate as f64*retry_cost).max(0.0) }
 
 pub struct AdaptiveMarketMaker { pub quotes: Vec<ModelMarketQuote>, pub rate_limit_probs: std::collections::HashMap<String,f64>, pub latency_drifts: std::collections::HashMap<String,f64>, pub instability_penalties: std::collections::HashMap<String,f64> }
 impl AdaptiveMarketMaker {
