@@ -442,19 +442,28 @@ impl AgentModel for GeminiModel {
             } else {
                 None
             },
-            generation_config: Some(GeminiConfig {
-                temperature: request.temperature,
-                max_output_tokens: request.max_tokens,
-                // Only enable Thinking Mode for high-end Pro models to balance performance and cost
-                thinking_config: if self.model_id.contains("pro")
-                    && !self.model_id.contains("flash")
-                {
-                    Some(GeminiThinkingConfig {
-                        thinking_budget: 4096,
-                    })
-                } else {
-                    None
-                },
+            generation_config: Some({
+                let thinking_enabled = self.model_id.contains("pro")
+                    && !self.model_id.contains("flash");
+                let thinking_budget = if thinking_enabled { 4096u32 } else { 0 };
+                // When thinking is enabled, max_output_tokens must leave room
+                // for actual output beyond the thinking budget, otherwise Gemini
+                // returns MAX_TOKENS with empty candidates.
+                let min_output_headroom = 1024u32;
+                let effective_max = request.max_tokens
+                    .unwrap_or(8192)
+                    .max(thinking_budget + min_output_headroom)
+                    .min(8192); // Gemini hard cap
+
+                GeminiConfig {
+                    temperature: request.temperature,
+                    max_output_tokens: Some(effective_max),
+                    thinking_config: if thinking_enabled {
+                        Some(GeminiThinkingConfig { thinking_budget })
+                    } else {
+                        None
+                    },
+                }
             }),
             system_instruction,
             safety_settings: Some(vec![
@@ -734,19 +743,28 @@ impl AgentModel for GeminiModel {
             } else {
                 None
             },
-            generation_config: Some(GeminiConfig {
-                temperature: request.temperature,
-                max_output_tokens: request.max_tokens,
-                // Only enable Thinking Mode for high-end Pro models to balance performance and cost
-                thinking_config: if self.model_id.contains("pro")
-                    && !self.model_id.contains("flash")
-                {
-                    Some(GeminiThinkingConfig {
-                        thinking_budget: 4096,
-                    })
-                } else {
-                    None
-                },
+            generation_config: Some({
+                let thinking_enabled = self.model_id.contains("pro")
+                    && !self.model_id.contains("flash");
+                let thinking_budget = if thinking_enabled { 4096u32 } else { 0 };
+                // When thinking is enabled, max_output_tokens must leave room
+                // for actual output beyond the thinking budget, otherwise Gemini
+                // returns MAX_TOKENS with empty candidates.
+                let min_output_headroom = 1024u32;
+                let effective_max = request.max_tokens
+                    .unwrap_or(8192)
+                    .max(thinking_budget + min_output_headroom)
+                    .min(8192); // Gemini hard cap
+
+                GeminiConfig {
+                    temperature: request.temperature,
+                    max_output_tokens: Some(effective_max),
+                    thinking_config: if thinking_enabled {
+                        Some(GeminiThinkingConfig { thinking_budget })
+                    } else {
+                        None
+                    },
+                }
             }),
             system_instruction,
             safety_settings: Some(vec![

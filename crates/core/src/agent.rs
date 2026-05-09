@@ -227,13 +227,13 @@ impl Agent {
             sid.clone()
         };
         // Check if task-local session ID is available, override if so
-        let session_id = CURRENT_SESSION_ID.with(|id| {
+        let session_id = CURRENT_SESSION_ID.try_with(|id| {
             if id.is_empty() {
-                session_id
+                session_id.clone()
             } else {
                 id.clone()
             }
-        });
+        }).unwrap_or(session_id);
         self.get_session_state(&session_id).await
     }
 
@@ -902,6 +902,29 @@ impl Agent {
 
                         let mut args: serde_json::Value =
                             serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+
+                        // Defensive: skip tool calls with empty/malformed arguments
+                        // (e.g. from truncated model responses like Gemini MAX_TOKENS)
+                        if tool_call.function.arguments.trim().is_empty() || args.is_null() {
+                            let tool_name = tool.name().to_string();
+                            log::warn!(
+                                "Agent: Skipping tool '{}' with empty/malformed arguments \
+                                 (model response may have been truncated by MAX_TOKENS)",
+                                tool_name
+                            );
+                            return (
+                                tool_call.id.clone(),
+                                Ok(format!(
+                                    "Tool '{}' skipped: empty or malformed arguments \
+                                     (the model response was likely truncated). \
+                                     Please retry with fewer tools or a simpler request.",
+                                    tool_name
+                                )),
+                                tool_name,
+                                0,
+                                String::new(),
+                            );
+                        }
 
                         // Global dry-run injection
                         if dry_run {

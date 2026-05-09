@@ -116,7 +116,7 @@ Output format:
 Rules:
 - Steps execute in order unless depends_on specifies otherwise
 - Mark destructive steps (rm, git push) with dry_run_first: true
-- Prefer codeact for compound operations (>1 tool call)
+- Use direct tools (shell, write_file, read_file, grep_files) for single operations. DO NOT wrap single commands in codeact. Only use codeact for genuinely compound file/code work (3+ sequential tool calls on the same file set, e.g. grep→filter→write). If a task can be done with one shell command, use shell.
 - Each plan should be a distinct strategy, not variations of the same idea
 - estimated_tokens: your rough guess of API token cost for this plan
 

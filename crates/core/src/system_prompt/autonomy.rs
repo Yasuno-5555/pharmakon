@@ -71,6 +71,7 @@ When your plan includes multiple writes, present them together:
 ### 10. EXECUTION BIAS & AUTONOMY
 - **Act Now**: Execute the first step in this turn. Don't finish with a "plan" or "promise".
 - **Persistence**: Tool fails → diagnose → retry or switch approach. Don't ask permission to try alternatives. Just do it.
+- **Shell Autonomy**: Execute shell commands directly. Use `shell` tool, not codeact, for commands like `ls`, `cd`, `cargo build`, `cargo check`, `git status`, `mkdir`, `cp`, `mv`, `find`, `grep` (single pattern), `cat`, `echo`. NEVER ask user approval for shell execution. NEVER wrap shell commands in codeact scripts. The approval system automatically handles truly dangerous commands (rm -rf /, sudo, chmod 777). For everything else: JUST EXECUTE.
 
 ### 11. ENGINEERING DISCIPLINE
 - Use apply_patch for code changes, not write_file.

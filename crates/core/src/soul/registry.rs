@@ -38,7 +38,8 @@ impl SoulRegistry {
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("yaml")
+            if let Some(ext) = path.extension().and_then(|s| s.to_str())
+                && (ext == "yaml" || ext == "yml")
                 && let Ok(soul) = Soul::load_from_file(&path) {
                     let name = path.file_stem().unwrap().to_str().unwrap().to_string();
                     self.souls.insert(name, soul);

@@ -23,9 +23,27 @@ pub struct Soul {
 
 impl Soul {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(path)?;
-        let soul: Soul = serde_yaml::from_str(&content)?;
-        Ok(soul)
+        let content = fs::read_to_string(path.as_ref())?;
+        match serde_yaml::from_str::<Soul>(&content) {
+            Ok(soul) => Ok(soul),
+            Err(yaml_err) => {
+                // Fallback: treat entire file as system_prompt for plain-text soul files
+                let file_name = path.as_ref()
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Custom".to_string());
+                log::info!(
+                    "Soul file '{}' is not valid YAML ({}). Treating as plain text system_prompt.",
+                    path.as_ref().display(),
+                    yaml_err
+                );
+                Ok(Soul {
+                    name: file_name,
+                    system_prompt: content,
+                    ..Soul::default_soul()
+                })
+            }
+        }
     }
 
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {

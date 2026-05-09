@@ -179,7 +179,19 @@ async fn build_agent(
             soul_registry.get_soul(path).cloned().unwrap_or_else(Soul::default_soul)
         }
     } else {
-        soul_registry.get_soul("default").cloned().unwrap_or_else(Soul::default_soul)
+        soul_registry.get_soul("default")
+            .or_else(|| {
+                // Fallback: if no "default" soul, use the first available soul in the registry
+                let available = soul_registry.list_souls();
+                if !available.is_empty() {
+                    log::info!("No 'default' soul found. Using '{}' as fallback.", available[0]);
+                    soul_registry.get_soul(&available[0])
+                } else {
+                    None
+                }
+            })
+            .cloned()
+            .unwrap_or_else(Soul::default_soul)
     };
 
     // Model

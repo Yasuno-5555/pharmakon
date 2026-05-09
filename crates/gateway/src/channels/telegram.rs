@@ -133,6 +133,20 @@ impl Channel for TelegramChannel {
                     let text_owned = text.to_string();
                     tokio::spawn(async move {
                         let agent_lock = agent_spawn;
+                        // Trim session history for Telegram to keep context lean
+                        {
+                            let state_arc = agent_lock.get_session_state(&session_id).await;
+                            let mut state = state_arc.lock().await;
+                            let max_telegram_history = 10usize;
+                            if state.history.len() > max_telegram_history {
+                                let keep_from = state.history.len() - max_telegram_history;
+                                state.history = state.history.split_off(keep_from);
+                                log::debug!(
+                                    "Telegram: trimmed session history to {} messages (removed {})",
+                                    state.history.len(), keep_from
+                                );
+                            }
+                        }
                         match agent_lock.chat_on_session(&text_owned, &session_id).await {
                             Ok(response) => {
                                 log::info!("Telegram sending response to {}: {}", chat_id, response);
