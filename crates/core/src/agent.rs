@@ -773,6 +773,11 @@ impl Agent {
                 temperature: Some(0.2),
                 max_tokens: Some(self.economy.lock().unwrap().recommend_max_tokens(target_model.name())),
                 tools: tool_definitions,
+                complexity: Some(match complexity {
+                    budget::TaskComplexity::Simple => 0.2,
+                    budget::TaskComplexity::Standard => 0.5,
+                    budget::TaskComplexity::Deep => 0.8,
+                }),
             };
 
              let mut response_result = None;
@@ -1732,6 +1737,7 @@ impl Agent {
             temperature: Some(0.3),
             max_tokens: Some(200),
             tools: None,
+            complexity: None,
         };
 
         let model = self.model.lock().await;

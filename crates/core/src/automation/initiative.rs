@@ -93,6 +93,7 @@ impl InitiativeEngineWorker {
             temperature: Some(0.4),
             max_tokens: Some(300),
             tools: None,
+            complexity: None,
         };
 
         let response = model.lock().await.complete(request).await?;

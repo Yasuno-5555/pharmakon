@@ -144,7 +144,7 @@ pub struct AgentEconomy {
 impl AgentEconomy {
     pub fn new(complexity: f64) -> Self {
         Self {
-            budget: CognitiveBudget::new(100_000, complexity),
+            budget: CognitiveBudget::new(10_000_000, complexity),
             macro_state: CognitiveMacroState::new(),
             knowledge: KnowledgeCapital::new(),
             market_quotes: model_market_quotes(),
@@ -285,8 +285,8 @@ let complexity_bonus = |id: &str| -> f64 {
         let quality_scale = self.production.alpha.clamp(0.3, 1.0);
         let ceiling = (self.budget.optimal_ceiling as f64 * quality_scale) as u32;
 
-        // Don't spend more than 25% of remaining in one call
-        let budget_cap = (self.budget.remaining() / 4) as u32;
+        // Don't spend more than 25% of remaining in one call, but ensure a floor of at least 8192 to prevent early truncation
+        let budget_cap = ((self.budget.remaining() / 4) as u32).max(8192);
 
         // Floor: never go below 256 to allow tool calls
         let model_cap = if model_id.contains("deepseek") { 16384 } else if model_id.contains("gemini") { 8192 } else { 4096 }; let recommended = ceiling.min(regime_cap).min(budget_cap).min(model_cap).max(256);

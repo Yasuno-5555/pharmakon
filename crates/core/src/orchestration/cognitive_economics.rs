@@ -713,10 +713,10 @@ impl RegimeSwitcher {
     }
     pub fn policy(&self) -> RegimePolicy {
         match self.current {
-            MacroRegime::Normal => RegimePolicy { max_tokens: 4096, max_retries: 3, prefer_cache: false },
-            MacroRegime::Congestion => RegimePolicy { max_tokens: 2048, max_retries: 2, prefer_cache: true },
-            MacroRegime::Crisis => RegimePolicy { max_tokens: 1024, max_retries: 1, prefer_cache: true },
-            MacroRegime::Offline => RegimePolicy { max_tokens: 256, max_retries: 0, prefer_cache: true },
+            MacroRegime::Normal => RegimePolicy { max_tokens: 8192, max_retries: 3, prefer_cache: false },
+            MacroRegime::Congestion => RegimePolicy { max_tokens: 4096, max_retries: 2, prefer_cache: true },
+            MacroRegime::Crisis => RegimePolicy { max_tokens: 2048, max_retries: 1, prefer_cache: true },
+            MacroRegime::Offline => RegimePolicy { max_tokens: 512, max_retries: 0, prefer_cache: true },
         }
     }
 }

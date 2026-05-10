@@ -61,6 +61,7 @@ impl SoulEvolutionWorker {
             temperature: Some(0.3),
             max_tokens: Some(500),
             tools: None,
+            complexity: None,
         };
 
         let response = model

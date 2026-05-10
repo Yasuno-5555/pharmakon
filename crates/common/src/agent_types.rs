@@ -172,6 +172,8 @@ pub struct CompletionRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

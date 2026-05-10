@@ -289,6 +289,7 @@ impl RhaiSkillLibrary {
             temperature: Some(0.2),
             max_tokens: Some(1500),
             tools: None,
+            complexity: None,
         };
 
         let response = model.complete(request).await?;
@@ -404,7 +405,7 @@ pub async fn verify_script(task: &str, script: &str, output: &str, model: &Arc<d
     let prompt = format!("Task: {}\nScript:\n```\n{}\n```\nOutput:\n{}\n\nAccomplished? YES/NO:", truncate(task, 300), truncate(script, 500), truncate(output, 500));
     let request = pharmakon_common::CompletionRequest {
         messages: vec![pharmakon_common::Message { role: "user".into(), content: Some(pharmakon_common::MessageContent::Text(prompt)), ..Default::default() }],
-        temperature: Some(0.0), max_tokens: Some(4), tools: None,
+        temperature: Some(0.0), max_tokens: Some(4), tools: None, complexity: None,
     };
     match model.complete(request).await {
         Ok(resp) => {
@@ -420,7 +421,7 @@ pub async fn generate_dream_tasks(model: &Arc<dyn pharmakon_common::AgentModel>,
     let prompt = format!("Generate {} task descriptions for file/code automation. Categories: grep_and_transform, batch_rename, code_stats, text_processing, file_organization, config_merging, log_parsing, data_extraction. One per line: CATEGORY: description", count);
     let request = pharmakon_common::CompletionRequest {
         messages: vec![pharmakon_common::Message { role: "user".into(), content: Some(pharmakon_common::MessageContent::Text(prompt)), ..Default::default() }],
-        temperature: Some(0.8), max_tokens: Some(500), tools: None,
+        temperature: Some(0.8), max_tokens: Some(500), tools: None, complexity: None,
     };
     match model.complete(request).await {
         Ok(resp) => {

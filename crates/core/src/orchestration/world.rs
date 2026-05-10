@@ -610,6 +610,7 @@ pub async fn generate_candidate_plans(
             temperature: Some(0.3 + (i as f32) * 0.1), // Vary temperature for diverse candidates
             max_tokens: Some(1536), // reduced from 3072 — plans don't need that many tokens
             tools: Some(vec![tool_def.clone()]),
+            complexity: None,
         };
 
         match model.complete(request).await {

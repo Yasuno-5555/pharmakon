@@ -453,13 +453,28 @@ impl AgentModel for GeminiModel {
                 None
             },
             generation_config: Some({
-                let thinking_enabled = self.model_id.contains("pro")
-                    && !self.model_id.contains("flash");
-                let thinking_budget = if thinking_enabled { 4096u32 } else { 0 };
+                let complexity = request.complexity.unwrap_or(0.5);
+                let thinking_enabled = (self.model_id.contains("2.5")
+                    || self.model_id.contains("pro")
+                    || self.model_id.contains("reasoner"))
+                    && complexity >= 0.3; // Disable thinking for simple tasks to maximize speed/cost savings
+                let thinking_budget = if thinking_enabled {
+                    if complexity >= 0.7 {
+                        if self.model_id.contains("flash") {
+                            2048u32
+                        } else {
+                            4096u32
+                        }
+                    } else {
+                        1024u32 // Light thinking for medium tasks
+                    }
+                } else {
+                    0u32
+                };
                 // When thinking is enabled, max_output_tokens must leave room
                 // for actual output beyond the thinking budget, otherwise Gemini
                 // returns MAX_TOKENS with empty candidates.
-                let min_output_headroom = 1024u32;
+                let min_output_headroom = if complexity >= 0.7 { 4096u32 } else { 2048u32 };
                 let effective_max = request.max_tokens
                     .unwrap_or(8192)
                     .max(thinking_budget + min_output_headroom)
@@ -468,7 +483,7 @@ impl AgentModel for GeminiModel {
                 GeminiConfig {
                     temperature: request.temperature,
                     max_output_tokens: Some(effective_max),
-                    thinking_config: if thinking_enabled {
+                    thinking_config: if thinking_enabled && thinking_budget > 0 {
                         Some(GeminiThinkingConfig { thinking_budget })
                     } else {
                         None
@@ -762,13 +777,28 @@ impl AgentModel for GeminiModel {
                 None
             },
             generation_config: Some({
-                let thinking_enabled = self.model_id.contains("pro")
-                    && !self.model_id.contains("flash");
-                let thinking_budget = if thinking_enabled { 4096u32 } else { 0 };
+                let complexity = request.complexity.unwrap_or(0.5);
+                let thinking_enabled = (self.model_id.contains("2.5")
+                    || self.model_id.contains("pro")
+                    || self.model_id.contains("reasoner"))
+                    && complexity >= 0.3; // Disable thinking for simple tasks to maximize speed/cost savings
+                let thinking_budget = if thinking_enabled {
+                    if complexity >= 0.7 {
+                        if self.model_id.contains("flash") {
+                            2048u32
+                        } else {
+                            4096u32
+                        }
+                    } else {
+                        1024u32 // Light thinking for medium tasks
+                    }
+                } else {
+                    0u32
+                };
                 // When thinking is enabled, max_output_tokens must leave room
                 // for actual output beyond the thinking budget, otherwise Gemini
                 // returns MAX_TOKENS with empty candidates.
-                let min_output_headroom = 1024u32;
+                let min_output_headroom = if complexity >= 0.7 { 4096u32 } else { 2048u32 };
                 let effective_max = request.max_tokens
                     .unwrap_or(8192)
                     .max(thinking_budget + min_output_headroom)
@@ -777,7 +807,7 @@ impl AgentModel for GeminiModel {
                 GeminiConfig {
                     temperature: request.temperature,
                     max_output_tokens: Some(effective_max),
-                    thinking_config: if thinking_enabled {
+                    thinking_config: if thinking_enabled && thinking_budget > 0 {
                         Some(GeminiThinkingConfig { thinking_budget })
                     } else {
                         None

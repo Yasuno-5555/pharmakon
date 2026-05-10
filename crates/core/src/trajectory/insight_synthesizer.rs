@@ -44,6 +44,7 @@ impl InsightSynthesizer {
             temperature: Some(0.3),
             max_tokens: Some(2048),
             tools: None,
+            complexity: None,
         };
 
         let response = model.complete(req).await?;
@@ -78,6 +79,7 @@ impl InsightSynthesizer {
             temperature: Some(0.1),
             max_tokens: Some(512),
             tools: None,
+            complexity: None,
         };
 
         if let Ok(critic_resp) = model.complete(critic_req).await {

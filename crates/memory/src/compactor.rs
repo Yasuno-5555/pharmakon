@@ -55,6 +55,7 @@ impl ContextCompactor {
                 temperature: Option::Some(0.3f32),
                 max_tokens: None,
                 tools: None,
+                complexity: None,
             })
             .await
             .map_err(anyhow::Error::new)?;
@@ -99,6 +100,7 @@ impl ContextCompactor {
                 temperature: Some(0.2),
                 max_tokens: None,
                 tools: None,
+                complexity: None,
             })
             .await
             .map_err(anyhow::Error::new)?;

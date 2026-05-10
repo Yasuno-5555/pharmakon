@@ -219,6 +219,7 @@ async fn llm_classify(
         temperature: Some(0.0),
         max_tokens: Some(64), // bumped for thinking models (Gemini Flash internally consumes some tokens for thought)
         tools: None,
+        complexity: None,
     };
 
     let response = model.complete(request).await.ok()?;

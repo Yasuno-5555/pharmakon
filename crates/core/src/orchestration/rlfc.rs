@@ -137,6 +137,7 @@ impl Tool for RlfcTool {
                     temperature: Some(0.1),
                     max_tokens: Some(2048),
                     tools: None,
+                    complexity: None,
                 };
 
                 let response = model.complete(req).await.map_err(|e| AgentError(e.to_string()))?;

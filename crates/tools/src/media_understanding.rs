@@ -78,6 +78,7 @@ impl Tool for MediaUnderstandingTool {
             temperature: Some(0.0),
             max_tokens: Some(500),
             tools: None,
+            complexity: None,
         };
 
         log::info!(
