@@ -39,3 +39,4 @@ tower = { workspace = true }
 diffy = "0.4.0"
 rhai = { version = "1", features = ["sync"] }
 tempfile = "3.10"
+flate2 = "1.0"

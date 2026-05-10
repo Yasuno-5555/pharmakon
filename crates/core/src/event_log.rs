@@ -8,7 +8,8 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 
@@ -84,9 +85,17 @@ pub enum EventKind {
     },
 }
 
+/// Default max in-memory events before oldest are evicted.
+/// At ~200 bytes/event, 10k events ≈ 2 MB — safe even for long sessions.
+const MAX_IN_MEMORY_EVENTS: usize = 10_000;
+
+/// Default max disk events (JSONL lines) before the file is truncated.
+/// At ~200 bytes/line, 50k events ≈ 10 MB on disk.
+const MAX_DISK_EVENTS: usize = 50_000;
+
 /// Append-only event log with optional disk persistence.
 pub struct EventLog {
-    events: Mutex<Vec<AgentEvent>>,
+    events: Mutex<VecDeque<AgentEvent>>,
     next_id: AtomicU64,
     persist_path: Option<PathBuf>,
 }
@@ -102,9 +111,28 @@ impl EventLog {
         }
 
         Self {
-            events: Mutex::new(Vec::new()),
+            events: Mutex::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
             persist_path,
+        }
+    }
+
+    /// Truncate the disk JSONL to the most recent N lines.
+    /// Called periodically to prevent unbounded file growth.
+    fn truncate_disk_log(path: &Path, max_lines: usize) {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() <= max_lines {
+            return;
+        }
+        let keep = &lines[lines.len() - max_lines..];
+        if let Ok(mut file) = std::fs::File::create(path) {
+            use std::io::Write;
+            for line in keep {
+                let _ = writeln!(file, "{}", line);
+            }
         }
     }
 
@@ -130,9 +158,23 @@ impl EventLog {
                     let _ = writeln!(file, "{}", line);
                 }
             }
+            // Truncate disk log periodically (every 100 events)
+            if id % 100 == 0 {
+                let p = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    Self::truncate_disk_log(&p, MAX_DISK_EVENTS);
+                });
+            }
         }
 
-        self.events.lock().await.push(event);
+        // Evict oldest events when over the in-memory cap (O(1) with VecDeque)
+        {
+            let mut events = self.events.lock().await;
+            events.push_back(event);
+            while events.len() > MAX_IN_MEMORY_EVENTS {
+                events.pop_front();
+            }
+        }
         id
     }
 

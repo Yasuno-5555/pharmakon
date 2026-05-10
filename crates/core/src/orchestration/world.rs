@@ -294,6 +294,26 @@ impl PlanCache {
         Ok(())
     }
 
+    /// Evict lowest-score entries when over the limit.
+    fn enforce_limit(&mut self, max: usize) {
+        if self.entries.len() <= max {
+            return;
+        }
+        // Sort by score ascending (lowest first) and truncate
+        self.entries.sort_by(|a, b| {
+            a.score("")
+                .partial_cmp(&b.score(""))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let remove = self.entries.len() - max;
+        self.entries.drain(0..remove);
+        log::info!(
+            "PlanCache: evicted {} entries (limit: {})",
+            remove,
+            max
+        );
+    }
+
     pub fn find_plan(&self, task: &str, fingerprint: &str) -> Option<CandidatePlan> {
         let mut best_entry: Option<&CachedPlan> = None;
         let mut best_score = 0.0;
@@ -400,6 +420,9 @@ impl PlanCache {
                 failure_count: if success { 0 } else { 1 },
             });
         }
+        // Enforce max entries (200) — evict lowest-score plans
+        const MAX_PLAN_CACHE_ENTRIES: usize = 200;
+        self.enforce_limit(MAX_PLAN_CACHE_ENTRIES);
         let _ = self.save();
 
         // 🕸️ Non-blocking background thread Pattern Mining & AOT Compilation to prevent thread stalls!
@@ -585,7 +608,7 @@ pub async fn generate_candidate_plans(
                 ..Default::default()
             }],
             temperature: Some(0.3 + (i as f32) * 0.1), // Vary temperature for diverse candidates
-            max_tokens: Some(3072),
+            max_tokens: Some(1536), // reduced from 3072 — plans don't need that many tokens
             tools: Some(vec![tool_def.clone()]),
         };
 

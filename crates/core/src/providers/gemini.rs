@@ -265,24 +265,34 @@ impl GeminiModel {
 
             if m.role == "tool"
                 && let Some(ref content) = m.content {
-                    let function_name = m.name.clone().unwrap_or_else(|| {
+                    let function_name = m.name.clone().filter(|n| !n.is_empty()).or_else(|| {
                         log::warn!(
-                            "Tool message is missing the 'name' field, attempting fallback lookup for tool_call_id: {:?}. This may fail and indicates an issue with message creation.",
+                            "Tool message is missing the 'name' field, attempting fallback lookup for tool_call_id: {:?}.",
                             m.tool_call_id
                         );
-                        // Fallback for older message formats, though ideally this is never hit.
+                        // Strategy 1: Look up tool_call_id in previous messages' tool_calls
                         if let Some(id) = &m.tool_call_id {
+                            // Strategy 2: Parse tool name from the call_id format: call_<tool_name>_<uuid>
+                            if let Some(rest) = id.strip_prefix("call_") {
+                                if let Some(last_underscore) = rest.rfind('_') {
+                                    let extracted = rest[..last_underscore].to_string();
+                                    if !extracted.is_empty() {
+                                        log::info!("Extracted function name '{}' from tool_call_id", extracted);
+                                        return Some(extracted);
+                                    }
+                                }
+                            }
+                            // Strategy 3: Search previous messages' tool_calls
                             all_messages
                                 .iter()
                                 .filter_map(|prev| prev.tool_calls.as_ref())
                                 .flatten()
                                 .find(|tc| tc.id == *id)
                                 .map(|tc| tc.function.name.clone())
-                                .unwrap_or_default()
                         } else {
-                            "".to_string()
+                            None
                         }
-                    });
+                    }).unwrap_or_default();
 
                     // Pre-flight validation: Ensure the function name is not empty before sending to API
                     if function_name.is_empty() {

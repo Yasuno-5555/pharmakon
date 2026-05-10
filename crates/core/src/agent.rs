@@ -57,6 +57,8 @@ pub struct Agent {
     pub fallback_models: Arc<StdMutex<Vec<String>>>,
     pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
     pub total_cost: Arc<Mutex<f64>>,
+    /// Hard cumulative token budget per session. Exceeding this stops API calls.
+    pub token_budget: u64,
     pub start_time: std::time::Instant,
     pub dry_run: Arc<std::sync::atomic::AtomicBool>,
     pub tool_call_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
@@ -65,6 +67,8 @@ pub struct Agent {
     pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
     pub event_log: Arc<crate::event_log::EventLog>,
     pub snapshot_store: Arc<crate::snapshot_store::SnapshotStore>,
+    /// Throttle whole-workspace snapshots: only one per cooldown period (seconds)
+    pub last_workspace_snapshot: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,
     pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
     pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
     pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
@@ -101,6 +105,7 @@ impl Clone for Agent {
             fallback_models: self.fallback_models.clone(),
             total_tokens: self.total_tokens.clone(),
             total_cost: self.total_cost.clone(),
+            token_budget: self.token_budget,
             start_time: self.start_time,
             dry_run: self.dry_run.clone(),
             tool_call_counts: self.tool_call_counts.clone(),
@@ -109,6 +114,7 @@ impl Clone for Agent {
             usage_history: self.usage_history.clone(),
             event_log: self.event_log.clone(),
             snapshot_store: self.snapshot_store.clone(),
+            last_workspace_snapshot: Arc::new(Mutex::new(None)), // fresh cooldown for clone
             registry: self.registry.clone(),
             governor: self.governor.clone(),
             dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -191,6 +197,7 @@ impl Agent {
             fallback_models: Arc::new(StdMutex::new(Vec::new())),
             total_tokens,
             total_cost,
+            token_budget: 250_000, // default: 250k tokens per session
             start_time: std::time::Instant::now(),
             dry_run: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tool_call_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -202,9 +209,20 @@ impl Agent {
             event_log: Arc::new(crate::event_log::EventLog::new(
                 Some(home.join(".pharmakon").join("event_log").join("events.jsonl")),
             )),
-            snapshot_store: Arc::new(crate::snapshot_store::SnapshotStore::new(
-                home.join(".pharmakon").join("snapshots"),
-            )),
+            snapshot_store: {
+                let ss = Arc::new(crate::snapshot_store::SnapshotStore::new(
+                    home.join(".pharmakon").join("snapshots"),
+                ));
+                // Spawn startup pruning in background so it doesn't block init
+                let ss_clone = ss.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = ss_clone.prune_on_startup().await {
+                        log::warn!("SnapshotStore: startup prune failed: {}", e);
+                    }
+                });
+                ss
+            },
+            last_workspace_snapshot: Arc::new(Mutex::new(None)),
             dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             cron_manager: Arc::new(StdMutex::new(None)),
             registry,
@@ -836,6 +854,12 @@ impl Agent {
                                      }
                                  }
                              } else {
+                                 // Skip retry if budget is already >80% used
+                                 let used = self.total_tokens.load(std::sync::atomic::Ordering::SeqCst);
+                                 if used > self.token_budget * 8 / 10 {
+                                     log::warn!("Skipping empty-response retry: budget at {:.0}%", (used as f64 / self.token_budget as f64) * 100.0);
+                                     break;
+                                 }
                                  log::info!("Retrying same model once for empty response...");
                                  response_result = None;
                                  continue;
@@ -917,6 +941,34 @@ impl Agent {
             { let mn = target_model.name().to_string(); let lat = start_time.elapsed().as_millis() as u64; self.economy.lock().unwrap().record_model_result(&mn, lat, true, false); }
             self.economy.lock().unwrap().observe_latency(start_time.elapsed().as_millis() as u64);
 
+            // ── Hard token budget enforcement ──
+            let used = self.total_tokens.load(std::sync::atomic::Ordering::SeqCst);
+            let token_limit = self.token_budget;
+            if used > token_limit {
+                let reason = format!(
+                    "Token budget exhausted: {} / {} tokens used. Stopping execution.",
+                    used, token_limit
+                );
+                log::error!("{}", reason);
+                self.event_log.append(session_id, crate::event_log::EventKind::SessionEvent {
+                    action: "budget_exhausted".to_string(),
+                    detail: reason.clone(),
+                }).await;
+                return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
+            }
+            if used > token_limit * 8 / 10 {
+                // Inject budget pressure directive into next system message
+                let mut state = state_arc.lock().await;
+                state.history.push(Message {
+                    role: "system".to_string(),
+                    content: Some(MessageContent::Text(format!(
+                        "BUDGET WARNING: {:.0}% of your token budget used ({} / {}). Be extremely concise. Skip explanations. Return final answers immediately when possible.",
+                        (used as f64 / token_limit as f64) * 100.0, used, token_limit
+                    ))),
+                    ..Default::default()
+                });
+            }
+
             log::debug!(
                 "[SESSION: {}] Model response received. Content: {}, Tool calls: {}",
                 session_id,
@@ -969,6 +1021,7 @@ impl Agent {
                     let forensic_id = uuid::Uuid::new_v4().to_string();
                     let el = self.event_log.clone();
                     let ss = self.snapshot_store.clone();
+                    let lws = self.last_workspace_snapshot.clone();
                     let el_session = session_id.to_string();
 
                     tool_tasks.push(tokio::spawn(async move {
@@ -1115,9 +1168,28 @@ impl Agent {
                         let mut workspace_snapshot = None;
                         let is_high_risk = tool.name() == "shell" || tool.name() == "codeact";
                         if is_high_risk {
-                            if let Ok(dir) = std::env::current_dir() {
-                                if let Ok(snap) = ss.snapshot_dir(&dir).await {
-                                    workspace_snapshot = Some((dir, snap));
+                            // Cooldown: only snapshot the whole workspace once per 60 seconds
+                            // to prevent unbounded storage growth from rapid shell/codeact calls.
+                            let should_snapshot = {
+                                let mut last = lws.lock().await;
+                                let cooldown = chrono::Duration::seconds(60);
+                                let now = chrono::Utc::now();
+                                if last.map_or(true, |t| now - t > cooldown) {
+                                    *last = Some(now);
+                                    true
+                                } else {
+                                    log::debug!(
+                                        "SnapshotStore: skipping whole-workspace snapshot (cooldown active, last was {:?} ago)",
+                                        last.map(|t| (now - t).num_seconds())
+                                    );
+                                    false
+                                }
+                            };
+                            if should_snapshot {
+                                if let Ok(dir) = std::env::current_dir() {
+                                    if let Ok(snap) = ss.snapshot_dir(&dir).await {
+                                        workspace_snapshot = Some((dir, snap));
+                                    }
                                 }
                             }
                         }
@@ -1475,7 +1547,10 @@ impl Agent {
                     );
                 }
                 if notebook.should_stop() {
-                    notebook.max_steps += 5; // extend for continued use
+                    // Cap facts to prevent unbounded growth — evict oldest fact
+                    if notebook.verified_facts.len() > 50 {
+                        notebook.verified_facts.remove(0);
+                    }
                 }
                 notebook.step_count += 1;
                 notebook.verified_facts.push(pharmakon_common::Fact {
@@ -1789,6 +1864,16 @@ impl Agent {
 
     pub async fn perform_maintenance(&self) -> Result<()> {
         log::info!("Agent: Performing autonomous maintenance...");
+        // Snapshot store cleanup (age-based + quota enforcement)
+        if let Err(e) = self.snapshot_store.maintenance().await {
+            log::warn!("Agent maintenance: snapshot store cleanup failed: {}", e);
+        }
+        // SQLite persistence cleanup (old messages, stale telemetry records)
+        if let Some(ref store) = self.session_store {
+            if let Err(e) = store.maintenance().await {
+                log::warn!("Agent maintenance: DB cleanup failed: {}", e);
+            }
+        }
         Ok(())
     }
 

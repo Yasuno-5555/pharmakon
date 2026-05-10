@@ -262,6 +262,97 @@ impl DbSessionStore {
         Ok(result.rows_affected() as usize)
     }
 
+    /// Delete messages from active sessions older than N days.
+    /// Keeps the session metadata but drops old message history to bound DB size.
+    pub async fn cleanup_old_messages(&self, max_age_days: i32) -> Result<usize> {
+        let result = sqlx::query(
+            "DELETE FROM messages WHERE created_at < datetime('now', ? || ' days')",
+        )
+        .bind(format!("-{}", max_age_days))
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as usize)
+    }
+
+    /// Comprehensive cleanup of all telemetry/metric tables.
+    /// Applies retention windows to keep tables bounded.
+    /// Returns total rows deleted.
+    pub async fn cleanup_stale_records(&self) -> Result<usize> {
+        let mut total = 0usize;
+
+        // tool_metrics: keep 30 days
+        total += sqlx::query(
+            "DELETE FROM tool_metrics WHERE timestamp < datetime('now', '-30 days')",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+
+        // usage_stats: keep 30 days
+        total += sqlx::query(
+            "DELETE FROM usage_stats WHERE timestamp < datetime('now', '-30 days')",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+
+        // trajectory_events: keep 14 days
+        total += sqlx::query(
+            "DELETE FROM trajectory_events WHERE timestamp < datetime('now', '-14 days')",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+
+        // traffic_capture: keep 7 days (shortest — forensic data)
+        total += sqlx::query(
+            "DELETE FROM traffic_capture WHERE timestamp < datetime('now', '-7 days')",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+
+        // trajectories: keep 30 days
+        total += sqlx::query(
+            "DELETE FROM trajectories WHERE created_at < datetime('now', '-30 days')",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+
+        // facts: keep 60 days (longer-lived knowledge)
+        total += sqlx::query(
+            "DELETE FROM facts WHERE created_at < datetime('now', '-60 days')",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+
+        if total > 0 {
+            log::info!(
+                "DbSessionStore: cleanup_stale_records removed {} rows across all tables",
+                total
+            );
+        }
+        Ok(total)
+    }
+
+    /// Periodic maintenance: run all cleanup passes.
+    /// Call this from agent.perform_maintenance() or heartbeat.
+    pub async fn maintenance(&self) -> Result<usize> {
+        let orphans = self.cleanup_orphan_sessions().await?;
+        let old_msgs = self.cleanup_old_messages(7).await?;
+        let stale = self.cleanup_stale_records().await?;
+        let total = orphans + old_msgs + stale;
+        if total > 0 {
+            log::info!(
+                "DbSessionStore maintenance: {} rows cleaned ({} orphans, {} old msgs, {} stale records)",
+                total, orphans, old_msgs, stale
+            );
+        }
+        Ok(total)
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<String>> {
         let rows = sqlx::query_as::<_, (String,)>(
             "SELECT DISTINCT session_id FROM messages ORDER BY created_at DESC",
@@ -341,6 +432,10 @@ impl DbSessionStore {
         req: &str,
         res: &str,
     ) -> Result<()> {
+        // Truncate bodies to prevent unbounded DB growth.
+        // Full request/response bodies would otherwise accumulate GBs.
+        let req_body = if req.len() <= 256 { req } else { &req[..256] };
+        let res_body = if res.len() <= 256 { res } else { &res[..256] };
         sqlx::query(
             "INSERT INTO traffic_capture (session_id, url, method, status, request_body, response_body) VALUES (?, ?, ?, ?, ?, ?)"
         )
@@ -348,8 +443,8 @@ impl DbSessionStore {
         .bind(url)
         .bind(method)
         .bind(status as i32)
-        .bind(req)
-        .bind(res)
+        .bind(req_body)
+        .bind(res_body)
         .execute(&self.pool)
         .await?;
         Ok(())

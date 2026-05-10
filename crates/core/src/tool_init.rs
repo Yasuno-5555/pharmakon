@@ -12,7 +12,7 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     use pharmakon_tools::git::{GitStatusTool, GitDiffTool, GitCommitTool};
     use pharmakon_tools::browser::BrowserTool;
     use pharmakon_tools::web_fetch::WebFetchTool;
-    use pharmakon_tools::web_search::{GoogleSearchTool, BraveSearchTool as WebSearchBraveSearchTool};
+    use pharmakon_tools::web_search::{DuckDuckGoSearchTool, GoogleSearchTool, BraveSearchTool as WebSearchBraveSearchTool};
     use pharmakon_tools::memory_hydration::HydrateContextTool;
     use pharmakon_tools::playbook::PlaybookTool;
     use pharmakon_tools::project_management::TaskTrackerTool;
@@ -81,6 +81,7 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     agent.add_tool(Arc::new(WebFetchTool::new())).await;
     agent.add_tool(Arc::new(WebSearchBraveSearchTool::new("".to_string()))).await;
     agent.add_tool(Arc::new(GoogleSearchTool)).await;
+    agent.add_tool(Arc::new(DuckDuckGoSearchTool::new())).await;
     agent.add_tool(Arc::new(pharmakon_tools::search::custom_scout::CustomScoutTool)).await;
 
     // --- Knowledge & Context ---
