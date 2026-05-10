@@ -89,6 +89,7 @@ impl ToolMetaRegistry {
         let deps = &self.deps;
         match name {
             "browser" => Some(Arc::new(crate::browser::BrowserTool::new(None))),
+            "native_gui_emulator" => Some(Arc::new(crate::gui::NativeGuiEmulatorTool::new())),
             "brave_search" => {
                 let api_key = std::env::var("BRAVE_API_KEY").ok()?;
                 Some(Arc::new(crate::web_search::BraveSearchTool::new(api_key)))

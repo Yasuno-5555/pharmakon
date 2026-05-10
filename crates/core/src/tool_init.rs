@@ -31,6 +31,7 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     };
     use pharmakon_tools::orchestration::EphemeralRedTeamTool;
     use pharmakon_tools::media::ImageGenTool;
+    use pharmakon_tools::NativeGuiEmulatorTool;
 
 
     // --- Core System Tools ---
@@ -64,6 +65,7 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
 
     // --- Browser & Web ---
     agent.add_tool(Arc::new(BrowserTool::new(None))).await;
+    agent.add_tool(Arc::new(NativeGuiEmulatorTool::new())).await;
     agent.add_tool(Arc::new(WebFetchTool::new())).await;
     agent.add_tool(Arc::new(WebSearchBraveSearchTool::new("".to_string()))).await;
     agent.add_tool(Arc::new(GoogleSearchTool)).await;

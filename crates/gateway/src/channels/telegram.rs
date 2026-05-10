@@ -139,7 +139,7 @@ impl Channel for TelegramChannel {
                     } else {
                         let active_model = {
                             let m = agent.model.lock().await;
-                            m.clone()
+                            (*m).clone()
                         };
 
                         let complexity = pharmakon_core::orchestration::scheduler::classify_task_complexity(
@@ -155,19 +155,55 @@ impl Channel for TelegramChannel {
 
                         match complexity {
                             pharmakon_core::orchestration::budget::TaskComplexity::Simple => {
-                                // Simple conversational query: answer immediately
+                                // Simple conversational query: answer immediately on main agent/session
                                 match w.chat_on_session(&text_owned, &session_id).await {
                                     Ok(r) => { if !r.is_empty() { let _ = b.send_message(cid, r).await; } }
                                     Err(e) => { let _ = b.send_message(cid, format!("💀 {}", e)).await; }
                                 }
                             }
                             _ => {
-                                // Complex engineering task: notify and run in background thread
-                                let _ = b.send_message(cid, "🟢 Task dispatched to worker agent.\nYou can /model, /new, /status while it runs.").await;
+                                // Complex engineering task: spawn a dedicated worker agent in a separate session
+                                let worker_session_id = format!("worker-{}-{}", session_id, uuid::Uuid::new_v4());
+                                let _ = b.send_message(
+                                    cid, 
+                                    format!(
+                                        "🟢 Task dispatched to dedicated background Worker Agent [Session: {}].\n\
+                                         You can continue chatting with me here while it works in the background!", 
+                                        worker_session_id
+                                    )
+                                ).await;
+
+                                // Build the dedicated worker agent
+                                let mut worker_agent = Agent::new(active_model.clone(), worker_session_id.clone());
+                                if let Some(store) = &w.session_store {
+                                    worker_agent = worker_agent.with_store(store.clone());
+                                }
+                                if let Some(nexus) = &w.knowledge_nexus {
+                                    worker_agent = worker_agent.with_knowledge_nexus(nexus.clone()).with_isolated_knowledge();
+                                }
+                                if let Some(search) = &w.semantic_search {
+                                    worker_agent = worker_agent.with_semantic_search(search.clone());
+                                }
+                                worker_agent.fact_memory = w.fact_memory.clone();
+                                worker_agent.territory_manager = w.territory_manager.clone();
+                                worker_agent.set_soul(pharmakon_core::soul::Soul::expert("coder")).await;
+
                                 tokio::spawn(async move {
-                                    match w.chat_on_session(&text_owned, &session_id).await {
-                                        Ok(r) => { if !r.is_empty() { let _ = b.send_message(cid, r).await; } }
-                                        Err(e) => { let _ = b.send_message(cid, format!("💀 {}", e)).await; }
+                                    match worker_agent.chat(&text_owned).await {
+                                        Ok(r) => {
+                                            if !r.is_empty() {
+                                                let _ = b.send_message(
+                                                    cid,
+                                                    format!("🏁 **Worker Agent Completed Task (Session: {})**\n\n{}", worker_session_id, r)
+                                                ).await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let _ = b.send_message(
+                                                cid,
+                                                format!("⚠️ **Worker Agent Failed (Session: {})**\n\n💀 {}", worker_session_id, e)
+                                            ).await;
+                                        }
                                     }
                                 });
                             }

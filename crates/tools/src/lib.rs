@@ -3,6 +3,7 @@ pub mod anchors;
 pub mod ast_ingest;
 pub mod browser;
 pub mod canvas;
+pub mod gui;
 pub mod checkpoint;
 pub mod code;
 pub mod cognitive;
@@ -50,6 +51,7 @@ pub use crate::anchors::{ListAnchorsTool, SetAnchorTool};
 pub use crate::ast_ingest::ASTKnowledgeIngestTool;
 pub use crate::browser::BrowserTool;
 pub use crate::canvas::CanvasTool;
+pub use crate::gui::NativeGuiEmulatorTool;
 pub use crate::checkpoint::CheckpointTool;
 pub use crate::code::{
     ApplyPatchTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
