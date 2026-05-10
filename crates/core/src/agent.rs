@@ -654,7 +654,7 @@ impl Agent {
                     system_rules: format!("{}\n{}", prompt_manager.soul().system_prompt, skill_guidance),
                     playbooks: {
                         if state.active_playbooks.is_empty() {
-                            "No specialized playbooks active.".to_string()
+                            "No playbook active. Use `playbook` tool: action='suggest' with query describing your task to find the right playbook, then action='inject' to activate it. Built-in playbooks: web_research, deep_research, code_review, security_audit, rust_refactor, implement_feature, bug_hunt, dependency_update, project_setup, write_docs, data_analysis, general_task.".to_string()
                         } else {
                             state.active_playbooks
                                 .iter()
@@ -1023,15 +1023,39 @@ impl Agent {
                     let ss = self.snapshot_store.clone();
                     let lws = self.last_workspace_snapshot.clone();
                     let el_session = session_id.to_string();
+                    // Capture tool list for hallucination-tolerant error messages
+                    let known_tool_names: Vec<String> = {
+                        let reg = self.registry.lock().await;
+                        reg.all_metadata().iter().map(|m| m.name.clone()).collect()
+                    };
 
                     tool_tasks.push(tokio::spawn(async move {
                         let tool_name_from_call = tool_call.function.name.clone();
                         let tool = match tool {
                             Some(t) => t,
                             None => {
+                                // Suggest similar tools to help the LLM recover from hallucinations
+                                let query = &tool_call.function.name;
+                                let suggestions: Vec<&str> = known_tool_names
+                                    .iter()
+                                    .filter(|n| {
+                                        // Fuzzy match: any word overlap
+                                        let q_parts: Vec<&str> = query.split('_').collect();
+                                        q_parts.iter().any(|p| n.contains(p))
+                                    })
+                                    .take(5)
+                                    .map(|s| s.as_str())
+                                    .collect();
+                                let hint = if suggestions.is_empty() {
+                                    format!("Available tools include: {}", known_tool_names.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+                                } else {
+                                    format!("Did you mean one of: {}? (Full list: {})",
+                                        suggestions.join(", "),
+                                        known_tool_names.iter().take(5).map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+                                };
                                 return (
                                     tool_call.id.clone(),
-                                    Err(anyhow!("Tool not found: {}", tool_call.function.name)),
+                                    Err(anyhow!("Tool '{}' not found. {}", query, hint)),
                                     tool_name_from_call,
                                     0,
                                     String::new(),
@@ -1389,35 +1413,56 @@ impl Agent {
                 }
 
                 if !tool_errors.is_empty() {
-                    // Classify each failure for strategic retry decisions
-                    let classified: Vec<_> = tool_errors.iter().map(|err| {
-                        let tool_name = err.split('\'').nth(1).unwrap_or("unknown");
-                        let class = crate::orchestration::retry::classify_failure(err, tool_name, current_iteration > 1);
-                        (tool_name.to_string(), class, err.clone())
-                    }).collect();
+                    // ── Autonomous Recovery Directive ──
+                    // Extract suggested alternatives from "Did you mean" errors
+                    let mut alternatives: Vec<String> = Vec::new();
+                    let mut api_key_missing = false;
+                    let mut not_found_tools: Vec<String> = Vec::new();
 
-                    let terminal: Vec<_> = classified.iter()
-                        .filter(|(_, c, _)| matches!(c, crate::orchestration::retry::FailureClass::Terminal))
-                        .map(|(t, _, e)| format!("{}: {}", t, e))
-                        .collect();
-                    let strategic: Vec<_> = classified.iter()
-                        .filter(|(_, c, _)| matches!(c, crate::orchestration::retry::FailureClass::Strategic))
-                        .map(|(t, _, e)| format!("{}: {}", t, e))
-                        .collect();
+                    for err in &tool_errors {
+                        if let Some(did_you_mean) = err.split("Did you mean one of:").nth(1) {
+                            if let Some(tools_part) = did_you_mean.split('?').next() {
+                                for t in tools_part.split(',') {
+                                    let clean = t.trim().trim_matches('`');
+                                    if !clean.is_empty() && !alternatives.contains(&clean.to_string()) {
+                                        alternatives.push(clean.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        if err.contains("API_KEY not found") || err.contains("API key") {
+                            api_key_missing = true;
+                        }
+                        // Extract the hallucinated tool name
+                        if let Some(tool_name) = err.split('\'').nth(1) {
+                            if !not_found_tools.contains(&tool_name.to_string()) {
+                                not_found_tools.push(tool_name.to_string());
+                            }
+                        }
+                    }
 
-                    let error_summary = if !terminal.is_empty() {
-                        format!("TERMINAL (do not retry):\n{}\nSTRATEGIC (consider alternative):\n{}",
-                            terminal.join("\n"), strategic.join("\n"))
+                    let recovery_msg = if !alternatives.is_empty() {
+                        format!(
+                            "AUTONOMOUS RECOVERY: Tool failed. Available alternatives you MUST try NOW: {}. Do NOT ask the user — just call the alternative tool immediately with the same parameters.",
+                            alternatives.join(", ")
+                        )
+                    } else if api_key_missing {
+                        "AUTONOMOUS RECOVERY: API key missing for the attempted service. Use `search` (DuckDuckGo, free) or `duckduckgo_search` as a fallback. Do NOT give up — try the free alternatives immediately.".to_string()
+                    } else if !not_found_tools.is_empty() {
+                        format!(
+                            "AUTONOMOUS RECOVERY: Tools not found: {}. Use `discover_tools` with a relevant query to find the correct tool, then call it. Do NOT retry the same missing tool name.",
+                            not_found_tools.join(", ")
+                        )
                     } else {
-                        tool_errors.join("\n")
+                        format!(
+                            "Tool errors occurred: {}. Try an alternative approach or tool. Do NOT give up.",
+                            tool_errors.first().map(|s| s.as_str()).unwrap_or("unknown error")
+                        )
                     };
 
                     let rescue_message = Message {
                         role: "system".to_string(),
-                        content: Some(MessageContent::Text(format!(
-                            "Tool failures classified:\n{}",
-                            error_summary
-                        ))),
+                        content: Some(MessageContent::Text(recovery_msg)),
                         ..Default::default()
                     };
                     let mut state = state_arc.lock().await;

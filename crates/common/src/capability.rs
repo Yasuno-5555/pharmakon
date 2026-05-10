@@ -103,7 +103,7 @@ impl Capability {
     pub fn from_tool_name(name: &str) -> Option<Self> {
         match name {
             // Search
-            "brave_search" | "duckduckgo_search" | "google_search" | "gemini_search" | "web_fetch"
+            "search" | "brave_search" | "duckduckgo_search" | "google_search" | "gemini_search" | "web_fetch"
             | "grep_files" | "file_search" | "semantic_grep" | "custom_scout"
             | "read_file" | "link_understanding" => Some(Self::Search),
 

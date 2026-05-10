@@ -81,6 +81,6 @@ pub use crate::terminal::{BackgroundRunTool, ProcessStatusTool, ShellTool, Termi
 pub use crate::token_economy_tool::TokenEconomyControlTool;
 pub use crate::tool_discovery::DiscoverToolsTool;
 pub use crate::web_fetch::WebFetchTool;
-pub use crate::web_search::{BraveSearchTool, DuckDuckGoSearchTool, GoogleSearchTool};
+pub use crate::web_search::{BraveSearchTool, DuckDuckGoSearchTool, GoogleSearchTool, SearchDispatcherTool};
 pub use crate::workspace::WorkspacePerceptionTool;
 pub use pharmakon_common::Tool;

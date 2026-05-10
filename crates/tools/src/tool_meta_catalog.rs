@@ -94,6 +94,7 @@ pub fn build_default_catalog() -> ToolMetaCatalog {
         meta("web_fetch", "Fetch and extract content from a URL", ToolCategory::Network, network()),
         meta("brave_search", "Search the web using Brave Search API", ToolCategory::Network, network()),
         meta("google_search", "Search the web using Google Search", ToolCategory::Network, network()),
+        meta("search", "Search the web (auto-routes to best free backend)", ToolCategory::Network, network()),
         meta("duckduckgo_search", "Search the web using DuckDuckGo (free, no API key needed)", ToolCategory::Network, network()),
         meta("web_task", "Execute a complex multi-step web research task", ToolCategory::Network, dangerous_net()),
         meta("link_understanding", "Analyze and extract structured data from a URL", ToolCategory::Network, network()),

@@ -354,3 +354,46 @@ impl DuckDuckGoSearchTool {
         results
     }
 }
+
+// ═══════════════════════════════════════════════════════════
+// Search Dispatcher — routes "search" to available backends
+// ═══════════════════════════════════════════════════════════
+
+/// A dispatcher tool named `search` that the LLM can call directly.
+/// Routes to DuckDuckGo (free) by default. Falls back gracefully.
+pub struct SearchDispatcherTool {
+    duckduckgo: DuckDuckGoSearchTool,
+}
+
+impl SearchDispatcherTool {
+    pub fn new() -> Self {
+        Self {
+            duckduckgo: DuckDuckGoSearchTool::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for SearchDispatcherTool {
+    fn name(&self) -> &str {
+        "search"
+    }
+    fn description(&self) -> &str {
+        "Search the web for information. Uses DuckDuckGo (free, no API key needed). Returns titles, URLs, and snippets."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "The search query" },
+                "count": { "type": "integer", "default": 8, "description": "Max results (1-20)" }
+            },
+            "required": ["query"]
+        })
+    }
+
+    async fn call(&self, args: Value) -> AgentResult<String> {
+        // Route to DuckDuckGo (always available, no API key)
+        self.duckduckgo.call(args).await
+    }
+}

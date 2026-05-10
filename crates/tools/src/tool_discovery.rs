@@ -48,13 +48,17 @@ impl Tool for DiscoverToolsTool {
                 query
             ))
         } else {
-            let mut output = format!("### Discovered Tools for '{}' (BM25 Ranked):\n\n", query);
+            let mut output = format!(
+                "### Tools matching '{}'\n\nIMPORTANT: Call tools by their EXACT name shown below. Do NOT invent or modify tool names.\n\n",
+                query
+            );
             for res in results {
                 output.push_str(&format!(
-                    "- **{}** (Score: {:.2}): {}\n",
-                    res.meta.name, res.score, res.meta.description
+                    "**`{}`** — {}\n",
+                    res.meta.name, res.meta.description
                 ));
             }
+            output.push_str("\n---\nTo use a tool, call it with its exact function name as shown above (e.g., `search`, `brave_search`, `duckduckgo_search`).");
             Ok(output)
         }
     }
