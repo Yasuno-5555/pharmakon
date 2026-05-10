@@ -764,7 +764,46 @@ pub fn execute_node<'a>(
 ) -> BoxFuture<'a, Result<String>> {
     async move {
         match node {
-            PlanNode::Step { tool, args, .. } => {
+            PlanNode::Step { tool, args, dry_run_first } => {
+                // 1. 🛑 CodeActGate Pre-Flight Interceptor & Redirect Gate:
+                // Auto-route low-level shell commands or codeact wrappers to high-performance, safe tools!
+                use crate::orchestration::tool_scheduler::{CodeActGate, RedirectTarget};
+                if let Some(redirect) = CodeActGate::should_redirect(tool, args) {
+                    let redirected_node = match redirect {
+                        RedirectTarget::ListDir { path } => {
+                            log::info!("⚡ CodeActGate: Intercepted raw '{}' execution. Redirecting to structured, high-performance 'list_dir' tool.", tool);
+                            PlanNode::Step {
+                                tool: "list_dir".to_string(),
+                                args: serde_json::json!({ "path": path }),
+                                dry_run_first: *dry_run_first,
+                            }
+                        }
+                        RedirectTarget::ReadFile { path } => {
+                            log::info!("⚡ CodeActGate: Intercepted raw '{}' execution. Redirecting to structured 'view_file' tool.", tool);
+                            PlanNode::Step {
+                                tool: "view_file".to_string(),
+                                args: serde_json::json!({ "path": path }),
+                                dry_run_first: *dry_run_first,
+                            }
+                        }
+                        RedirectTarget::GrepFiles { query, path } => {
+                            log::info!("⚡ CodeActGate: Intercepted raw '{}' execution. Redirecting to structured 'grep_search' tool.", tool);
+                            PlanNode::Step {
+                                tool: "grep_search".to_string(),
+                                args: serde_json::json!({ "query": query, "path": path }),
+                                dry_run_first: *dry_run_first,
+                            }
+                        }
+                    };
+                    return execute_node(agent, &redirected_node, workspace_root, snapshotted_files).await;
+                }
+
+                // 2. 🛡️ Tool Scheduler Pre-execute: Enforce exploration budget and cooldown/co-relation policies!
+                if let Err(e) = agent.tool_scheduler.pre_execute(tool, args) {
+                    log::warn!("🚫 ToolScheduler Blocked Execution: {}", e);
+                    return Err(e);
+                }
+
                 if tool == "write_file" || tool == "apply_patch" {
                     if let Some(path_str) = args.get("path").and_then(|s| s.as_str()) {
                         let resolved = resolve_path(workspace_root, path_str);
@@ -780,19 +819,40 @@ pub fn execute_node<'a>(
                     "codeact" => {
                         let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
                         let script = args.get("script").and_then(|s| s.as_str()).unwrap_or("");
-                        let r = engine.execute(script);
-                        if r.success { Ok(r.output) } else { Err(anyhow!(r.error.unwrap_or_default())) }
+                        let script_cloned = script.to_string();
+
+                        // ⏱️ Problem ①: Enforce strict CodeAct timeout in spawn_blocking task
+                        let timeout_res = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
+                            tokio::task::spawn_blocking(move || {
+                                engine.execute(&script_cloned)
+                            }).await
+                        }).await;
+
+                        match timeout_res {
+                            Ok(Ok(r)) => {
+                                if r.success { Ok(r.output) } else { Err(anyhow!(r.error.unwrap_or_default())) }
+                            }
+                            Ok(Err(join_err)) => Err(anyhow!("CodeAct execution task panicked: {}", join_err)),
+                            Err(_) => Err(anyhow!("CodeAct execution timed out after 30 seconds")),
+                        }
                     }
                     "shell" => {
                         let cmd = args.get("command").and_then(|s| s.as_str()).unwrap_or("");
-                        let output = tokio::process::Command::new("sh").arg("-c").arg(cmd)
+                        let cmd_future = tokio::process::Command::new("sh").arg("-c").arg(cmd)
                             .current_dir(workspace_root)
-                            .output().await
-                            .map_err(|e| anyhow!("shell failed: {}", e))?;
-                        if output.status.success() {
-                            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-                        } else {
-                            Err(anyhow!("shell failed: {}", String::from_utf8_lossy(&output.stderr)))
+                            .output();
+
+                        // ⏱️ Problem ①: Enforce strict Shell timeout
+                        match tokio::time::timeout(std::time::Duration::from_secs(30), cmd_future).await {
+                            Ok(Ok(output)) => {
+                                if output.status.success() {
+                                    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+                                } else {
+                                    Err(anyhow!("shell failed: {}", String::from_utf8_lossy(&output.stderr)))
+                                }
+                            }
+                            Ok(Err(e)) => Err(anyhow!("shell execution failed: {}", e)),
+                            Err(_) => Err(anyhow!("shell execution timed out after 30 seconds")),
                         }
                     }
                     _ => {

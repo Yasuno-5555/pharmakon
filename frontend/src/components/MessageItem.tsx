@@ -22,6 +22,67 @@ interface MessageItemProps {
   socket: WebSocket | null;
 }
 
+interface ToolFamilyInfo {
+  glyph: string;
+  label: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+}
+
+const getToolFamilyInfo = (name: string): ToolFamilyInfo => {
+  const norm = name.toLowerCase();
+  if (norm.includes('list_dir') || norm.includes('view_file') || norm.includes('read')) {
+    return {
+      glyph: '▷',
+      label: 'READ',
+      color: 'rgb(59, 130, 246)',
+      bgColor: 'rgba(59, 130, 246, 0.04)',
+      borderColor: 'rgba(59, 130, 246, 0.12)',
+    };
+  }
+  if (
+    norm.includes('modify') ||
+    norm.includes('replace') ||
+    norm.includes('write_to_file') ||
+    norm.includes('edit') ||
+    norm.includes('patch')
+  ) {
+    return {
+      glyph: '◆',
+      label: 'PATCH',
+      color: 'rgb(16, 185, 129)',
+      bgColor: 'rgba(16, 185, 129, 0.04)',
+      borderColor: 'rgba(16, 185, 129, 0.12)',
+    };
+  }
+  if (norm.includes('shell') || norm.includes('run') || norm.includes('codeact')) {
+    return {
+      glyph: '▶',
+      label: 'RUN',
+      color: 'rgb(168, 85, 247)',
+      bgColor: 'rgba(168, 85, 247, 0.04)',
+      borderColor: 'rgba(168, 85, 247, 0.12)',
+    };
+  }
+  if (norm.includes('grep') || norm.includes('search') || norm.includes('find')) {
+    return {
+      glyph: '⌕',
+      label: 'FIND',
+      color: 'rgb(6, 182, 212)',
+      bgColor: 'rgba(6, 182, 212, 0.04)',
+      borderColor: 'rgba(6, 182, 212, 0.12)',
+    };
+  }
+  return {
+    glyph: '•',
+    label: 'TOOL',
+    color: 'rgb(156, 163, 175)',
+    bgColor: 'rgba(156, 163, 175, 0.04)',
+    borderColor: 'rgba(156, 163, 175, 0.12)',
+  };
+};
+
 const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
   return (
     <motion.div
@@ -61,30 +122,67 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
           </div>
         )}
 
-        {msg.toolCall && (
-          <div className="tool-block tool-call">
-            <div className="tool-header">
-              <Terminal size={14} />
-              <span className="tool-label">EXECUTING TOOL</span>
-            </div>
-            <div className="tool-body">
-              <span className="tool-name">{msg.toolCall.name}</span>
-              <pre className="tool-args">{JSON.stringify(msg.toolCall.args, null, 2)}</pre>
-            </div>
-          </div>
-        )}
+        {msg.toolCall && (() => {
+          const info = getToolFamilyInfo(msg.toolCall.name);
+          return (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="tool-block tool-call"
+              style={{
+                background: info.bgColor,
+                borderColor: info.borderColor,
+                borderLeft: `4px solid ${info.color}`,
+                boxShadow: `0 4px 20px -4px rgba(0, 0, 0, 0.3)`
+              }}
+            >
+              <div className="tool-header" style={{ borderColor: info.borderColor, background: 'rgba(255,255,255,0.01)' }}>
+                <Terminal size={14} style={{ color: info.color }} />
+                <span className="tool-label" style={{ color: info.color, letterSpacing: '0.05em', fontWeight: 800 }}>
+                  {info.glyph} {info.label}
+                </span>
+              </div>
+              <div className="tool-body">
+                <span className="tool-name" style={{ color: info.color }}>{msg.toolCall.name}</span>
+                <pre className="tool-args">{JSON.stringify(msg.toolCall.args, null, 2)}</pre>
+              </div>
+            </motion.div>
+          );
+        })()}
 
-        {msg.toolResult && (
-          <div className="tool-block tool-result">
-            <div className="tool-header">
-              <Terminal size={14} />
-              <span className="tool-label">SYSTEM OUTPUT</span>
-            </div>
-            <pre className="tool-result-body">
-              {msg.toolResult.result}
-            </pre>
-          </div>
-        )}
+        {msg.toolResult && (() => {
+          const resultStr = msg.toolResult.result || '';
+          const isError = resultStr.toLowerCase().includes('error') || resultStr.toLowerCase().includes('failed');
+          const themeColor = isError ? 'rgb(239, 68, 68)' : 'rgb(59, 130, 246)';
+          const themeBg = isError ? 'rgba(239, 68, 68, 0.04)' : 'rgba(59, 130, 246, 0.04)';
+          const themeBorder = isError ? 'rgba(239, 68, 68, 0.12)' : 'rgba(59, 130, 246, 0.12)';
+          const label = isError ? 'SYSTEM ERROR' : 'SYSTEM OUTPUT';
+          const glyph = isError ? '❌' : '✓';
+          
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="tool-block tool-result"
+              style={{
+                background: themeBg,
+                borderColor: themeBorder,
+                borderLeft: `4px solid ${themeColor}`,
+                boxShadow: `0 4px 20px -4px rgba(0, 0, 0, 0.3)`
+              }}
+            >
+              <div className="tool-header" style={{ borderColor: themeBorder, background: 'rgba(255,255,255,0.01)' }}>
+                <Terminal size={14} style={{ color: themeColor }} />
+                <span className="tool-label" style={{ color: themeColor, letterSpacing: '0.05em', fontWeight: 800 }}>
+                  {glyph} {label}
+                </span>
+              </div>
+              <pre className="tool-result-body" style={{ padding: '12px' }}>
+                {resultStr}
+              </pre>
+            </motion.div>
+          );
+        })()}
 
         {(msg.content || (msg.images && msg.images.length > 0)) && (
           <div className="message-bubble markdown-body">

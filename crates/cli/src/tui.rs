@@ -111,6 +111,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                 }
                 Event::AgentResponse { content } => {
                     messages.push(("assistant".to_string(), content.to_string()));
+                    chat_scroll = 0;
                     status_line = "🟢 Ready.".to_string();
                 }
                 Event::AgentResponseChunk { chunk, .. } => {
@@ -119,9 +120,11 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                             last.1.push_str(&chunk);
                         } else {
                             messages.push(("assistant".to_string(), chunk));
+                            chat_scroll = 0;
                         }
                     } else {
                         messages.push(("assistant".to_string(), chunk));
+                        chat_scroll = 0;
                     }
                 }
                 Event::ToolCall { name, args } => {
@@ -134,6 +137,16 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                     
                     tool_trace.push(format!("🔧 Exec: {} ({})", name, display_args));
                     status_line = format!("⚙ Running: {}...", name);
+
+                    // Add to main chat timeline as a beautiful card!
+                    let (glyph, label, _) = get_tool_family_info(&name);
+                    let mut tool_card = String::new();
+                    tool_card.push_str(&format!("╭─ {} {} ──────────────────────────────────────────────\n", glyph, label));
+                    tool_card.push_str(&format!("│ Tool: {}\n", name));
+                    tool_card.push_str(&format!("│ Args: {}\n", display_args));
+                    tool_card.push_str("╰─────────────────────────────────────────────────────");
+                    messages.push(("tool".to_string(), tool_card));
+                    chat_scroll = 0;
 
                     // Add to detailed log history
                     detailed_tool_logs.push(DetailedToolLog {
@@ -156,15 +169,45 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                     status_line = "🟢 Idle.".to_string();
 
                     // Update corresponding detailed tool log
+                    let mut tool_name = "tool".to_string();
+                    let mut is_error = false;
                     if let Some(entry) = detailed_tool_logs.iter_mut().rev().find(|e| e.status == "RUNNING") {
-                        entry.status = if result.to_lowercase().contains("error") || result.to_lowercase().contains("failed") {
+                        is_error = result.to_lowercase().contains("error") || result.to_lowercase().contains("failed");
+                        entry.status = if is_error {
                             "FAILED"
                         } else {
                             "SUCCESS"
                         };
-                        entry.result = result;
+                        entry.result = result.clone();
                         entry.latency_ms = Some(entry.start_time.elapsed().as_millis() as u64);
+                        tool_name = entry.name.clone();
                     }
+
+                    // Add to main chat timeline as a beautiful card!
+                    let (glyph, label, _) = get_tool_family_info(&tool_name);
+                    let mut result_card = String::new();
+                    result_card.push_str(&format!("╭─ {} {} [RESULT] ─────────────────────────────────────\n", glyph, label));
+                    
+                    let mut result_clean = result.trim().to_string();
+                    if result_clean.is_empty() {
+                        result_clean = "Success (No output)".to_string();
+                    }
+                    let result_lines: Vec<&str> = result_clean.lines().take(15).collect();
+                    for line in result_lines {
+                        let mut truncated = line.to_string();
+                        if truncated.len() > 80 {
+                            truncated = format!("{}...", &truncated[..77]);
+                        }
+                        result_card.push_str(&format!("│ {}\n", truncated));
+                    }
+                    if result_clean.lines().count() > 15 {
+                        result_card.push_str(&format!("│ ... ({} lines truncated)\n", result_clean.lines().count() - 15));
+                    }
+                    result_card.push_str("╰─────────────────────────────────────────────────────");
+                    
+                    let role = if is_error { "tool_error".to_string() } else { "tool_result".to_string() };
+                    messages.push((role, result_card));
+                    chat_scroll = 0;
                 }
                 Event::ApprovalRequest { id, tool, args } => {
                     let args_str = serde_json::to_string_pretty(&args).unwrap_or_default();
@@ -199,6 +242,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                     tool_trace.push(format!("🔄 Active model switched to: {}", model_id));
                     status_line = format!("🟢 Active model updated: {}", model_id);
                     messages.push(("system".to_string(), format!("🔄 Model successfully switched to: {}", model_id)));
+                    chat_scroll = 0;
                 }
                 _ => {}
             }
@@ -252,6 +296,9 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                             "user" => ("🧑 OPERATOR │ ", Color::Green),
                             "assistant" => ("💊 PHARMAKON │ ", Color::Cyan),
                             "system" => ("⚙ SYSTEM   │ ", Color::Yellow),
+                            "tool" => ("              │ ", Color::Magenta),
+                            "tool_result" => ("              │ ", Color::LightBlue),
+                            "tool_error" => ("              │ ", Color::LightRed),
                             _ => ("   INFO     │ ", Color::DarkGray),
                         };
                         let style = Style::default().fg(color);
@@ -266,11 +313,30 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                         display_msgs.push(ListItem::new("")); // Spacer between messages
                     }
 
-                    // Implement chat scrolling limit safely
-                    let sliced_msgs = if display_msgs.len() > chat_scroll {
-                        display_msgs[chat_scroll..].to_vec()
+                    // Implement chat scrolling limit safely with precise bottom-aligned scroll offset
+                    let chat_height = (chat_layout[0].height as usize).saturating_sub(2);
+                    let total_lines = display_msgs.len();
+                    let start_idx = if total_lines > chat_height {
+                        let base = total_lines - chat_height;
+                        if chat_scroll < base {
+                            base - chat_scroll
+                        } else {
+                            0
+                        }
                     } else {
-                        display_msgs
+                        0
+                    };
+                    
+                    let end_idx = if total_lines > chat_height {
+                        total_lines - chat_scroll
+                    } else {
+                        total_lines
+                    };
+
+                    let sliced_msgs = if start_idx < end_idx && start_idx < display_msgs.len() && end_idx <= display_msgs.len() {
+                        display_msgs[start_idx..end_idx].to_vec()
+                    } else {
+                        display_msgs.clone()
                     };
 
                     let chat_block = List::new(sliced_msgs)
@@ -644,10 +710,23 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                 input_buffer.pop();
                             }
                             KeyCode::Up => {
-                                if chat_scroll > 0 { chat_scroll -= 1; }
+                                let mut total_lines = 0;
+                                for (_, content) in &messages {
+                                    total_lines += content.split('\n').count() + 1;
+                                }
+                                let term_height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
+                                let chat_height = term_height.saturating_sub(6);
+                                if total_lines > chat_height {
+                                    let max_scroll = total_lines - chat_height;
+                                    if chat_scroll < max_scroll {
+                                        chat_scroll += 1;
+                                    }
+                                }
                             }
                             KeyCode::Down => {
-                                if chat_scroll < messages.len() { chat_scroll += 1; }
+                                if chat_scroll > 0 {
+                                    chat_scroll -= 1;
+                                }
                             }
                             KeyCode::Enter => {
                                 let msg = input_buffer.trim().to_string();
@@ -657,6 +736,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                         messages.clear();
                                         tool_trace.clear();
                                         detailed_tool_logs.clear();
+                                        chat_scroll = 0;
                                         tool_trace.push("🔄 Workspace cognitive history cleared.".to_string());
                                         messages.push(("system".to_string(), "🔄 New session started. All context and cognitive history cleared.".to_string()));
                                         input_buffer.clear();
@@ -667,6 +747,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                     }
 
                                     messages.push(("user".to_string(), msg.clone()));
+                                    chat_scroll = 0;
                                     input_buffer.clear();
                                     status_line = "⏳ Thinking...".to_string();
 
@@ -675,7 +756,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                     active_chat_task = Some(tokio::spawn(async move {
                                         match agent_clone.chat(&msg).await {
                                             Ok(resp) => {
-                                                if msg.starts_with("/model") {
+                                                if msg.to_lowercase().starts_with("/model") {
                                                     let _ = event_tx.send(Event::AgentResponse {
                                                         content: pharmakon_common::MessageContent::Text(resp),
                                                     });
@@ -697,6 +778,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                     status_line = "🔴 Execution cancelled by operator. Ready for input.".to_string();
                                     tool_trace.push("❌ Execution aborted by operator via ESC.".to_string());
                                     messages.push(("system".to_string(), "🔴 Execution cancelled by operator. Ready for input.".to_string()));
+                                    chat_scroll = 0;
                                 } else {
                                     input_buffer.clear();
                                 }
@@ -797,4 +879,14 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn get_tool_family_info(name: &str) -> (&'static str, &'static str, Color) {
+    match name {
+        "list_dir" | "view_file" => ("▷", "read", Color::Blue),
+        "modify_code" | "replace_file_content" | "multi_replace_file_content" | "write_to_file" => ("◆", "patch", Color::Green),
+        "shell" | "codeact" => ("▶", "run", Color::Magenta),
+        "grep_search" => ("⌕", "find", Color::Cyan),
+        _ => ("•", "tool", Color::DarkGray),
+    }
 }

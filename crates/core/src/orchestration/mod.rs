@@ -36,3 +36,4 @@ pub mod pattern_miner;
 pub mod aot;
 pub mod fabric;
 pub mod benchmark;
+pub mod tool_scheduler;

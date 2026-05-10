@@ -77,6 +77,7 @@ pub struct Agent {
     pub cron_manager: Arc<StdMutex<Option<Arc<crate::automation::cron::CronManager>>>>,
     pub skill_library: Arc<std::sync::Mutex<crate::orchestration::skill_library::RhaiSkillLibrary>>,
     pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
+    pub tool_scheduler: Arc<crate::orchestration::tool_scheduler::ToolScheduler>,
 }
 
 impl Clone for Agent {
@@ -123,6 +124,7 @@ impl Clone for Agent {
             bank_of_pharmakon: self.bank_of_pharmakon.clone(),
             skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
             vision_stream: self.vision_stream.clone(),
+            tool_scheduler: self.tool_scheduler.clone(),
         }
     }
 }
@@ -231,6 +233,9 @@ impl Agent {
             bank_of_pharmakon: Arc::new(Mutex::new(crate::orchestration::economy_v2::BankOfPharmakon::new(100_000))),
             governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
             vision_stream: None,
+            tool_scheduler: Arc::new(crate::orchestration::tool_scheduler::ToolScheduler::new(
+                std::env::current_dir().unwrap_or_default(),
+            )),
         }
     }
 

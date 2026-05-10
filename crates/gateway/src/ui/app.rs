@@ -36,8 +36,9 @@ pub graph_relations: Vec<String>,
     pub file_tree: Vec<String>,
     pub selected_file: Option<String>,
     pub file_content: String,
-pub workspace_root: String,
+    pub workspace_root: String,
     pub last_snapshot_id: Option<String>,
+    pub pending_approval: Option<(String, String, String)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -57,11 +58,11 @@ pub struct SwarmStatus { pub id: String, pub role: String, pub status: String }
 
 #[derive(Clone, PartialEq)]
 pub struct TimelineEvent { pub timestamp: String, pub event: String, pub kind: TimelineKind }
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelineKind { Plan, Verify, Execute, Fail, Rollback, Gate }
 #[derive(Clone, PartialEq)]
 pub struct DagNode { pub id: String, pub label: String, pub status: DagStatus, pub children: Vec<usize> }
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DagStatus { Pending, Running, Success, Failed, Gated }
 
 pub struct CronJobInfoData { pub id: String, pub schedule_type: String, pub expr: String, pub message: String }
@@ -80,6 +81,8 @@ pub enum UiEvent {
     PlanDagUpdate(Vec<DagNode>),
     TimelineEvent(TimelineEvent),
     SnapshotCreated(String),
+    ApprovalRequest { id: String, tool: String, args: String },
+    ApprovalResolved(String),
 }
 
 impl AppData {
@@ -111,6 +114,7 @@ impl AppData {
             file_tree, selected_file: None, file_content: String::new(),
             workspace_root: ws.to_string_lossy().to_string(),
             last_snapshot_id: None,
+            pending_approval: None,
         }
     }
 
@@ -153,6 +157,14 @@ impl AppData {
                 UiEvent::PlanDagUpdate(dag) => { self.plan_dag = dag; }
                 UiEvent::TimelineEvent(ev) => { self.cognitive_timeline.push(ev); if self.cognitive_timeline.len() > 50 { self.cognitive_timeline.remove(0); } }
                 UiEvent::SnapshotCreated(id) => { self.last_snapshot_id = Some(id); }
+                UiEvent::ApprovalRequest { id, tool, args } => {
+                    self.pending_approval = Some((id, tool, args));
+                }
+                UiEvent::ApprovalResolved(id) => {
+                    if self.pending_approval.as_ref().map(|x| &x.0) == Some(&id) {
+                        self.pending_approval = None;
+                    }
+                }
             }
             if self.system_logs.len() > 200 { self.system_logs.remove(0); }
             if self.messages.len() > 50 { self.messages.remove(0); }
@@ -189,6 +201,12 @@ impl AppData {
             });
             let ev = TimelineEvent { timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(), event: format!("Rollback → {}", &sid[..sid.len().min(8)]), kind: TimelineKind::Rollback };
             self.cognitive_timeline.push(ev);
+        }
+    }
+
+    pub fn resolve_approval(&mut self, approved: bool) {
+        if let Some((id, _, _)) = self.pending_approval.take() {
+            self.agent.approve(id, approved);
         }
     }
 
