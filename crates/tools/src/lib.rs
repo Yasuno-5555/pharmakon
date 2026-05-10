@@ -5,7 +5,7 @@ pub mod browser;
 pub mod canvas;
 pub mod checkpoint;
 pub mod code;
-pub mod codex;
+pub mod cognitive;
 pub mod commitment_tool;
 pub mod config_tool;
 pub mod connectors;
@@ -52,8 +52,8 @@ pub use crate::browser::BrowserTool;
 pub use crate::canvas::CanvasTool;
 pub use crate::checkpoint::CheckpointTool;
 pub use crate::code::{
-    ApplyPatchTool, CodeEditTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
-    MultiCodeEditTool, PythonInterpreterTool, ViewFileTool,
+    ApplyPatchTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
+    PythonInterpreterTool, StrictReplaceContentTool, ViewFileTool,
 };
 pub use crate::commitment_tool::CommitmentTool;
 pub use crate::connectors::ContextConnectorTool;
@@ -77,7 +77,7 @@ pub use crate::search::custom_scout::CustomScoutTool;
 pub use crate::skill_factory::SkillFactoryTool;
 pub use crate::soul_tool::SoulTool;
 pub use crate::subagent::{ParallelSwarmTool, SubAgentTool};
-pub use crate::terminal::{BackgroundRunTool, ProcessStatusTool, ShellTool, TerminalTool};
+pub use crate::terminal::{BackgroundRunTool, ProcessStatusTool, ShellTool, TerminalTool, SendCommandInputTool};
 pub use crate::token_economy_tool::TokenEconomyControlTool;
 pub use crate::tool_discovery::DiscoverToolsTool;
 pub use crate::web_fetch::WebFetchTool;

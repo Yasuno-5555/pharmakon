@@ -222,22 +222,25 @@ impl Tool for ShellTool {
     }
 }
 
-pub struct BackgroundRunTool {
-    pub active_processes: Arc<Mutex<std::collections::HashMap<String, Child>>>,
+pub struct ManagedProcess {
+    pub child: Mutex<Child>,
+    pub stdin: Mutex<Option<tokio::process::ChildStdin>>,
+    pub output_buffer: Arc<tokio::sync::RwLock<String>>,
 }
+
+static PROCESS_REGISTRY: std::sync::OnceLock<Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<ManagedProcess>>>>> = std::sync::OnceLock::new();
+
+fn get_process_registry() -> Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<ManagedProcess>>>> {
+    PROCESS_REGISTRY.get_or_init(|| Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))).clone()
+}
+
+pub struct BackgroundRunTool;
 
 impl BackgroundRunTool {
-    pub fn new() -> Self {
-        Self {
-            active_processes: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        }
-    }
+    pub fn new() -> Self { Self }
 }
-
 impl Default for BackgroundRunTool {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self }
 }
 
 #[async_trait]
@@ -246,14 +249,13 @@ impl Tool for BackgroundRunTool {
         "run_background"
     }
     fn description(&self) -> &str {
-        "Start a command in the background. Returns a process ID (handle) that can be used to track it."
+        "Start a command in the background with interactive I/O. Returns a handle to interact with it."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "command": { "type": "string", "description": "Command to run" },
-                "log_file": { "type": "string", "description": "Optional file to redirect output to" }
+                "command": { "type": "string", "description": "Command to run" }
             },
             "required": ["command"]
         })
@@ -261,39 +263,71 @@ impl Tool for BackgroundRunTool {
 
     async fn call(&self, args: Value) -> AgentResult<String> {
         let command = args["command"].as_str().unwrap();
-        let log_file = args["log_file"].as_str();
 
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(command);
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| AgentError(e.to_string()))?;
 
-        if let Some(path) = log_file {
-            let file = std::fs::File::create(path).map_err(|e| AgentError(e.to_string()))?;
-            cmd.stdout(Stdio::from(
-                file.try_clone().map_err(|e| AgentError(e.to_string()))?,
-            ));
-            cmd.stderr(Stdio::from(file));
-        } else {
-            cmd.stdout(Stdio::null());
-            cmd.stderr(Stdio::null());
+        let stdin = child.stdin.take();
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let output_buffer = Arc::new(tokio::sync::RwLock::new(String::new()));
+        
+        if let Some(stdout) = stdout {
+            let buffer = output_buffer.clone();
+            tokio::spawn(async move {
+                let mut reader = tokio::io::BufReader::new(stdout);
+                let mut line = String::new();
+                while let Ok(n) = tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await {
+                    if n == 0 { break; }
+                    let mut lock = buffer.write().await;
+                    lock.push_str(&line);
+                    line.clear();
+                }
+            });
+        }
+        
+        if let Some(stderr) = stderr {
+            let buffer = output_buffer.clone();
+            tokio::spawn(async move {
+                let mut reader = tokio::io::BufReader::new(stderr);
+                let mut line = String::new();
+                while let Ok(n) = tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await {
+                    if n == 0 { break; }
+                    let mut lock = buffer.write().await;
+                    lock.push_str("[stderr] ");
+                    lock.push_str(&line);
+                    line.clear();
+                }
+            });
         }
 
-        let child = cmd.spawn().map_err(|e| AgentError(e.to_string()))?;
         let id = uuid::Uuid::new_v4().to_string();
-        let handle = format!("bg_{}", id);
+        let handle = format!("bg_{}", &id[0..8]);
 
-        let mut procs = self.active_processes.lock().await;
-        procs.insert(handle.clone(), child);
+        let managed = Arc::new(ManagedProcess {
+            child: Mutex::new(child),
+            stdin: Mutex::new(stdin),
+            output_buffer,
+        });
 
-        Ok(format!(
-            "Started background process with handle: {}. Max auto-fix retries: 3.",
-            handle
-        ))
+        let registry = get_process_registry();
+        registry.write().await.insert(handle.clone(), managed);
+
+        Ok(format!("Started background process with handle: {}", handle))
     }
 }
 
-pub struct ProcessStatusTool {
-    pub active_processes: Arc<Mutex<std::collections::HashMap<String, Child>>>,
-    pub retry_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+pub struct ProcessStatusTool;
+
+impl ProcessStatusTool {
+    pub fn new() -> Self { Self }
 }
 
 #[async_trait]
@@ -302,7 +336,7 @@ impl Tool for ProcessStatusTool {
         "get_process_status"
     }
     fn description(&self) -> &str {
-        "Check the status of a background process. Monitors for errors and manages retry limits."
+        "Check the status and read the output of a background process."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -316,33 +350,89 @@ impl Tool for ProcessStatusTool {
 
     async fn call(&self, args: Value) -> AgentResult<String> {
         let handle = args["handle"].as_str().unwrap();
-        let mut procs = self.active_processes.lock().await;
+        let registry = get_process_registry();
+        let map = registry.read().await;
 
-        if let Some(child) = procs.get_mut(handle) {
+        if let Some(managed) = map.get(handle) {
+            let mut child = managed.child.lock().await;
+            let output = {
+                let mut buf = managed.output_buffer.write().await;
+                let text = buf.clone();
+                buf.clear(); // Clear buffer after reading
+                text
+            };
+
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    if status.success() {
-                        Ok(format!("Process {} finished successfully.", handle))
-                    } else {
-                        let mut retries = self.retry_counts.lock().await;
-                        let count = retries.entry(handle.to_string()).or_insert(0);
-                        *count += 1;
-
-                        if *count > 3 {
-                            Ok(format!(
-                                "CRITICAL: Process {} failed with status {}. RETRY LIMIT EXCEEDED ({}). HUMAN INTERVENTION REQUIRED.",
-                                handle, status, *count
-                            ))
-                        } else {
-                            Ok(format!(
-                                "ERROR: Process {} failed with status {}. Retry count: {}/3. You may attempt ONE more fix.",
-                                handle, status, *count
-                            ))
-                        }
-                    }
+                    Ok(format!("Process {} EXITED with status: {}\nOutput:\n{}", handle, status, output))
                 }
-                Ok(None) => Ok(format!("Process {} is still running.", handle)),
+                Ok(None) => {
+                    Ok(format!("Process {} is RUNNING.\nOutput:\n{}", handle, output))
+                }
                 Err(e) => Err(AgentError(format!("Error checking process: {}", e))),
+            }
+        } else {
+            Err(AgentError(format!("Process handle {} not found.", handle)))
+        }
+    }
+}
+
+pub struct SendCommandInputTool;
+
+impl SendCommandInputTool {
+    pub fn new() -> Self { Self }
+}
+
+#[async_trait]
+impl Tool for SendCommandInputTool {
+    fn name(&self) -> &str {
+        "send_command_input"
+    }
+    fn description(&self) -> &str {
+        "Send stdin input to a running background process. Use to interact with REPLs."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "handle": { "type": "string", "description": "Process handle" },
+                "input": { "type": "string", "description": "Input string to send." },
+                "wait_ms": { "type": "integer", "description": "Milliseconds to wait for output after sending", "default": 500 }
+            },
+            "required": ["handle", "input"]
+        })
+    }
+
+    async fn call(&self, args: Value) -> AgentResult<String> {
+        let handle = args["handle"].as_str().unwrap();
+        let input = args["input"].as_str().unwrap();
+        let wait_ms = args["wait_ms"].as_u64().unwrap_or(500);
+        
+        let registry = get_process_registry();
+        let map = registry.read().await;
+
+        if let Some(managed) = map.get(handle) {
+            let mut stdin_lock = managed.stdin.lock().await;
+            if let Some(stdin) = stdin_lock.as_mut() {
+                // Ensure there's a trailing newline if it looks like a command submission but is missing it
+                let final_input = if !input.ends_with('\n') {
+                    format!("{}\n", input)
+                } else {
+                    input.to_string()
+                };
+
+                stdin.write_all(final_input.as_bytes()).await.map_err(|e| AgentError(e.to_string()))?;
+                stdin.flush().await.map_err(|e| AgentError(e.to_string()))?;
+                
+                // wait a little bit for output to be generated
+                tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+                
+                let mut buf = managed.output_buffer.write().await;
+                let text = buf.clone();
+                buf.clear();
+                Ok(format!("Sent input to {}.\nOutput:\n{}", handle, text))
+            } else {
+                Err(AgentError(format!("Process {} does not have an active stdin.", handle)))
             }
         } else {
             Err(AgentError(format!("Process handle {} not found.", handle)))

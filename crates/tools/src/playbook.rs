@@ -148,6 +148,7 @@ impl PlaybookTool {
         ]
     }
 
+    #[allow(dead_code)]
     fn get_builtin_playbooks() -> Vec<(&'static str, &'static str)> {
         Self::all_playbooks()
             .into_iter()

@@ -37,22 +37,30 @@ impl Tool for GrepSearchTool {
             .ok_or_else(|| AgentError("Missing query".to_string()))?;
         let path = args["path"].as_str().unwrap_or(".");
         let max_results = args["max_results"].as_u64().unwrap_or(50);
+        let include = args["include"].as_str();
 
-        let mut cmd = Command::new("grep");
-        cmd.arg("-r")
-            .arg("-n")
-            .arg("-C")
-            .arg("1")
-            .arg(query)
-            .arg(path);
+        let use_rg = Command::new("rg").arg("--version").output().is_ok();
 
-        if let Some(include) = args["include"].as_str() {
-            cmd.arg("--include").arg(include);
-        }
+        let (mut cmd, _is_rg) = if use_rg {
+            let mut cmd = Command::new("rg");
+            cmd.arg("-n").arg("-C").arg("1").arg(query).arg(path);
+            if let Some(inc) = include {
+                cmd.arg("-g").arg(inc);
+            }
+            (cmd, true)
+        } else {
+            let mut cmd = Command::new("grep");
+            cmd.arg("-r").arg("-n").arg("-C").arg("1").arg(query).arg(path);
+            if let Some(inc) = include {
+                cmd.arg("--include").arg(inc);
+            }
+            (cmd, false)
+        };
 
         let output = cmd
             .output()
-            .map_err(|e| AgentError(format!("Grep failed: {}", e)))?;
+            .map_err(|e| AgentError(format!("Search command failed: {}", e)))?;
+            
         let result = String::from_utf8_lossy(&output.stdout).to_string();
 
         if result.is_empty() {
@@ -73,63 +81,15 @@ impl Tool for GrepSearchTool {
     }
 }
 
-pub struct CodeEditTool;
+pub struct StrictReplaceContentTool;
 
 #[async_trait]
-impl Tool for CodeEditTool {
+impl Tool for StrictReplaceContentTool {
     fn name(&self) -> &str {
-        "edit_file"
+        "replace_file_content"
     }
     fn description(&self) -> &str {
-        "Apply a single search-and-replace edit. Equivalent to Antigravity's replace_file_content."
-    }
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string", "description": "Path to the file" },
-                "old_content": { "type": "string", "description": "Exact text to find" },
-                "new_content": { "type": "string", "description": "Replacement text" }
-            },
-            "required": ["path", "old_content", "new_content"]
-        })
-    }
-
-    fn category(&self) -> ToolCategory {
-        ToolCategory::FileSystem
-    }
-
-    async fn call(&self, args: Value) -> AgentResult<String> {
-        let path = args["path"]
-            .as_str()
-            .ok_or_else(|| AgentError("Missing path".to_string()))?;
-        let old = args["old_content"]
-            .as_str()
-            .ok_or_else(|| AgentError("Missing old_content".to_string()))?;
-        let new = args["new_content"]
-            .as_str()
-            .ok_or_else(|| AgentError("Missing new_content".to_string()))?;
-
-        let content = fs::read_to_string(path)
-            .map_err(|e| AgentError(format!("Failed to read file: {}", e)))?;
-        if !content.contains(old) {
-            return Err(AgentError(format!("Old content not found in: {}", path)));
-        }
-        let new_content = content.replace(old, new);
-        fs::write(path, new_content).map_err(|e| AgentError(format!("Failed to write: {}", e)))?;
-        Ok(format!("Updated {}", path))
-    }
-}
-
-pub struct MultiCodeEditTool;
-
-#[async_trait]
-impl Tool for MultiCodeEditTool {
-    fn name(&self) -> &str {
-        "multi_edit_file"
-    }
-    fn description(&self) -> &str {
-        "Apply multiple search-and-replace edits. Equivalent to Antigravity's multi_replace_file_content."
+        "Strictly replace exact content chunks in a file within line ranges. Prevents accidental replacements."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -141,10 +101,12 @@ impl Tool for MultiCodeEditTool {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "old_content": { "type": "string", "description": "Text to find" },
-                            "new_content": { "type": "string", "description": "Replacement" }
+                            "start_line": { "type": "integer", "description": "Search scope start line (1-indexed)" },
+                            "end_line": { "type": "integer", "description": "Search scope end line (1-indexed)" },
+                            "target_content": { "type": "string", "description": "Exact text to find, including whitespace/newlines" },
+                            "replacement_content": { "type": "string", "description": "Replacement text" }
                         },
-                        "required": ["old_content", "new_content"]
+                        "required": ["start_line", "end_line", "target_content", "replacement_content"]
                     }
                 }
             },
@@ -163,18 +125,65 @@ impl Tool for MultiCodeEditTool {
         let edits = args["edits"]
             .as_array()
             .ok_or_else(|| AgentError("Missing edits".to_string()))?;
+
         let mut content =
             fs::read_to_string(path).map_err(|e| AgentError(format!("Failed to read: {}", e)))?;
+        let ends_with_newline = content.ends_with('\n');
+
         for edit in edits {
-            let old = edit["old_content"].as_str().unwrap_or_default();
-            let new = edit["new_content"].as_str().unwrap_or_default();
-            if !content.contains(old) {
-                return Err(AgentError(format!("Chunk not found in: {}", path)));
+            let start = edit["start_line"].as_u64().unwrap_or(1) as usize;
+            let end = edit["end_line"].as_u64().unwrap_or(1) as usize;
+            let target = edit["target_content"].as_str().unwrap_or("");
+            let replacement = edit["replacement_content"].as_str().unwrap_or("");
+
+            let mut lines: Vec<&str> = content.split('\n').collect();
+            if ends_with_newline && lines.last() == Some(&"") {
+                lines.pop();
             }
-            content = content.replace(old, new);
+
+            let total_lines = lines.len();
+            let s_idx = start.saturating_sub(1).min(total_lines);
+            let e_idx = end.min(total_lines);
+
+            if s_idx > e_idx {
+                return Err(AgentError(format!("Invalid range: {}-{}", start, end)));
+            }
+
+            let scope_text = lines[s_idx..e_idx].join("\n");
+            let matches: Vec<_> = scope_text.match_indices(target).collect();
+
+            if matches.is_empty() {
+                return Err(AgentError(format!(
+                    "Target content not found in lines {}-{}",
+                    start, end
+                )));
+            }
+            if matches.len() > 1 {
+                return Err(AgentError(format!(
+                    "Target content found multiple times in lines {}-{}. Be more specific.",
+                    start, end
+                )));
+            }
+
+            let new_scope_text = scope_text.replace(target, replacement);
+
+            let mut new_lines = Vec::new();
+            if s_idx > 0 {
+                new_lines.push(lines[0..s_idx].join("\n"));
+            }
+            new_lines.push(new_scope_text);
+            if e_idx < total_lines {
+                new_lines.push(lines[e_idx..total_lines].join("\n"));
+            }
+            
+            content = new_lines.join("\n");
+            if ends_with_newline {
+                content.push('\n');
+            }
         }
+
         fs::write(path, content).map_err(|e| AgentError(format!("Failed to write: {}", e)))?;
-        Ok(format!("Applied {} edits to {}", edits.len(), path))
+        Ok(format!("Applied {} strict edits to {}", edits.len(), path))
     }
 }
 
