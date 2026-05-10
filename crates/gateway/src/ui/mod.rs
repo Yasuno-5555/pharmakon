@@ -191,6 +191,21 @@ impl eframe::App for PharmakonIde {
                     }
                 }
             });
+            ui.horizontal(|ui| {
+                if ui.button("📂 Pick Folder").clicked() {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        self.data.workspace_root = folder.to_string_lossy().to_string();
+                        self.data.refresh_file_tree();
+                        self.folder_input.clear();
+                    }
+                }
+                if ui.button("📄 Pick File").clicked() {
+                    if let Some(file) = rfd::FileDialog::new().pick_file() {
+                        let full = file.to_string_lossy().to_string();
+                        self.data.open_file(&full);
+                    }
+                }
+            });
             ui.colored_label(egui::Color32::GRAY, self.data.workspace_root.clone());
             if ui.button("↻ Refresh workspace").clicked() {
                 self.data.refresh_file_tree();
