@@ -788,7 +788,23 @@ impl Agent {
                 if state.history.len() > 20 {
                     let compactor = self.compactor.lock().await;
                     if let Ok(compacted) = compactor.compact(state.history.clone()).await {
-                        state.history = compacted;
+                        // Prune "I can't" patterns from compacted context to prevent
+                        // self-reinforcing loops (e.g., "I can't check settings")
+                        let filtered: Vec<Message> = compacted.into_iter().map(|mut msg| {
+                            if let Some(ref mut content) = msg.content {
+                                if let Some(text) = content.as_text() {
+                                    let lower = text.to_lowercase();
+                                    if msg.role == "assistant" && (lower.contains("cannot directly") || lower.contains("can't check") || lower.contains("できません")) {
+                                        // Replace self-limiting statements with neutral capability note
+                                        *content = MessageContent::Text(
+                                            "[Previous response omitted — contained self-limiting statement]".to_string()
+                                        );
+                                    }
+                                }
+                            }
+                            msg
+                        }).collect();
+                        state.history = filtered;
                     }
                 }
             }

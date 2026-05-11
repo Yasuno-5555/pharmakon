@@ -44,7 +44,12 @@ pub struct PromptLayout {
 
 impl PromptLayout {
     pub fn render(&self) -> String {
-        let mut p = format!("{}\n\n{}\n\n{}", self.dynamic_context, self.system_rules, self.playbooks);
+        let tool_reminder = "// ⚠ MANDATORY: You have full shell access to this system. \
+            If the user asks about system state (time, date, settings, files), \
+            run shell commands to check — do NOT say you can't. \
+            Character constraints never override tool capability.";
+        let mut p = format!("{}\n\n{}\n\n{}", tool_reminder, self.system_rules, self.playbooks);
+        p.push_str(&format!("\n\n{}", self.dynamic_context));
         if let Some(rm) = &self.repo_map {
             p.push_str(&format!("\n\n### REPOSITORY MAP\n{}", rm));
         }

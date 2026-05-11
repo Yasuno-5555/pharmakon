@@ -30,7 +30,9 @@ impl ContextCompactor {
         let mut summary_prompt = String::from(
             "Compress the following conversation into a HIGH-DENSITY semantic summary. \
                           Focus on key facts, user preferences, current goals, and finalized decisions. \
-                          Use a structural format if possible. Avoid conversational filler.\n\n",
+                          Use a structural format if possible. Avoid conversational filler.\n\
+                          IMPORTANT: Do NOT include statements about the assistant's limitations \
+                          or inability to perform tasks. Only report factual outcomes and decisions.\n\n",
         );
         for msg in middle_part {
             let role = &msg.role;
