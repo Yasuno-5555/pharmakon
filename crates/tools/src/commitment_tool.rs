@@ -20,7 +20,7 @@ impl Tool for CommitmentTool {
         "commitment"
     }
     fn description(&self) -> &str {
-        "Register a commitment or promise made to the user. Use this when you promise to do something in the future."
+        "Register a future commitment to the user (e.g. 'I'll fix this bug next session'). Do NOT use this as an excuse to skip work — only use when you genuinely cannot complete the task now."
     }
     fn parameters(&self) -> Value {
         json!({

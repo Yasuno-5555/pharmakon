@@ -20,7 +20,7 @@ impl Tool for CanvasTool {
         "canvas"
     }
     fn description(&self) -> &str {
-        "Draw on a shared canvas. Use this to visualize data or draw diagrams."
+        "Draw shapes, text, and colors on a shared visual canvas. Supports rectangles, circles, lines, labels, and color fills. Use to create diagrams, data visualizations, and UI mockups."
     }
     fn parameters(&self) -> Value {
         json!({

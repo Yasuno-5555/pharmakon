@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, Tool};
+use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory, ExecutionProfile, SideEffectLevel, FilesystemScope, Reversibility};
 use serde_json::{Value, json};
 use std::fs;
 use std::process::Command;
@@ -23,6 +23,27 @@ impl Tool for HostScriptTool {
             },
             "required": ["script"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::System
+    }
+
+    fn execution_profile(&self) -> ExecutionProfile {
+        ExecutionProfile {
+            side_effect_level: SideEffectLevel::Irreversible,
+            filesystem_scope: FilesystemScope::Unrestricted,
+            reversibility: Reversibility::Impractical,
+            requires_human_approval: true,
+            ..Default::default()
+        }
+    }
+
+    fn requires_approval(&self, _args: &Value) -> bool { true }
+
+    fn approval_description(&self, args: &Value) -> String {
+        let preview = args["script"].as_str().unwrap_or("").chars().take(80).collect::<String>();
+        format!("Execute host script: {}", preview)
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {

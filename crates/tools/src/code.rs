@@ -490,8 +490,9 @@ impl Tool for StrictReplaceContentTool {
                         "properties": {
                             "start_line": { "type": "integer", "description": "Search scope start (1-indexed)" },
                             "end_line": { "type": "integer", "description": "Search scope end (1-indexed)" },
-                            "old": { "type": "string", "description": "Exact text to find (including whitespace)" },
-                            "new": { "type": "string", "description": "Replacement text" }
+                            "old": { "type": "string", "description": "Text to find. Exact match by default. Set trim=true to ignore surrounding whitespace (more reliable)." },
+                            "new": { "type": "string", "description": "Replacement text" },
+                            "trim": { "type": "boolean", "default": false, "description": "When true, trims whitespace from old+new before matching. Use when exact indentation is uncertain." }
                         },
                         "required": ["start_line", "end_line", "old", "new"]
                     }
@@ -528,12 +529,17 @@ impl Tool for StrictReplaceContentTool {
         for edit in edits {
             let start = edit["start_line"].as_u64().unwrap_or(1) as usize;
             let end = edit["end_line"].as_u64().unwrap_or(1) as usize;
-            let old = edit["old"].as_str().unwrap_or("");
+            let raw_old = edit["old"].as_str().unwrap_or("");
             let replacement = edit["new"].as_str().unwrap_or("");
+            let trim_enabled = edit["trim"].as_bool().unwrap_or(false);
 
-            if old.is_empty() {
+            if raw_old.is_empty() {
                 return Err(AgentError("Empty 'old' string in edit".to_string()));
             }
+
+            // When trim is enabled, normalize whitespace for fuzzy matching
+            let old = if trim_enabled { raw_old.trim() } else { raw_old };
+            let replacement = if trim_enabled { replacement.trim() } else { replacement };
 
             let mut lines: Vec<&str> = content.split('\n').collect();
             if ends_with_newline && lines.last() == Some(&"") {
@@ -549,12 +555,27 @@ impl Tool for StrictReplaceContentTool {
             }
 
             let scope_text = lines[s_idx..e_idx].join("\n");
-            let match_count = scope_text.matches(old).count();
 
+            // Try exact match first; fall back to trimmed if enabled
+            let match_count = scope_text.matches(old).count();
+            let (actual_old, actual_replacement) = if match_count == 0 && !trim_enabled {
+                // Exact match failed — try trimming both sides (whitespace-tolerant)
+                let trimmed_old = old.trim();
+                let trimmed_count = scope_text.matches(trimmed_old).count();
+                if trimmed_count > 0 {
+                    (trimmed_old, replacement.trim())
+                } else {
+                    (old, replacement)
+                }
+            } else {
+                (old, replacement)
+            };
+
+            let match_count = scope_text.matches(actual_old).count();
             if match_count == 0 {
                 return Err(AgentError(format!(
-                    "Target text not found in lines {}-{}. Check exact whitespace and newlines:\n---\n{}\n---",
-                    start, end, &old[..old.len().min(100)]
+                    "Target text not found in lines {}-{}. Try setting trim=true to ignore whitespace, or check exact indentation:\n---\n{}\n---",
+                    start, end, &raw_old[..raw_old.len().min(100)]
                 )));
             }
             if match_count > 1 {
@@ -565,7 +586,7 @@ impl Tool for StrictReplaceContentTool {
             }
 
             // Build result by replacing only the scope portion
-            let new_scope_text = scope_text.replace(old, replacement);
+            let new_scope_text = scope_text.replace(actual_old, actual_replacement);
             let mut new_lines = Vec::new();
             if s_idx > 0 {
                 new_lines.push(lines[..s_idx].join("\n"));
