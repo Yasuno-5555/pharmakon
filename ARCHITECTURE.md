@@ -1,160 +1,273 @@
-# Pharmakon System Architecture
+# Pharmakon Architecture
 
-This document describes the high-level design, component boundaries, and data flow of the Pharmakon Personal AI Engineering OS.
+This document describes the component boundaries, data flow, and design decisions of Pharmakon.
 
-**Last updated:** 2026-05-09 (Phase 0–5 complete — World Model Agent, DSGE wiring, Codex discovery, Cron)
+---
 
-## Core Philosophy
+## What it is
 
-Pharmakon is designed around four pillars:
-1. **Local-First Reliability**: Sensitive data and heavy processing (AST indexing, vector search) remain on the user's machine.
-2. **Deterministic Engineering**: Event-sourced execution with snapshot-based rollback ensures agent behavior is observable, reproducible, and reversible.
-3. **Epistemic Integrity**: A structured memory system (Knowledge Nexus) with causal edge tracking (`caused_by`, `fixed_by`, `invalidated_by`).
-4. **Sandboxed Safety**: Progressive isolation from CodeAct scripting (Rhai → Python fallback) to ephemeral Docker containers, guarded by a Constitutional Policy Engine.
+Pharmakon is a **modular AI agent framework** that coordinates LLMs, tools, and memory. It is not an operating system — it is a Rust application that runs on your machine and provides agentic capabilities through multiple interfaces (CLI, REST API, chat bots).
 
-## Component Diagram (C4-Style)
+## Design principles
+
+1. **Local-first**: Tool execution, vector search, and file operations happen on the local machine. LLM calls go to external APIs (or local Ollama).
+2. **Observable**: Event-sourced execution (EventLog) with snapshot-based rollback (SnapshotStore) — agent actions are recorded and reversible.
+3. **Provider-agnostic**: Unified `AgentModel` trait abstracts over 7+ LLM providers with automatic fallback.
+4. **Constitutional safety**: Immutable policy rules prevent self-modification and destructive operations.
+
+---
+
+## Crate architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│                       External Channels                            │
-│            Telegram  │  Discord  │  Slack  │  Web Browser           │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-┌────────────────────────────▼───────────────────────────────────────┐
-│                    pharmakon-gateway                                │
-│  Orchestrator │ WebSocket Hub │ REST API │ Xilem Dashboard           │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-┌────────────────────────────▼───────────────────────────────────────┐
-│                      pharmakon-core (The Brain)                     │
-│                                                                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
-│  │Agent Loop   │  │Soul Manager  │  │Constitutional PolicyEngine│  │
-│  │(Entropy     │  │              │  │(immutable safety rules)   │  │
-│  │ Monitor)    │  └──────────────┘  └───────────────────────────┘  │
-│  └──────┬──────┘                                                    │
-│         │                                                           │
-│  ┌──────▼──────────────────────────────────────────────────────┐   │
-│  │              Control Plane (Phase 1)                         │   │
-│  │  ┌─────────────────┐  ┌──────────────┐  ┌────────────────┐  │   │
-│  │  │Entropy Monitor  │  │Atomic Rollback│  │Cognitive       │  │   │
-│  │  │(stagnation 0.4, │  │(snapshot-based│  │Scheduler       │  │   │
-│  │  │ repetition 0.25)│  │ file restore) │  │(LLM classify)  │  │   │
-│  │  └─────────────────┘  └──────────────┘  └────────────────┘  │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              Intelligence Layer (Phase 2)                     │  │
-│  │  ┌──────────────────┐  ┌──────────────┐  ┌────────────────┐  │  │
-│  │  │Capability        │  │Causal Memory │  │Swarm Return    │  │  │
-│  │  │Abstraction       │  │Edges         │  │Channel         │  │  │
-│  │  │(65 tools→10 caps)│  │(caused_by etc)│  │(SpawnHandle)   │  │  │
-│  │  └──────────────────┘  └──────────────┘  └────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              Advanced Features (Phase 3)                      │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐  │  │
-│  │  │CodeAct Hybrid│  │Constitutional│  │Durable Task        │  │  │
-│  │  │(Rhai engine) │  │Engine         │  │Runtime             │  │  │
-│  │  └──────────────┘  └──────────────┘  └────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              World Model Agent (Phase 5)                      │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐  │  │
-│  │  │Plan Generator│  │MCTS Simulator│  │Commit & Rollback   │  │  │
-│  │  │(LLM→candidate│  │(temp ws +    │  │(snapshot→execute→  │  │  │
-│  │  │ plans)       │  │ cargo check) │  │ verify→rollback)   │  │  │
-│  │  └──────────────┘  └──────────────┘  └────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              Foundation (Phase 0)                             │  │
-│  │  ┌──────────────────┐  ┌──────────────┐  ┌────────────────┐  │  │
-│  │  │ToolMetaRegistry  │  │EventLog +    │  │ExecutionProfile│  │  │
-│  │  │(BM25, defer load)│  │SnapshotStore │  │(risk assessment)│  │  │
-│  │  └──────────────────┘  └──────────────┘  └────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-┌────────────────────────────▼───────────────────────────────────────┐
-│                    pharmakon-tools (The Hands)                      │
-│  Codex OS Tools │ AST Mutation │ LSP Bridge │ Browser │ Shell       │
-│  ToolMetaRegistry (BM25 search, deferred hydration)                 │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-┌────────────────────────────▼───────────────────────────────────────┐
-│                   pharmakon-memory (The Memory)                     │
-│  KnowledgeNexus │ LanceDB Embeddings │ SQLite Graph │ Causal Edges  │
-└────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      External interfaces                     │
+│    pharmakon-cli (REPL/TUI)    pharmakon-gateway (REST/WS)  │
+│                               Telegram / Discord / Slack     │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                      pharmakon-core                          │
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │Agent loop    │  │ModelRouter   │  │CognitiveScheduler │  │
+│  │chat_on_session│  │(fallback,   │  │(task complexity   │  │
+│  │entropy monitor│  │ economy)    │  │ classification)   │  │
+│  └──────┬───────┘  └──────────────┘  └───────────────────┘  │
+│         │                                                    │
+│  ┌──────▼───────────────────────────────────────────────┐   │
+│  │              Orchestration layer                       │   │
+│  │  CodeAct  │  World Model  │  Swarm  │  Skills  │ MCTS │   │
+│  │  Planner  │  Speculative  │  Fabric │  Pattern │ AOT  │   │
+│  │  Retry    │  Benchmark    │  Replan │  Economy │ etc. │   │
+│  └────────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │              Tool Scheduler                             │  │
+│  │  ExplorationBudget │ ToolPolicyEngine │ AttentionScore │  │
+│  │  DirectoryIndexingDaemon │ CodeActGate                  │  │
+│  └────────────────────────────────────────────────────────┘  │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                     pharmakon-tools                          │
+│ 65+ tools in categories: File, Code, Shell, Search, Browser, │
+│ Git, LSP, AST, Canvas, Web, Media, Codex (advanced)          │
+│ BM25-indexed metadata catalog. Deferred hydration.           │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                    pharmakon-memory                           │
+│ ┌──────────────────┐  ┌──────────────┐  ┌────────────────┐  │
+│ │KnowledgeNexus    │  │GraphStore    │  │CausalGraph     │  │
+│ │(LanceDB vectors) │  │(SQLite rels) │  │(DAG edges)     │  │
+│ └──────────────────┘  └──────────────┘  └────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Crate Responsibilities
+### Dependency direction
 
-### `pharmakon-core` — Skill Library (Phase 4)
-- **Skill Genome System**: Quantitative metadata per script (capabilities, failure_modes, token_cost, success_rate, composability_score).
-- **Composite Skills**: Merge two verified primitives into higher-order functions via `compose_skills()`.
-- **Trajectory Compression**: Extract reusable patterns (e.g. `safe_refactor()`) from raw agent traces.
-- **Skill Crystallization**: Auto-suggest Rhai→Rust native compilation candidates with `suggest_crystallizations()`.
-- **AntiPattern Extraction**: Cluster script failures, generate positive guidance, inject into system prompt.
-- **Primitive Darwinism**: Lifecycle management (experimental → stable → core → deprecated → removed) driven by usage counts.
-- **Dream Mode**: Background self-play loop — generate tasks, execute scripts, verify, label, store — fully autonomous skill acquisition.
+```
+common ← memory ← core ← tools ← gateway ← cli
+                        ↕
+                    plugin-sdk
+```
 
-### `pharmakon-core` (The Brain)
-- **Decision Loop**: Async iteration handling LLM completions, tool calls, parallel context gathering, and entropy-based loop detection.
-- **Entropy Monitor**: Four-factor entropy scoring (stagnation 0.4, repetition 0.25, failure 0.2, token_drift 0.15) with `EntropyOverflow` hard termination.
-- **Atomic Rollback**: `rollback_to_snapshot()` / `rollback_to_event()` — file-level restore via content-addressed SnapshotStore.
-- **Cognitive Scheduler**: LLM-based task complexity classification (Simple/Standard/Deep) with heuristic fallback. `ManagedTask` with cognitive economics (`priority_score`, `expected_information_gain`, `retry_cost`).
-- **CodeAct Hybrid Mode** (Python + Rhai): Model-adaptive routing auto-detects script language and selects the best execution engine. Gemini models → Python-first; other models → Rhai-first. Silent fallback on engine failure. 1 LLM turn = 10+ tool calls via control flow in scripts. System prompt includes skill library few-shot examples and anti-pattern guidance. Successful scripts auto-crystallized into SkillGenome for reuse.
-- **Constitutional PolicyEngine**: Immutable safety rules preventing self-modification, critical file deletion, and destructive shell commands.
-- **Durable Task Runtime**: `suspend()` / `resume()` with EventLog integration and `TaskSnapshot` persistence.
-- **Soul Management**: Markdown-based "Soul" files defining personality, constraints, and instructions.
-- **Multi-Provider Fallback**: Automatic model switching on API rate limits (429). Fallback chain configurable via `~/.pharmakon/config.json`. Default: deepseek/deepseek-chat → gemini/gemini-2.5-flash → groq/llama-3.3-70b-versatile. DeepSeek registered as first-class provider (API key: `DEEPSEEK_API_KEY`).
-- **Integrated MCP**: Native Model Context Protocol support for external tool servers.
+No circular dependencies between crates.
 
-### `pharmakon-memory` (The Memory)
-- **Knowledge Nexus**: Vector embeddings (LanceDB) + relational graph (SQLite) for hybrid RAG.
-- **Causal Memory Edges**: Tracks `caused_by`, `fixed_by`, `invalidated_by` relationships. Auto-recorded by RLFC on success/failure.
-- **Access-Aware Decay**: High-access nodes receive decay suppression to prevent loss of critical architectural knowledge.
+---
 
-### `pharmakon-tools` (The Hands)
-- **ToolMetaRegistry**: BM25-powered deferred tool loading. 65+ tools indexed by lightweight metadata (~80 bytes/tool). Full implementations hydrated on-demand.
-- **Capability Abstraction**: 65 tools mapped to 10 semantic capabilities (`Search`, `Modify`, `Execute`, `Investigate`, `Orchestrate`, `Reflect`, `Validate`, `Learn`, `Coordinate`, `Simulate`). 90% token reduction in prompt injection.
-- **ExecutionProfile**: Risk classification via `SideEffectLevel`, `FilesystemScope`, `Reversibility`.
-- **Codex Tools**: Execution Trace, Deterministic Replay, Dry-Run, AST mutation, LSP bridging.
-- **Standard Tools**: Browser, Shell, File I/O, Web Search, RepoMap.
+## Agent decision loop
 
-### `pharmakon-common` (The Foundation)
-- **ToolMetaCatalog**: BM25-indexed tool metadata catalog with `capability_summary()`.
-- **EventLog**: Append-only JSONL event log with structured `EventKind` variants (`ToolCalled`, `FileMutated`, `EntropyAlert`, etc.).
-- **SpawnHandle**: `oneshot::Receiver`-based sub-agent result handle. Replaces fire-and-forget spawn.
-- **Shared types**: `AgentSpawner`, `ExecutionProfile`, `Tool`, `Config`, `Event`.
+The core of Pharmakon is the `Agent::chat_on_session()` method, which runs a loop:
 
-### `pharmakon-gateway` (The Senses & Voice)
-- **Multi-Channel Hub**: Telegram, Discord, Slack bots.
-- **Real-time Desktop Dashboard**: Xilem+Vello native GUI with 8 tabs (Chat, Dashboard, Automation, Skills, Research, Database, System, Settings). Vello-powered SwarmVisualizer with animated particle system. Feature parity with React/TypeScript Web frontend.
-- **Tool Orchestration**: Initializes tools and registers them with the Agent.
+```
+User message
+    │
+    ▼
+┌─────────────────┐
+│ Dream Mode init │  ← started once per process
+│ Context gather  │  ← parallel semantic + nexus search
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ Classify task   │  ← heuristic (free) or LLM (ambiguous short tasks)
+│ complexity      │
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ Estimate budget │  ← Simple: 8 iters / Standard: progress-based / Deep: lenient
+└────────┬────────┘
+         ▼
+    ┌────┴────┐
+    │  LOOP   │◄──────────────────────────────┐
+    └────┬────┘                                │
+         ▼                                     │
+┌─────────────────┐                            │
+│ Build prompt    │  ← system rules + skills + │
+│ Inject tools    │     BM25 search + working  │
+│ (BM25 +         │     memory + playbook      │
+│  serendipity)   │                            │
+└────────┬────────┘                            │
+         ▼                                     │
+┌─────────────────┐                            │
+│ Model selection │  ← economy-aware or manual │
+└────────┬────────┘                            │
+         ▼                                     │
+┌─────────────────┐                            │
+│ Execute model   │  ← with fallback on 429,   │
+│ (with fallback) │     MAX_TOKENS, empty      │
+└────────┬────────┘                            │
+         ▼                                     │
+    ┌────┴────┐                                │
+    │ Has     │  Yes                           │
+    │ tool    ├────► Execute tools ────────────┘
+    │ calls?  │     (parallel via tokio::spawn)
+    └────┬────┘     record to skill library
+         │ No       snapshot before mutation
+         ▼          rollback on failure
+┌─────────────────┐
+│ Process response│  ← extract <think> tags
+│ Save to history │     update notebook
+│ Index to nexus  │     trigger reflection
+└─────────────────┘
+    │
+    ▼
+  Return to user
+```
 
-## Interaction Flow: The Decision Loop
+### Budget enforcement
 
-1. **Input**: Message arrives via Gateway channel or CLI.
-2. **Task Classification**: Cognitive Scheduler classifies complexity (Simple/Standard/Deep).
-3. **World Model Fork** (Deep tasks): Generate 3-5 candidate plans → simulate in temp workspace → score → commit best → rollback on failure. Falls back to standard CodeAct.
-4. **Parallel Context Gathering**: Knowledge Nexus + Semantic Search + Working Memory + Skill Library queried concurrently. 3 random codex tools injected for serendipitous discovery.
-5. **DSGE Economics**: Dynamic `max_tokens` from CognitiveBudget × RegimeSwitcher × learned ProductionFunction. Shadow price directive injected into system prompt. Token consumption fed to economy for online parameter fitting.
-6. **Decision Turn**: Agent sends prompt with skill library few-shot examples to Model. Tool calls executed in parallel with `SnapshotStore` checkpointing. Failed codeact scripts fed to anti-pattern extraction.
-7. **Entropy Check**: Four-factor entropy computed. >0.8 warns, >0.95 hard-terminates.
-8. **Retry Strategy**: Tool failures classified (Transient/Terminal/Strategic) with targeted recovery.
-9. **Progress Tracking**: `ProgressTracker` checks stalls, loops, entropy overflow.
-10. **Response**: Final answer. Task outcome recorded to ResearchNotebook for context reuse.
-11. **Reflection Cycle**: Periodic reflection extracts facts, updates PHARMAKON.md, indexes to Knowledge Nexus.
+| Policy | Applied to | Behavior |
+|---|---|---|
+| `FixedIterations(8)` | Simple tasks | Loop terminates after 8 iterations |
+| `ProgressBased` | Standard/Deep | Terminates after N consecutive stalled iterations |
+| Hard wall time | All | Depends on complexity (2min simple → 30min deep) |
+| Token budget | All | Default 250k tokens per session |
+| Entropy overflow | All | >0.95 entropy hard-terminates |
 
-## Security & Reliability
+### Model fallback chain
 
-- **Constitutional PolicyEngine**: Immutable rules that cannot be bypassed — no self-modification, no critical file deletion, no destructive commands.
-- **Atomic Rollback**: Any file mutation can be reversed to its pre-mutation snapshot via `rollback_to_event()`.
-- **Dry-Run Mode**: Destructive tools can run in simulation mode.
-- **Entropy Overflow Protection**: Pathological loops detected via stagnation analysis and hard-terminated.
-- **SpawnHandle**: Sub-agent results are verified via `oneshot` channels — no more hallucinated success.
-- **Strict Layering**: `common` → `memory` → `core` → `tools` → `gateway` → `cli`.
+1. Primary model fails (429 / MAX_TOKENS / empty response)
+2. Try next model in `fallback_models` list
+3. Two consecutive empty responses → switch model
+4. All models exhausted → return error
+
+---
+
+## Memory system
+
+### KnowledgeNexus (vector store)
+- **Backend**: LanceDB (embedded columnar vector database)
+- **Embeddings**: local via `fastembed` (CPU, ONNX runtime)
+- **Access-aware decay**: High-access nodes have decay suppression
+- **Smart search**: Hybrid BM25 + vector similarity
+
+### GraphStore (relational)
+- **Backend**: SQLite with WAL mode
+- **Relations**: Custom edge types between nodes
+- **Used for**: Structured fact storage, graph queries
+
+### CausalGraph (DAG)
+- **Purpose**: Track causal relationships between actions and outcomes
+- **Edge types**: `caused_by`, `fixed_by`, `invalidated_by`
+- **Query**: Root cause analysis, counterfactual reasoning
+
+### EventLog & SnapshotStore
+- **EventLog**: Append-only JSONL file, typed events (ToolCalled, FileMutated, EntropyAlert, etc.)
+- **SnapshotStore**: Content-addressed gzip-compressed file snapshots
+- **Separation**: EventLog = causal history, SnapshotStore = state materialization
+- **Auto-truncation**: Disk log capped at 50,000 lines (~10MB)
+
+---
+
+## Tool system
+
+### ToolMetaRegistry
+- 65+ tools registered with lightweight metadata (~80 bytes/tool)
+- BM25-powered semantic search for tool discovery
+- Deferred hydration: tool implementations loaded on-demand
+- Serendipity injection: 3 random non-core tools injected each turn
+
+### Capability abstraction
+Tools are categorized into 10 capabilities: Search, Modify, Execute, Investigate, Orchestrate, Reflect, Validate, Learn, Coordinate, Simulate
+
+### Tool categories
+- Core (always loaded): `chat`, `codeact`, `discover_tools`
+- FileSystem: `read_file`, `write_file`, `apply_patch`, `grep_search`, `list_dir`
+- Network: `web_fetch`, `web_search`, browser
+- Media: screenshot, camera, vision, media understanding
+- Codex: MCTS, swarm, LSP bridge, AST mutation, time-travel debugger, etc.
+
+---
+
+## Security model
+
+### ConstitutionalPolicy (immutable)
+- Agent cannot modify its own source code paths (`crates/core/src/`, etc.)
+- Policy engine files are protected
+- Destructive shell commands (`rm -rf /`, `sudo`, `chmod 777`) are blocked
+
+### DefaultSecurityPolicy (enforceable)
+- Shell commands audited for dangerous patterns
+- File paths checked against allow/deny lists
+- Can require manual approval for high-risk operations
+
+### ExecutionProfile
+Each tool has an execution profile with:
+- `SideEffectLevel`: None / Local / Irreversible
+- `FilesystemScope`: None / Confined / Unrestricted
+- `Reversibility`: Trivial / Possible / Impractical
+
+---
+
+## Multi-provider model routing
+
+The `ModelRouter` handles:
+1. **Model selection**: Economy-aware scoring (ROI-based) or manual override
+2. **Token budget tracking**: DSGE-inspired economics with shadow prices
+3. **Fallback chain**: On rate limits, MAX_TOKENS, or empty responses
+4. **Performance tracking**: Per-model success rates, latency, and cost
+
+Supported providers:
+- Anthropic (Claude)
+- Google (Gemini)
+- OpenAI (GPT-4, o-series)
+- DeepSeek
+- Groq (Llama, Mixtral)
+- Ollama (local models)
+- OpenRouter (multi-provider proxy)
+
+---
+
+## Heartbeat & automation
+
+- **HeartbeatManager**: Periodic maintenance cycle (default 30min)
+- **Structured probes**: disk_usage, memory_pressure, task_queue_lag, snapshot_quota, LLM success rate, cargo check staleness
+- **Hysteresis state machine**: Healthy ↔ Degraded ↔ Critical ↔ Recovering
+- **Initiative engine**: Scans trajectory for unresolved tasks, spawns sub-agents
+- **Cron**: Schedule agent tasks via cron expressions
+
+---
+
+## Key files
+
+| File | Lines | Purpose |
+|---|---|---|
+| `crates/core/src/agent.rs` | ~2050 | Agent struct, chat loop, session management |
+| `crates/core/src/model_router.rs` | ~200 | Model selection, fallback, economy integration |
+| `crates/core/src/orchestration/world.rs` | ~1300 | World model agent, plan AST, verification |
+| `crates/core/src/event_log.rs` | ~400 | Append-only typed event log |
+| `crates/core/src/snapshot_store.rs` | ~500 | Content-addressed file snapshots |
+| `crates/memory/src/weaver.rs` | ~400 | KnowledgeNexus (LanceDB vector store) |
+| `crates/core/src/orchestration/tool_scheduler.rs` | ~530 | Tool policy, exploration budget, CodeAct gate |
+| `crates/core/src/orchestration/health_monitor.rs` | ~400 | Structured probes, state machine |
+
+---
+
+## Test status
+
+- 64 unit tests in `pharmakon-core`
+- All integration tests passing
+- 2 tests ignored (require Ollama)
+- `cargo clippy` clean for `pharmakon-core`

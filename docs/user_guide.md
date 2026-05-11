@@ -1,74 +1,128 @@
-# Pharmakon User Guide
+# User guide
 
-Welcome to the Pharmakon User Guide. Pharmakon is a highly optimized, multimodal autonomous agent framework built in Rust. It offers a local-first, privacy-focused experience, while providing seamless integrations with multiple LLM providers, tools, and communication channels.
+## Installation
 
-## Getting Started
-
-### 1. Installation and Setup
-Ensure you have Rust and Cargo installed, then build the project:
 ```bash
+git clone https://github.com/Yasuno-5555/Pharmakon.git
+cd Pharmakon
 cargo build --release
 ```
 
-### 2. Configuration & API Keys
-Pharmakon uses a secure Keyring mechanism to store your API keys. You can configure them via the CLI:
+## First run
 
 ```bash
-pharmakon secrets set OPENAI_API_KEY <your-key>
-pharmakon secrets set GEMINI_API_KEY <your-key>
-```
-Alternatively, set them as environment variables (e.g., `export OPENAI_API_KEY="..."`).
+# Run the onboarding wizard
+cargo run --release -- onboard
 
-### 3. Interactive CLI (Agent Mode)
-You can directly interact with your agent from the terminal. 
-
-```bash
-# Chat with the default model
-pharmakon agent --message "What is the weather today?"
-
-# Specify a provider and model
-pharmakon agent --provider gemini --model gemini-1.5-pro-latest --message "Analyze this text."
+# Or just start using it (config auto-created)
+cargo run --release -- agent --message "Hello"
 ```
 
-### 4. Running the Gateway
-The Gateway acts as a central hub, exposing WebSockets and REST APIs for integrations (e.g., channels, UI clients).
+## CLI commands
+
+### Agent interaction
 
 ```bash
+# Interactive session
+pharmakon agent
+
+# One-shot query
+pharmakon agent --message "List all files modified today"
+
+# With a named session (for continuity)
+pharmakon agent --message "Continue the refactoring" --session my-work
+
+# Different model
+pharmakon agent --model gemini/gemini-2.5-flash --message "Hello"
+
+# With a custom soul (personality file)
+pharmakon agent --soul ~/.pharmakon/souls/expert.md --message "Review this code"
+```
+
+### Model commands (at runtime)
+
+```
+/model                 List available models (● = current)
+/model gemini/gemini-2.5-flash  Switch model
+/model auto            Enable automatic model selection
+/plan                  Execute world model planner on current task
+```
+
+### Scheduling
+
+For cron scheduling, use the cron tool from within an agent session. The heartbeat manager automatically runs maintenance every 30 minutes.
+
+### Gateway
+
+```bash
+# Start REST API + WebSocket server
 pharmakon gateway --port 19999
+
+# With a specific soul
+pharmakon gateway --port 19999 --soul ~/.pharmakon/souls/bot.md
 ```
 
-### 5. Using the TUI Dashboard
-For a rich, real-time terminal interface showing the agent's thought process and conversations:
+## Configuration
+
+File: `~/.pharmakon/config.json` (auto-created)
+
+```json
+{
+  "default_agent": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "fallback_models": ["deepseek/deepseek-v4-flash", "groq/llama-3.3-70b-versatile"]
+  },
+  "gateway": {
+    "port": 19999
+  }
+}
+```
+
+### Secrets
+
+Sensitive values (API keys) can be stored:
+
 ```bash
-pharmakon tui
+pharmakon secrets set GEMINI_API_KEY <your-key>
+pharmakon secrets list
+pharmakon secrets get GEMINI_API_KEY
 ```
 
-### 6. Background Daemon
-You can run the gateway in the background:
+## Soul files
+
+Soul files define the agent's personality and constraints. They live in `~/.pharmakon/souls/` as markdown or YAML files.
+
+Example soul (`~/.pharmakon/souls/expert.md`):
+```markdown
+You are a senior Rust expert. Focus on safety, performance, and idiomatic code.
+Always prefer simple solutions over complex ones.
+```
+
+## Onboarding wizard
+
 ```bash
-pharmakon daemon start
-pharmakon daemon status
-pharmakon daemon stop
+pharmakon onboard
 ```
 
-### 8. Multi-Agent Teams (Orchestration)
-Pharmakon allows you to define specialized agent teams managed by a `Supervisor`. The supervisor decomposes complex goals and delegates tasks to specific agents.
+The wizard will:
+1. Prompt for API keys (Gemini, Anthropic, OpenAI, etc.)
+2. Create the config file
+3. Create a default soul
+4. Test the connection with the selected model
 
-Agents in a team can communicate using the `send_message` tool.
+## Status
 
-### 9. Dynamic Model Loading & Fallback
-You can request specific models using the `--provider` and `--model` flags (or via the configuration file). 
-Pharmakon's `AgentRouter` automatically handles fallback:
-- If you request `openai:gpt-4o` but haven't set an `OPENAI_API_KEY`, the agent will automatically fall back to your configured default model (e.g., `gemini-1.5-flash`).
-- This ensures that your autonomous workflows and scheduled tasks don't fail due to missing credentials or provider outages.
-
-## System Diagnostics
-If you encounter issues, use the built-in diagnostic tool to identify and automatically fix problems:
 ```bash
-pharmakon doctor --repair
+pharmakon status
 ```
 
+Shows health probes (disk usage, memory, task queue, LLM success rate), running background tasks, and snapshot store usage.
 
-## Further Reading
-- For developers looking to create WASM tools, see the [Plugin Development Guide](./plugin_development.md).
-- To connect Pharmakon to Discord, Slack, or Telegram, see the [Channels Setup Guide](./channels.md).
+## Desktop GUI (experimental)
+
+```bash
+pharmakon gui
+```
+
+Launches a native desktop dashboard with tabs for chat, stats, automation, skills, research, graph, logs, and configuration.
