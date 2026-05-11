@@ -3,7 +3,7 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
-use crate::codex::utils::scan_diff_risks;
+use crate::codex_utils::scan_diff_risks;
 
 pub struct DryRunTool;
 

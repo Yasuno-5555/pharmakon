@@ -46,6 +46,37 @@ pub mod web_fetch;
 pub mod web_search;
 pub mod workspace;
 
+// Codex utilities (shared helpers for the tools below)
+pub mod codex_utils;
+
+// Codex tools — previously under codex/, promoted to top-level
+pub mod ast_lsp_bridge;
+pub mod ast_native_mutation;
+pub mod autonomy_dial;
+pub mod cognitive_mirror;
+pub mod context_budget_optimizer;
+pub mod deterministic_replay;
+pub mod diff_security_auditor;
+pub mod dry_run;
+pub mod execution_trace;
+pub mod failure_memory;
+pub mod intent_compiler;
+pub mod local_model_router;
+pub mod memory_actor_status;
+pub mod nexus_visualizer;
+pub mod node_repl;
+pub mod proactive_intervention;
+pub mod proactive_self_optimization;
+pub mod semantic_conflict_resolution;
+pub mod semantic_grep;
+pub mod simple_tools;
+pub mod skill_composition;
+pub mod spec_first_test;
+pub mod time_travel_debugger;
+pub mod tool_reliability;
+pub mod web_task;
+pub mod workspace_snapshot;
+
 pub use crate::anchors::{ListAnchorsTool, SetAnchorTool};
 // ...
 pub use crate::ast_ingest::ASTKnowledgeIngestTool;

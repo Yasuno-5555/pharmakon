@@ -3,7 +3,7 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
-use crate::codex::utils::{tokenize};
+use crate::codex_utils::{tokenize};
 
 pub struct SemanticGrepTool;
 #[async_trait]

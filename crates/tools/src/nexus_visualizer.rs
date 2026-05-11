@@ -3,7 +3,7 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
-use crate::codex::utils::{state_dir};
+use crate::codex_utils::{state_dir};
 
 pub struct NexusVisualizerTool;
 #[async_trait]

@@ -158,7 +158,7 @@ macro_rules! planning_tool {
                 let mut ranked = Vec::new();
                 for (idx, option) in options.iter().enumerate() {
                     let text = option.as_str().map(|s| s.to_string()).unwrap_or_else(|| option.to_string());
-                    let risk = $crate::codex::utils::scan_diff_risks(&text).len() as f64;
+                    let risk = $crate::codex_utils::scan_diff_risks(&text).len() as f64;
                     ranked.push(json!({
                         "option": option,
                         "score": (1.0 / ((idx + 1) as f64)) - (risk * 0.2),

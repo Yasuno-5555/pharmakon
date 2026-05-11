@@ -3,7 +3,7 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::process::Command;
-use crate::codex::utils::{state_dir, read_json, write_json, now, short_hash};
+use crate::codex_utils::{state_dir, read_json, write_json, now, short_hash};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct DecisionRecord {

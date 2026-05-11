@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
-use crate::codex::utils::{state_dir, read_json, write_json, now, is_probably_binary, metadata_modified_secs};
+use crate::codex_utils::{state_dir, read_json, write_json, now, is_probably_binary, metadata_modified_secs};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct SnapshotFile {

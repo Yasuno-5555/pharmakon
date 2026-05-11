@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use pharmakon_common::{AgentResult, Tool, ToolCategory};
 use serde_json::{json, Value};
-use crate::codex::utils::scan_diff_risks;
+use crate::codex_utils::scan_diff_risks;
 
 pub struct CognitiveMirrorTool;
 

@@ -3,7 +3,7 @@ use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
-use crate::codex::utils::find_rust_function_span;
+use crate::codex_utils::find_rust_function_span;
 
 pub struct AstNativeMutationTool;
 #[async_trait]
