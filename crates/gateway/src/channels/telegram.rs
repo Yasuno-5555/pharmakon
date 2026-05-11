@@ -201,9 +201,19 @@ impl Channel for TelegramChannel {
                                 };
                                 worker_agent.set_soul(pharmakon_core::soul::Soul::expert(soul_role)).await;
                                 // Ensure worker has all tools registered (the fresh Agent::new() has none)
+                                let tool_count = {
+                                    let reg = worker_agent.registry.lock().await;
+                                    reg.all_metadata().len()
+                                };
+                                log::info!("Worker agent initialized with {} tools in metadata catalog", tool_count);
                                 if let Err(e) = pharmakon_core::tool_init::init_all_agent_tools(&worker_agent).await {
                                     log::error!("Failed to init worker agent tools: {}", e);
                                 }
+                                let tool_count_after = {
+                                    let reg = worker_agent.registry.lock().await;
+                                    reg.all_metadata().len()
+                                };
+                                log::info!("Worker agent now has {} tools after init_all_agent_tools", tool_count_after);
 
                                 tokio::spawn(async move {
                                     match worker_agent.chat(&text_owned).await {

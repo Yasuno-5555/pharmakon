@@ -122,7 +122,7 @@ impl ToolMetaRegistry {
             "discover_tools" => Some(Arc::new(crate::tool_discovery::DiscoverToolsTool::new())),
             "hydrate_context" => Some(Arc::new(crate::memory_hydration::HydrateContextTool::new())),
             "playbook" => Some(Arc::new(crate::playbook::PlaybookTool::new())),
-            "repomap" => Some(Arc::new(crate::repomap::RepoMapTool::new())),
+            "repomap" | "get_repo_map" => Some(Arc::new(crate::repomap::RepoMapTool::new())),
             "task_tracker" => Some(Arc::new(crate::project_management::TaskTrackerTool::new())),
             "self_diagnostic" => Some(Arc::new(crate::diagnostic::DiagnosticTool {
                 vision_stream: deps.vision_stream.clone(),
