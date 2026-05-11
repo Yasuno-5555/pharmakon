@@ -46,7 +46,7 @@ impl GraphStore {
             "CREATE TABLE IF NOT EXISTS graph_nodes (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
-                node_type TEXT NOT NULL,
+                node_type TEXT NOT NULL DEFAULT 'generic',
                 content TEXT NOT NULL,
                 summary TEXT,
                 embedding_id TEXT,
@@ -54,7 +54,7 @@ impl GraphStore {
                 access_count INTEGER DEFAULT 0,
                 last_access_time INTEGER DEFAULT 0,
                 decay_score REAL DEFAULT 1.0,
-                properties TEXT NOT NULL
+                properties TEXT NOT NULL DEFAULT '{}'
             )",
         )
         .execute(&pool)
@@ -66,7 +66,7 @@ impl GraphStore {
                 to_id TEXT NOT NULL,
                 relation TEXT NOT NULL,
                 weight REAL DEFAULT 1.0,
-                metadata TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
                 PRIMARY KEY (from_id, to_id, relation),
                 FOREIGN KEY (from_id) REFERENCES graph_nodes(id),
                 FOREIGN KEY (to_id) REFERENCES graph_nodes(id)
@@ -74,6 +74,24 @@ impl GraphStore {
         )
         .execute(&pool)
         .await?;
+
+        // Migration: add any columns that might be missing from old databases.
+        // ALTER TABLE ADD COLUMN errors if column already exists, so we ignore errors.
+        let migrations = [
+            "ALTER TABLE graph_nodes ADD COLUMN node_type TEXT NOT NULL DEFAULT 'generic'",
+            "ALTER TABLE graph_nodes ADD COLUMN content TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE graph_nodes ADD COLUMN summary TEXT",
+            "ALTER TABLE graph_nodes ADD COLUMN embedding_id TEXT",
+            "ALTER TABLE graph_nodes ADD COLUMN embedding_status TEXT DEFAULT 'PENDING'",
+            "ALTER TABLE graph_nodes ADD COLUMN access_count INTEGER DEFAULT 0",
+            "ALTER TABLE graph_nodes ADD COLUMN last_access_time INTEGER DEFAULT 0",
+            "ALTER TABLE graph_nodes ADD COLUMN decay_score REAL DEFAULT 1.0",
+            "ALTER TABLE graph_nodes ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE graph_edges ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+        ];
+        for sql in migrations {
+            let _ = sqlx::query(sql).execute(&pool).await;
+        }
 
         Ok(Self { pool })
     }
