@@ -1,4 +1,23 @@
+# Rust
 /target
+**/*.rs.bk
+Cargo.lock
+
+# Project-specific generated
 .fastembed_cache/
-reference/deepseektui/
 crates_backup/
+*.log
+debug_output*.txt
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
