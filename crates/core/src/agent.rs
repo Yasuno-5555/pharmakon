@@ -719,6 +719,34 @@ impl Agent {
         if active_tools.is_empty() { None } else { Some(active_tools) }
     }
 
+    pub async fn revert_last_mutation(&self, session_id: &str) -> Result<String> {
+        let events = self.event_log.session_events(session_id).await;
+        let last_mutation = events.iter().rev().find_map(|e| match &e.kind {
+            crate::event_log::EventKind::FileMutated { path, snapshot_before_id, .. } => {
+                Some((path.clone(), snapshot_before_id.clone()))
+            }
+            _ => None,
+        });
+
+        match last_mutation {
+            Some((path, before_id)) => {
+                let path_buf = std::path::PathBuf::from(&path);
+                if before_id == SNAPSHOT_DID_NOT_EXIST {
+                    if path_buf.exists() {
+                        std::fs::remove_file(&path_buf)?;
+                        Ok(format!("Successfully reverted: Deleted newly created file '{}'", path))
+                    } else {
+                        Ok(format!("File '{}' was newly created but already deleted.", path))
+                    }
+                } else {
+                    self.snapshot_store.restore(&before_id, &path_buf).await?;
+                    Ok(format!("Successfully reverted '{}' to its state before mutation.", path))
+                }
+            }
+            None => Err(anyhow!("No recent file mutations found to revert in session '{}'", session_id)),
+        }
+    }
+
     pub async fn chat_on_session(&self, user_message: &str, session_id: &str) -> Result<String> {
         self.sync_registry_deps().await;
         self.ensure_dream_mode();

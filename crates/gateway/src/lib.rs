@@ -102,6 +102,7 @@ impl Gateway {
 
         let api_v1 = Router::new()
             .route("/tools/execute", axum::routing::post(api::execute_tool))
+            .route("/tools", get(api::get_tools))
             .route("/agent/chat", axum::routing::post(api::agent_chat))
             .route("/state", get(api::get_state))
             .layer(axum::middleware::from_fn(auth::auth_middleware));

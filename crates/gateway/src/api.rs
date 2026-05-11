@@ -97,4 +97,18 @@ pub async fn get_state(
     }))
 }
 
+pub async fn get_tools(
+    State((agent, _, _, _)): State<(
+        Arc<Agent>,
+        Arc<crate::canvas::CanvasHost>,
+        Arc<pharmakon_core::automation::cron::CronManager>,
+        Arc<pharmakon_common::Config>,
+    )>,
+) -> impl IntoResponse {
+    let agent_lock = agent;
+    let reg = agent_lock.registry.lock().await;
+    let tools = reg.all_metadata();
+    Json(json!(tools))
+}
+
 use serde_json::json;

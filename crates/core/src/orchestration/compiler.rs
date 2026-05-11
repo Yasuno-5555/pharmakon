@@ -314,6 +314,7 @@ impl PlanCompiler {
     /// Helper to statically estimate token cost of executing the CompiledPlan AST node
     pub fn estimate_token_cost(&self, node: &PlanNode) -> u64 {
         match node {
+            PlanNode::Script { .. } => 800,
             PlanNode::Step { tool, .. } => {
                 match tool.as_str() {
                     "codeact" => 800,

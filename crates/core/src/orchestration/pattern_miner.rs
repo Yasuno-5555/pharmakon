@@ -80,6 +80,14 @@ impl PatternLibrary {
 /// Recursively substitute parameter placeholders (e.g. "{param_0}") in a PlanNode.
 fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNode {
     match node {
+        PlanNode::Script { language, code, timeout_secs } => {
+            let substituted_code = substitute_string(code, params);
+            PlanNode::Script {
+                language: *language,
+                code: substituted_code,
+                timeout_secs: *timeout_secs,
+            }
+        }
         PlanNode::Step { tool, args, dry_run_first } => {
             let substituted_args = substitute_json_value(args, params);
             PlanNode::Step {
@@ -104,6 +112,15 @@ fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     crate::orchestration::world::Condition::CargoCheckSuccess
+                }
+                crate::orchestration::world::Condition::VerifySuccess { strategy } => {
+                    let sub_strategy = strategy.as_ref().map(|s| match s {
+                        crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
+                            crate::orchestration::world::VerifyStrategy::Shell(substitute_string(cmd, params))
+                        }
+                        _ => s.clone(),
+                    });
+                    crate::orchestration::world::Condition::VerifySuccess { strategy: sub_strategy }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     crate::orchestration::world::Condition::Script {
@@ -244,6 +261,13 @@ impl PatternMiner {
 /// Abstract AST node values containing the specific word with a dynamic placeholder
 fn generalize_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNode {
     match node {
+        PlanNode::Script { language, code, timeout_secs } => {
+            PlanNode::Script {
+                language: *language,
+                code: generalize_string(code, params),
+                timeout_secs: *timeout_secs,
+            }
+        }
         PlanNode::Step { tool, args, dry_run_first } => {
             PlanNode::Step {
                 tool: tool.clone(),
@@ -265,6 +289,15 @@ fn generalize_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     crate::orchestration::world::Condition::CargoCheckSuccess
+                }
+                crate::orchestration::world::Condition::VerifySuccess { strategy } => {
+                    let gen_strategy = strategy.as_ref().map(|s| match s {
+                        crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
+                            crate::orchestration::world::VerifyStrategy::Shell(generalize_string(cmd, params))
+                        }
+                        _ => s.clone(),
+                    });
+                    crate::orchestration::world::Condition::VerifySuccess { strategy: gen_strategy }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     crate::orchestration::world::Condition::Script {
@@ -331,6 +364,7 @@ fn generalize_json_value(val: &serde_json::Value, params: &HashMap<String, Strin
 fn is_structurally_equal(a: Option<&PlanNode>, b: Option<&PlanNode>) -> bool {
     match (a, b) {
         (None, None) => true,
+        (Some(PlanNode::Script { language: l_a, .. }), Some(PlanNode::Script { language: l_b, .. })) => l_a == l_b,
         (Some(PlanNode::Step { tool: t_a, .. }), Some(PlanNode::Step { tool: t_b, .. })) => t_a == t_b,
         (Some(PlanNode::Sequence { nodes: n_a }), Some(PlanNode::Sequence { nodes: n_b })) => {
             n_a.len() == n_b.len() && n_a.iter().zip(n_b).all(|(x, y)| is_structurally_equal(Some(x), Some(y)))

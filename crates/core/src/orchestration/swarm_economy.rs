@@ -9,12 +9,50 @@
 //!   → GeneralEquilibrium.market_clearing() computes optimal allocations
 //!   → Sub-agents execute with budget caps
 //!   → Results pooled, parent economy updated
+//!
 
 use crate::orchestration::cognitive_economics::{
     AgentProfile, AgentSpecialization, GeneralEquilibrium, ModelMarketQuote, select_model_by_roi,
 };
 use crate::orchestration::dsge_integration::AgentEconomy;
 use std::collections::HashMap;
+
+/// Task categories for matching model-specific strengths (Task Taxonomy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum TaskTaxonomy {
+    Refactor,
+    Bugfix,
+    ShellTask,
+    Planning,
+    Architecture,
+    Retrieval,
+    Summarization,
+    Generic,
+}
+
+impl TaskTaxonomy {
+    /// Detect taxonomy from task description text.
+    pub fn detect(description: &str) -> Self {
+        let lower = description.to_lowercase();
+        if lower.contains("refactor") || lower.contains("clean") || lower.contains("restructure") {
+            TaskTaxonomy::Refactor
+        } else if lower.contains("fix") || lower.contains("bug") || lower.contains("error") || lower.contains("issue") || lower.contains("compile") {
+            TaskTaxonomy::Bugfix
+        } else if lower.contains("shell") || lower.contains("run") || lower.contains("cmd") || lower.contains("command") || lower.contains("execute") {
+            TaskTaxonomy::ShellTask
+        } else if lower.contains("plan") || lower.contains("roadmap") || lower.contains("schedule") {
+            TaskTaxonomy::Planning
+        } else if lower.contains("architecture") || lower.contains("design") || lower.contains("structure") || lower.contains("system") {
+            TaskTaxonomy::Architecture
+        } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") || lower.contains("read") || lower.contains("retrieval") {
+            TaskTaxonomy::Retrieval
+        } else if lower.contains("summarize") || lower.contains("summary") || lower.contains("explain") || lower.contains("describe") {
+            TaskTaxonomy::Summarization
+        } else {
+            TaskTaxonomy::Generic
+        }
+    }
+}
 
 /// Manages token allocation across swarm sub-agents.
 pub struct SwarmEconomy {
@@ -73,22 +111,54 @@ impl SwarmEconomy {
     /// Select the best model for a sub-agent based on task + specialization + budget.
     pub fn select_model_for(
         &self,
-        _task: &str,
+        task: &str,
         specialization: &AgentSpecialization,
         budget: u64,
     ) -> Option<String> {
         let est_input = 1500;
         let est_output = budget.min(2000) / 2;
 
-        let best = select_model_by_roi(&self.market_quotes, est_input, est_output, None);
+        let taxonomy = TaskTaxonomy::detect(task);
+        log::info!("SwarmEconomy: Detected TaskTaxonomy={:?} for task '{}'", taxonomy, task);
+
+        // Task Taxonomy-aware ROI optimization:
+        // Adjust the market quotes according to taxonomy-based model strengths
+        let mut adjusted_quotes = self.market_quotes.clone();
+        for q in &mut adjusted_quotes {
+            match taxonomy {
+                TaskTaxonomy::Refactor | TaskTaxonomy::Bugfix | TaskTaxonomy::Architecture => {
+                    // For complex coding/design tasks, strong reasoning models perform disproportionately better
+                    if q.model_id.contains("gemini") || q.model_id.contains("claude") {
+                        q.avg_success_rate = (q.avg_success_rate + 0.12).min(1.0);
+                    } else {
+                        q.avg_success_rate = (q.avg_success_rate - 0.15).max(0.1);
+                    }
+                }
+                TaskTaxonomy::Summarization | TaskTaxonomy::Retrieval => {
+                    // For summarization or information retrieval, high volume & low cost models have superior ROI
+                    if q.model_id.contains("deepseek") || q.model_id.contains("llama") {
+                        q.avg_success_rate = (q.avg_success_rate + 0.10).min(1.0);
+                    }
+                }
+                TaskTaxonomy::ShellTask => {
+                    // Fast responsive execution matches small, agile models
+                    if q.avg_latency_ms < 400 {
+                        q.avg_success_rate = (q.avg_success_rate + 0.08).min(1.0);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let best = select_model_by_roi(&adjusted_quotes, est_input, est_output, None);
 
         best.map(|q| {
-            // Specialization-aware routing:
+            // Specialization-aware routing fallback:
             // Deep reasoning → prefer high-capability models
             // Fast execution → prefer low-latency models
             match specialization {
                 AgentSpecialization::Deep | AgentSpecialization::Planner => {
-                    if q.avg_success_rate > 0.9 { q.model_id.clone() }
+                    if q.avg_success_rate > 0.85 { q.model_id.clone() }
                     else { "gemini/gemini-2.5-flash".into() }
                 }
                 AgentSpecialization::Fast | AgentSpecialization::Verifier => {
@@ -185,5 +255,25 @@ mod tests {
 
         let fast_model = swarm.select_model_for("quick check", &AgentSpecialization::Fast, 500);
         assert!(fast_model.is_some());
+    }
+
+    #[test]
+    fn test_task_taxonomy_detection_and_routing() {
+        // Test detect categories
+        assert_eq!(TaskTaxonomy::detect("Refactor the world module to clean code"), TaskTaxonomy::Refactor);
+        assert_eq!(TaskTaxonomy::detect("Fix compiler error in aot.rs"), TaskTaxonomy::Bugfix);
+        assert_eq!(TaskTaxonomy::detect("Summarize the results in a report"), TaskTaxonomy::Summarization);
+        assert_eq!(TaskTaxonomy::detect("Search the workspace for pattern miner"), TaskTaxonomy::Retrieval);
+        assert_eq!(TaskTaxonomy::detect("Run a cargo check command"), TaskTaxonomy::ShellTask);
+
+        let economy = AgentEconomy::new(0.5);
+        let swarm = SwarmEconomy::from_parent(&economy);
+
+        // Under summarization taxonomy, deepseek/llama models should get positive boost, while under bugfix, gemini/claude gets boost.
+        let sum_model = swarm.select_model_for("Summarize the entire project changelog", &AgentSpecialization::Researcher, 3000);
+        assert!(sum_model.is_some());
+
+        let bug_model = swarm.select_model_for("Fix segment fault in memory controller", &AgentSpecialization::Deep, 8000);
+        assert!(bug_model.is_some());
     }
 }

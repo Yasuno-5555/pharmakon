@@ -6,6 +6,8 @@ use crossterm::{
 };
 use pharmakon_common::Event;
 use pharmakon_core::agent::Agent;
+use pharmakon_core::providers::registry::ModelRegistry;
+use pharmakon_common::Config;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -314,8 +316,14 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
         if event::poll(Duration::from_millis(80))?
             && let CEvent::Key(key) = event::read()? {
                 // Global: Ctrl+C / Ctrl+D → quit
-                if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL { break; }
-                if key.code == KeyCode::Char('d') && key.modifiers == KeyModifiers::CONTROL { break; }
+                if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+                    agent.shutdown();
+                    break;
+                }
+                if key.code == KeyCode::Char('d') && key.modifiers == KeyModifiers::CONTROL {
+                    agent.shutdown();
+                    break;
+                }
 
                 // Approvals
                 if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('a') {
@@ -371,6 +379,73 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                             status = "Ready.".to_string();
                             continue;
                         }
+                        if msg == "/revert" || msg == "/undo" {
+                            let session_id = {
+                                let sid = agent.session_id.lock().await;
+                                sid.clone()
+                            };
+                            match agent.revert_last_mutation(&session_id).await {
+                                Ok(feedback) => {
+                                    messages.push(("system".to_string(), feedback.clone()));
+                                    status = feedback;
+                                }
+                                Err(e) => {
+                                    messages.push(("error".to_string(), format!("Revert failed: {}", e)));
+                                    status = format!("Revert failed: {}", e);
+                                }
+                            }
+                            continue;
+                        }
+                        if msg.starts_with("/model") {
+                            let parts: Vec<&str> = msg["/model".len()..].trim().split_whitespace().collect();
+                            if !parts.is_empty() {
+                                let mut save = false;
+                                let mut model_id = parts[0];
+                                if parts[0] == "--save" && parts.len() > 1 {
+                                    save = true;
+                                    model_id = parts[1];
+                                } else if parts.len() > 1 && parts[1] == "--save" {
+                                    save = true;
+                                }
+                                if let Some(new_m) = ModelRegistry::get_model(model_id) {
+                                    let mut current = agent.model.lock().await;
+                                    *current = new_m;
+                                    messages.push(("system".to_string(), format!("Switched model to {}", model_id)));
+                                    status = format!("Model: {}", model_id);
+
+                                    // Context re-processing cost calculation
+                                    let session_id = { agent.session_id.lock().await.clone() };
+                                    let states = agent.session_states.lock().await;
+                                    let est_tokens = if let Some(state) = states.get(&session_id) {
+                                        let s = state.lock().await;
+                                        s.history.iter().map(|m| m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0)).sum::<usize>() / 4
+                                    } else {
+                                        0
+                                    };
+                                    let est_cost = (est_tokens as f64) * 0.000001;
+                                    messages.push(("system".to_string(), format!("⚠ Context re-processing cost: ~{} tokens (${:.4})", est_tokens, est_cost)));
+
+                                    if save {
+                                        if let Ok(mut cfg) = Config::load() {
+                                            if let Some(idx) = model_id.find('/') {
+                                                cfg.default_agent.provider = model_id[..idx].to_string();
+                                                cfg.default_agent.model = model_id[idx+1..].to_string();
+                                            } else {
+                                                cfg.default_agent.model = model_id.to_string();
+                                            }
+                                            if cfg.save().is_ok() {
+                                                messages.push(("system".to_string(), "Configuration saved permanently.".to_string()));
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    messages.push(("error".to_string(), format!("Model not found or invalid API key: {}", model_id)));
+                                }
+                            } else {
+                                messages.push(("system".to_string(), "Usage: /model [--save] <model_id>".to_string()));
+                            }
+                            continue;
+                        }
                         if msg == "/exit" || msg == "/quit" { break; }
 
                         messages.push(("user".to_string(), msg.clone()));
@@ -407,6 +482,16 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
     println!("\u{1F48A} Pharmakon REPL");
     println!("/quit to exit, /reset to clean context.");
     println!();
+
+    let agent_clone = agent.clone();
+    let ctrlc_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            println!("\n🛑 [System] Interrupt received. Shutting down agent gracefully...");
+            agent_clone.shutdown();
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            std::process::exit(130);
+        }
+    });
 
     let mut event_rx = agent.event_tx.subscribe();
     // Track whether we're inside a chat call to show events live
@@ -457,6 +542,66 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
                 println!("Session reset.");
                 continue;
             }
+            "/revert" | "/undo" => {
+                let session_id = {
+                    let sid = agent.session_id.lock().await;
+                    sid.clone()
+                };
+                match agent.revert_last_mutation(&session_id).await {
+                    Ok(feedback) => println!("⚙️ [System]: {}", feedback),
+                    Err(e) => eprintln!("❌ Revert failed: {}", e),
+                }
+                continue;
+            }
+            _ if input.starts_with("/model") => {
+                let parts: Vec<&str> = input["/model".len()..].trim().split_whitespace().collect();
+                if !parts.is_empty() {
+                    let mut save = false;
+                    let mut model_id = parts[0];
+                    if parts[0] == "--save" && parts.len() > 1 {
+                        save = true;
+                        model_id = parts[1];
+                    } else if parts.len() > 1 && parts[1] == "--save" {
+                        save = true;
+                    }
+                    if let Some(new_m) = ModelRegistry::get_model(model_id) {
+                        let mut current = agent.model.lock().await;
+                        *current = new_m;
+                        println!("⚙️ [System]: Switched model to {}", model_id);
+
+                        // Context re-processing cost calculation
+                        let session_id = { agent.session_id.lock().await.clone() };
+                        let states = agent.session_states.lock().await;
+                        let est_tokens = if let Some(state) = states.get(&session_id) {
+                            let s = state.lock().await;
+                            s.history.iter().map(|m| m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0)).sum::<usize>() / 4
+                        } else {
+                            0
+                        };
+                        let est_cost = (est_tokens as f64) * 0.000001;
+                        println!("⚠ Context re-processing cost: ~{} tokens (${:.4})", est_tokens, est_cost);
+
+                        if save {
+                            if let Ok(mut cfg) = Config::load() {
+                                if let Some(idx) = model_id.find('/') {
+                                    cfg.default_agent.provider = model_id[..idx].to_string();
+                                    cfg.default_agent.model = model_id[idx+1..].to_string();
+                                } else {
+                                    cfg.default_agent.model = model_id.to_string();
+                                }
+                                if cfg.save().is_ok() {
+                                    println!("⚙️ [System]: Configuration saved permanently.");
+                                }
+                            }
+                        }
+                    } else {
+                        eprintln!("❌ Model not found or invalid API key: {}", model_id);
+                    }
+                } else {
+                    println!("Usage: /model [--save] <model_id>");
+                }
+                continue;
+            }
             _ => {}
         }
 
@@ -476,6 +621,7 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
         println!();
     }
 
+    ctrlc_task.abort();
     Ok(())
 }
 

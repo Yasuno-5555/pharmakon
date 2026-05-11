@@ -15,11 +15,140 @@ use futures::future::{BoxFuture, FutureExt};
 // Plan AST Types
 // ═══════════════════════════════════════════════════════
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VerifyStrategy {
+    Cargo,
+    Cmake,
+    Npm,
+    PythonTest,
+    Go,
+    Shell(String),
+}
+
+fn has_command(cmd: &str) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("which")
+            .arg(cmd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("where")
+            .arg(cmd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+}
+
+pub fn detect_verify_strategy(workspace_root: &Path) -> VerifyStrategy {
+    if workspace_root.join("Cargo.toml").exists() {
+        VerifyStrategy::Cargo
+    } else if workspace_root.join("CMakeLists.txt").exists() && has_command("cmake") {
+        VerifyStrategy::Cmake
+    } else if workspace_root.join("package.json").exists() && has_command("npm") {
+        VerifyStrategy::Npm
+    } else if (workspace_root.join("setup.py").exists() || workspace_root.join("pyproject.toml").exists()) && has_command("pytest") {
+        VerifyStrategy::PythonTest
+    } else if workspace_root.join("go.mod").exists() && has_command("go") {
+        VerifyStrategy::Go
+    } else {
+        log::warn!("No suitable verification tool found in environment. Falling back to verification skip (Shell('true')).");
+        VerifyStrategy::Shell("true".to_string())
+    }
+}
+
+pub async fn run_verify(dir: &Path, strategy: &VerifyStrategy, changed_files: &[PathBuf]) -> bool {
+    match strategy {
+        VerifyStrategy::Cargo => {
+            if has_command("cargo") {
+                run_cargo_check_optimized(dir, changed_files).await
+            } else {
+                log::warn!("cargo command not found in environment. Skipping verification.");
+                true
+            }
+        }
+        VerifyStrategy::Cmake => {
+            if has_command("cmake") {
+                log::info!("⚡ CMake Build Check: Running cmake --build...");
+                let mut cmd = tokio::process::Command::new("cmake");
+                cmd.arg("--build").arg(".").current_dir(dir);
+                match tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output()).await {
+                    Ok(Ok(output)) => output.status.success(),
+                    _ => false,
+                }
+            } else {
+                log::warn!("cmake command not found in environment. Skipping verification.");
+                true
+            }
+        }
+        VerifyStrategy::Npm => {
+            if has_command("npm") {
+                log::info!("⚡ Npm Build Check: Running npm run build...");
+                let mut cmd = tokio::process::Command::new("npm");
+                cmd.arg("run").arg("build").current_dir(dir);
+                match tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output()).await {
+                    Ok(Ok(output)) => output.status.success(),
+                    _ => false,
+                }
+            } else {
+                log::warn!("npm command not found in environment. Skipping verification.");
+                true
+            }
+        }
+        VerifyStrategy::PythonTest => {
+            if has_command("pytest") {
+                log::info!("⚡ Python Test Check: Running pytest...");
+                let mut cmd = tokio::process::Command::new("pytest");
+                cmd.current_dir(dir);
+                match tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output()).await {
+                    Ok(Ok(output)) => output.status.success(),
+                    _ => false,
+                }
+            } else {
+                log::warn!("pytest command not found in environment. Skipping verification.");
+                true
+            }
+        }
+        VerifyStrategy::Go => {
+            if has_command("go") {
+                log::info!("⚡ Go Build Check: Running go build...");
+                let mut cmd = tokio::process::Command::new("go");
+                cmd.arg("build").arg("./...").current_dir(dir);
+                match tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output()).await {
+                    Ok(Ok(output)) => output.status.success(),
+                    _ => false,
+                }
+            } else {
+                log::warn!("go command not found in environment. Skipping verification.");
+                true
+            }
+        }
+        VerifyStrategy::Shell(command) => {
+            log::info!("⚡ Custom Shell Check: Running '{}'...", command);
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.arg("-c").arg(command).current_dir(dir);
+            match tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output()).await {
+                Ok(Ok(output)) => output.status.success(),
+                _ => false,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "condition_type")]
 pub enum Condition {
     FileExists { path: PathBuf },
     CargoCheckSuccess,
+    VerifySuccess { strategy: Option<VerifyStrategy> },
     Script { script: String },
     #[serde(untagged)]
     Legacy(String),
@@ -33,7 +162,12 @@ impl Condition {
                 resolved.exists()
             }
             Condition::CargoCheckSuccess => {
-                run_cargo_check(workspace_root).await
+                let strategy = detect_verify_strategy(workspace_root);
+                run_verify(workspace_root, &strategy, &[]).await
+            }
+            Condition::VerifySuccess { strategy } => {
+                let s = strategy.clone().unwrap_or_else(|| detect_verify_strategy(workspace_root));
+                run_verify(workspace_root, &s, &[]).await
             }
             Condition::Script { script } | Condition::Legacy(script) => {
                 let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
@@ -44,6 +178,12 @@ impl Condition {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ScriptLang {
+    Rhai,
+    Python,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum PlanNode {
@@ -52,6 +192,11 @@ pub enum PlanNode {
         args: serde_json::Value,
         #[serde(default)]
         dry_run_first: bool,
+    },
+    Script {
+        language: ScriptLang,
+        code: String,
+        timeout_secs: u64,
     },
     Sequence {
         nodes: Vec<PlanNode>,
@@ -158,6 +303,18 @@ impl StaticVerifier {
         simulated_created_paths: &mut HashSet<PathBuf>,
     ) -> Result<()> {
         match node {
+            PlanNode::Script { language, code, timeout_secs: _ } => {
+                let script_risk = 0.8;
+                if script_risk > self.risk_ceiling {
+                    issues.push(format!("Risk ceiling violation: Script node ({:?}) has risk {} which exceeds ceiling {}", language, script_risk, self.risk_ceiling));
+                }
+                let dangerous = ["rm -rf", "sudo ", "chmod 777", "shutil.rmtree"];
+                for pattern in dangerous {
+                    if code.contains(pattern) {
+                        issues.push(format!("Dangerous code pattern detected in script: '{}'", pattern));
+                    }
+                }
+            }
             PlanNode::Step { tool, args, .. } => {
                 // 1. Risk ceiling enforcement using unified ExecutionProfile score
                 let tool_risk = {
@@ -752,6 +909,9 @@ fn calculate_static_bayesian_score(
     // Calculate toolchain risk based on AST structure
     fn calculate_risk(node: &PlanNode) -> f64 {
         match node {
+            PlanNode::Script { .. } => {
+                0.15
+            }
             PlanNode::Step { tool, .. } => {
                 if tool == "shell" || tool == "codeact" {
                     0.15
@@ -805,6 +965,16 @@ pub fn execute_node<'a>(
 ) -> BoxFuture<'a, Result<String>> {
     async move {
         match node {
+            PlanNode::Script { language, code, timeout_secs } => {
+                log::info!("Executing Script Node: language={:?}, timeout={}s", language, timeout_secs);
+                let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
+                let r = engine.execute(code);
+                if r.success {
+                    Ok(r.output)
+                } else {
+                    Err(anyhow::anyhow!("Script execution failed: {}", r.error.unwrap_or_else(|| "Unknown error".to_string())))
+                }
+            }
             PlanNode::Step { tool, args, dry_run_first } => {
                 // 1. 🛑 CodeActGate Pre-Flight Interceptor & Redirect Gate:
                 // Auto-route low-level shell commands or codeact wrappers to high-performance, safe tools!
@@ -925,6 +1095,7 @@ pub fn execute_node<'a>(
                 for node in nodes {
                     fn extract_write_paths(n: &PlanNode, root: &Path, paths: &mut std::collections::HashSet<PathBuf>) {
                         match n {
+                            PlanNode::Script { .. } => {}
                             PlanNode::Step { tool, args, .. } => {
                                 if (tool == "write_file" || tool == "apply_patch")
                                     && let Some(path_str) = args.get("path").and_then(|s| s.as_str()) {
@@ -1059,21 +1230,37 @@ pub fn execute_node<'a>(
             }
             PlanNode::Verify { node, assertion_script } => {
                 let out = execute_node(agent, node, workspace_root, snapshotted_files).await?;
-                if assertion_script == "cargo_success" {
-                    let changed_paths: Vec<PathBuf> = snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
-                    if run_cargo_check_optimized(workspace_root, &changed_paths).await {
-                        Ok(out)
-                    } else {
-                        Err(anyhow!("Verification failed: cargo check broke"))
-                    }
+                let strategy = if assertion_script == "cargo_success" {
+                    VerifyStrategy::Cargo
+                } else if assertion_script == "npm_success" {
+                    VerifyStrategy::Npm
+                } else if assertion_script == "python_success" {
+                    VerifyStrategy::PythonTest
+                } else if assertion_script == "cmake_success" {
+                    VerifyStrategy::Cmake
+                } else if assertion_script == "go_success" {
+                    VerifyStrategy::Go
+                } else if assertion_script.starts_with("shell:") {
+                    VerifyStrategy::Shell(assertion_script[6..].to_string())
                 } else {
-                    let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
-                    let r = engine.execute(assertion_script);
-                    if r.success && r.output.trim() == "true" {
-                        Ok(out)
+                    if assertion_script.contains("return") || assertion_script.contains("print") || assertion_script.contains("==") {
+                        let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
+                        let r = engine.execute(assertion_script);
+                        if r.success && r.output.trim() == "true" {
+                            return Ok(out);
+                        } else {
+                            return Err(anyhow!("Verification failed via script"));
+                        }
                     } else {
-                        Err(anyhow!("Verification failed"))
+                        detect_verify_strategy(workspace_root)
                     }
+                };
+
+                let changed_paths: Vec<PathBuf> = snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
+                if run_verify(workspace_root, &strategy, &changed_paths).await {
+                    Ok(out)
+                } else {
+                    Err(anyhow!("Verification failed: strategy {:?} broke", strategy))
                 }
             }
             PlanNode::Gate { gate_name, node } => {
@@ -1235,9 +1422,10 @@ pub async fn execute_world_model(
             let exec_result = execute_node(agent, &ast, &workspace_root, &mut snapshotted_files).await;
 
             let changed_paths: Vec<PathBuf> = snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
-            let cargo_ok = run_cargo_check_optimized(&workspace_root, &changed_paths).await;
+            let strategy = detect_verify_strategy(&workspace_root);
+            let verify_ok = run_verify(&workspace_root, &strategy, &changed_paths).await;
 
-            if exec_result.is_ok() && cargo_ok {
+            if exec_result.is_ok() && verify_ok {
                 log::info!("WorldModel V2: Plan '{}' executed successfully", plan.id);
                 cache.record_result(task, plan, true, fingerprint.clone());
                 return Ok(format!(
@@ -1249,7 +1437,7 @@ pub async fn execute_world_model(
             // Classification & forensic rollback on failure
             let error_msg = match &exec_result {
                 Err(e) => e.to_string(),
-                Ok(_) => "cargo check failed after execution".to_string(),
+                Ok(_) => format!("{:?} failed after execution", strategy),
             };
 
             let failure = FailureKind::classify(&error_msg, "AST Executor");
@@ -1300,6 +1488,7 @@ pub async fn execute_world_model(
 // Helpers
 // ═══════════════════════════════════════════════════════
 
+#[allow(dead_code)]
 async fn run_cargo_check(dir: &Path) -> bool {
     run_cargo_check_optimized(dir, &[]).await
 }

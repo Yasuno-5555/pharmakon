@@ -26,6 +26,13 @@ impl IncrementalPlanner {
         replacement: PlanNode,
     ) -> PlanNode {
         match root {
+            PlanNode::Script { language, code, timeout_secs } => {
+                PlanNode::Script {
+                    language: *language,
+                    code: code.clone(),
+                    timeout_secs: *timeout_secs,
+                }
+            }
             PlanNode::Step { tool, args, dry_run_first } => {
                 if tool == target_tool {
                     replacement

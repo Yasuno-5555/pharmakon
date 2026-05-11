@@ -86,6 +86,16 @@ impl AotCompiler {
 fn format_plan_node_as_rust(node: &crate::orchestration::world::PlanNode, indent: &str) -> String {
     let next_indent = format!("{}    ", indent);
     match node {
+        crate::orchestration::world::PlanNode::Script { language, code, timeout_secs } => {
+            let lang_str = match language {
+                crate::orchestration::world::ScriptLang::Rhai => "crate::orchestration::world::ScriptLang::Rhai",
+                crate::orchestration::world::ScriptLang::Python => "crate::orchestration::world::ScriptLang::Python",
+            };
+            format!(
+                "PlanNode::Script {{\n{}language: {},\n{}code: r#\"{}\"#.to_string(),\n{}timeout_secs: {},\n{}}}",
+                next_indent, lang_str, next_indent, code, next_indent, timeout_secs, indent
+            )
+        }
         crate::orchestration::world::PlanNode::Step { tool, args, dry_run_first } => {
             format!(
                 "PlanNode::Step {{\n{}tool: \"{}\".to_string(),\n{}args: serde_json::json!({}),\n{}dry_run_first: {},\n{}}}",
@@ -118,6 +128,22 @@ fn format_plan_node_as_rust(node: &crate::orchestration::world::PlanNode, indent
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     "Condition::CargoCheckSuccess".to_string()
+                }
+                crate::orchestration::world::Condition::VerifySuccess { strategy } => {
+                    match strategy {
+                        Some(strat) => {
+                            let strat_code = match strat {
+                                crate::orchestration::world::VerifyStrategy::Cargo => "VerifyStrategy::Cargo".to_string(),
+                                crate::orchestration::world::VerifyStrategy::Cmake => "VerifyStrategy::Cmake".to_string(),
+                                crate::orchestration::world::VerifyStrategy::Npm => "VerifyStrategy::Npm".to_string(),
+                                crate::orchestration::world::VerifyStrategy::PythonTest => "VerifyStrategy::PythonTest".to_string(),
+                                crate::orchestration::world::VerifyStrategy::Go => "VerifyStrategy::Go".to_string(),
+                                crate::orchestration::world::VerifyStrategy::Shell(cmd) => format!("VerifyStrategy::Shell(\"{}\".to_string())", cmd),
+                            };
+                            format!("Condition::VerifySuccess {{ strategy: Some({}) }}", strat_code)
+                        }
+                        None => "Condition::VerifySuccess { strategy: None }".to_string(),
+                    }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     format!("Condition::Script {{ script: \"{}\".to_string() }}", script)
@@ -213,6 +239,14 @@ impl AotHotReloader {
 
 fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::collections::HashMap<String, String>) -> crate::orchestration::world::PlanNode {
     match node {
+        crate::orchestration::world::PlanNode::Script { language, code, timeout_secs } => {
+            let substituted_code = substitute_string(code, params);
+            crate::orchestration::world::PlanNode::Script {
+                language: *language,
+                code: substituted_code,
+                timeout_secs: *timeout_secs,
+            }
+        }
         crate::orchestration::world::PlanNode::Step { tool, args, dry_run_first } => {
             let sub_args = substitute_json_value(args, params);
             crate::orchestration::world::PlanNode::Step {
@@ -239,6 +273,15 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     crate::orchestration::world::Condition::CargoCheckSuccess
+                }
+                crate::orchestration::world::Condition::VerifySuccess { strategy } => {
+                    let sub_strategy = strategy.as_ref().map(|s| match s {
+                        crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
+                            crate::orchestration::world::VerifyStrategy::Shell(substitute_string(cmd, params))
+                        }
+                        _ => s.clone(),
+                    });
+                    crate::orchestration::world::Condition::VerifySuccess { strategy: sub_strategy }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     crate::orchestration::world::Condition::Script {

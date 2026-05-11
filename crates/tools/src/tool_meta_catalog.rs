@@ -128,6 +128,7 @@ pub fn build_default_catalog() -> ToolMetaCatalog {
         meta("fractal_swarm", "Delegate tasks to parallel sub-agents or threads", ToolCategory::Orchestration, dangerous_shell()),
         meta("subagent", "Spawn a specialized sub-agent for a focused task", ToolCategory::Orchestration, autonomous()),
         meta("ephemeral_red_team", "Run temporary adversarial tests and auto-cleanup", ToolCategory::System, dangerous_shell()),
+        meta("pharmakon_task", "Delegate tasks recursively to an independent Pharmakon sub-instance", ToolCategory::Orchestration, autonomous()),
         // --- Observability ---
         meta("temporal_awareness", "Analyze git history, code churn, and author contributions", ToolCategory::System, local_fs()),
         // --- Media ---

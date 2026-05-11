@@ -182,6 +182,18 @@ impl DbSessionStore {
         .execute(&pool)
         .await;
 
+        let _ = sqlx::query(
+            "ALTER TABLE messages ADD COLUMN archived BOOLEAN DEFAULT 0",
+        )
+        .execute(&pool)
+        .await;
+
+        let _ = sqlx::query(
+            "ALTER TABLE messages ADD COLUMN session_title TEXT",
+        )
+        .execute(&pool)
+        .await;
+
         Ok(Self { pool })
     }
 
@@ -825,5 +837,114 @@ impl pharmakon_common::ResearchPersistence for DbSessionStore {
     ) -> anyhow::Result<()> {
         self.save_research_cache(url, content, depth, metadata)
             .await
+    }
+}
+
+impl DbSessionStore {
+    pub async fn rename_session(&self, session_id: &str, name: &str) -> Result<()> {
+        sqlx::query("UPDATE messages SET session_title = ? WHERE session_id = ?")
+            .bind(name)
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_sessions_info(&self) -> Result<Vec<serde_json::Value>> {
+        let rows = sqlx::query(
+            "SELECT session_id, 
+                    COUNT(*) as msg_count, 
+                    MAX(created_at) as last_at, 
+                    session_title,
+                    MIN(CASE WHEN role='user' THEN content END) as first_msg
+             FROM messages 
+             WHERE archived = 0 OR archived IS NULL
+             GROUP BY session_id 
+             ORDER BY last_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            let session_id: String = r.get("session_id");
+            let msg_count: i64 = r.get("msg_count");
+            let last_at: String = r.get("last_at");
+            let title: Option<String> = r.get("session_title");
+            let first_msg: Option<String> = r.get("first_msg");
+
+            // Extract auto-generated title if none named
+            let display_title = if let Some(t) = title {
+                t
+            } else if let Some(m) = first_msg {
+                let parsed: String = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
+                    if let Some(txt) = v.get("text").and_then(|t| t.as_str()) {
+                        txt.to_string()
+                    } else if let Some(txt) = v.as_str() {
+                        txt.to_string()
+                    } else {
+                        m.clone()
+                    }
+                } else {
+                    m.clone()
+                };
+                let clean = parsed.replace("\n", " ");
+                let char_count = clean.chars().count();
+                if char_count > 50 {
+                    format!("{}...", clean.chars().take(47).collect::<String>())
+                } else {
+                    clean
+                }
+            } else {
+                "Untitled Session".to_string()
+            };
+
+            list.push(serde_json::json!({
+                "session_id": session_id,
+                "msg_count": msg_count,
+                "last_updated": last_at,
+                "title": display_title,
+            }));
+        }
+        Ok(list)
+    }
+
+    pub async fn prune_sessions(&self, days: u32) -> Result<usize> {
+        let result = sqlx::query(
+            "UPDATE messages SET archived = 1 
+             WHERE session_id IN (
+                 SELECT session_id FROM (
+                     SELECT session_id, MAX(created_at) as max_at FROM messages GROUP BY session_id
+                 ) WHERE max_at < datetime('now', ? || ' days')
+             )"
+        )
+        .bind(format!("-{}", days))
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as usize)
+    }
+
+    pub async fn purge_sessions(&self, days: u32) -> Result<usize> {
+        let result = sqlx::query(
+            "DELETE FROM messages 
+             WHERE archived = 1 OR session_id IN (
+                 SELECT session_id FROM (
+                     SELECT session_id, MAX(created_at) as max_at FROM messages GROUP BY session_id
+                 ) WHERE max_at < datetime('now', ? || ' days')
+             )"
+        )
+        .bind(format!("-{}", days))
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as usize)
+    }
+
+    pub async fn export_session(&self, session_id: &str) -> Result<serde_json::Value> {
+        let messages = self.load_history(session_id).await?;
+        let json_val = serde_json::to_value(messages)?;
+        Ok(serde_json::json!({
+            "session_id": session_id,
+            "messages": json_val,
+        }))
     }
 }

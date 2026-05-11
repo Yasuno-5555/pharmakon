@@ -175,6 +175,7 @@ impl ToolMetaRegistry {
             }
             "ephemeral_red_team" => Some(Arc::new(crate::orchestration::EphemeralRedTeamTool)),
             "fractal_swarm" => Some(Arc::new(crate::orchestration::FractalSwarmTool)),
+            "pharmakon_task" => Some(Arc::new(crate::orchestration::PharmakonTaskTool)),
             _ => None,
         }
     }
