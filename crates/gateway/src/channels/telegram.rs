@@ -186,7 +186,20 @@ impl Channel for TelegramChannel {
                                 }
                                 worker_agent.fact_memory = w.fact_memory.clone();
                                 worker_agent.territory_manager = w.territory_manager.clone();
-                                worker_agent.set_soul(pharmakon_core::soul::Soul::expert("coder")).await;
+                                // Detect task type for appropriate soul selection
+                                let lower_task = text_owned.to_lowercase();
+                                let soul_role = if lower_task.contains("diagnos") || lower_task.contains("設定")
+                                    || lower_task.contains("調べて") || lower_task.contains("確認")
+                                    || lower_task.contains("confirm") || lower_task.contains("check")
+                                    || lower_task.contains("error") || lower_task.contains("not work")
+                                    || lower_task.contains("真っ白") || lower_task.contains("映らない")
+                                    || lower_task.contains("トラブル") || lower_task.contains("help")
+                                {
+                                    "diagnostics"
+                                } else {
+                                    "coder"
+                                };
+                                worker_agent.set_soul(pharmakon_core::soul::Soul::expert(soul_role)).await;
 
                                 tokio::spawn(async move {
                                     match worker_agent.chat(&text_owned).await {

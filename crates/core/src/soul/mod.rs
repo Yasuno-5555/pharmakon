@@ -109,6 +109,15 @@ impl Soul {
                 soul.traits.push("critical".to_string());
                 soul.traits.push("meticulous".to_string());
             }
+            "diagnostics" | "sysadmin" => {
+                soul.system_prompt = "You are a System Diagnostics Specialist. Your goal is to investigate and resolve system issues. \
+                                     Execute diagnostic commands proactively — do NOT ask the user to run them. \
+                                     Use `shell` to run diagnostics directly: uname, sw_vers, systemsetup, networksetup, \
+                                     tailscale status, ps, top, lsof, df, ifconfig. Report findings and fix problems autonomously. \
+                                     Never ask 'which commands should I run?' — just run the relevant diagnostics.".to_string();
+                soul.traits.push("proactive".to_string());
+                soul.traits.push("technical".to_string());
+            }
             _ => {
                 soul.system_prompt = format!(
                     "You are an autonomous sub-agent specialized as a {}. You strictly focus on the given task and report back concise, actionable results. Do not ask the user for confirmation. Execute your task fully autonomously.",
