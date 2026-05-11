@@ -114,6 +114,7 @@ impl ToolMetaRegistry {
             "run_background" => Some(Arc::new(crate::terminal::BackgroundRunTool::new())),
             "get_process_status" => Some(Arc::new(crate::terminal::ProcessStatusTool::new())),
             "send_command_input" => Some(Arc::new(crate::terminal::SendCommandInputTool::new())),
+            "run_command" | "command" => Some(Arc::new(crate::terminal::ShellTool)),
             "screenshot" => Some(Arc::new(crate::media::capture::ScreenshotTool)),
             "camera" => Some(Arc::new(crate::media::capture::CameraTool)),
             "generate_image" => Some(Arc::new(crate::media::ImageGenTool::new())),
@@ -122,6 +123,9 @@ impl ToolMetaRegistry {
             "discover_tools" => Some(Arc::new(crate::tool_discovery::DiscoverToolsTool::new())),
             "hydrate_context" => Some(Arc::new(crate::memory_hydration::HydrateContextTool::new())),
             "playbook" => Some(Arc::new(crate::playbook::PlaybookTool::new())),
+            "search" | "web_search" => Some(Arc::new(crate::web_search::SearchDispatcherTool::new())),
+            "duckduckgo_search" => Some(Arc::new(crate::web_search::DuckDuckGoSearchTool::new())),
+            "google_search" => Some(Arc::new(crate::web_search::GoogleSearchTool)),
             "repomap" | "get_repo_map" => Some(Arc::new(crate::repomap::RepoMapTool::new())),
             "task_tracker" => Some(Arc::new(crate::project_management::TaskTrackerTool::new())),
             "self_diagnostic" => Some(Arc::new(crate::diagnostic::DiagnosticTool {
