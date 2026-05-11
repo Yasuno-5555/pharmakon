@@ -8,16 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct TokenEconomyHook {
     enabled: Arc<AtomicBool>,
-    threshold: f32,
     budget_limit: Arc<Mutex<u64>>,
     cumulative_usage: Arc<Mutex<u64>>,
 }
 
 impl TokenEconomyHook {
-    pub fn new(threshold: f32, budget_limit: u64) -> Self {
+    pub fn new(_threshold: f32, budget_limit: u64) -> Self {
         Self {
             enabled: Arc::new(AtomicBool::new(true)),
-            threshold,
             budget_limit: Arc::new(Mutex::new(budget_limit)),
             cumulative_usage: Arc::new(Mutex::new(0)),
         }

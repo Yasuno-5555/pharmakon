@@ -21,7 +21,6 @@ struct TerminalSession {
     stdin: tokio::process::ChildStdin,
     stdout_reader: BufReader<tokio::process::ChildStdout>,
     stderr_reader: BufReader<tokio::process::ChildStderr>,
-    cwd: String,
 }
 
 impl Default for TerminalTool {
@@ -61,16 +60,11 @@ impl TerminalTool {
                 .take()
                 .ok_or_else(|| AgentError("Failed to open stderr".to_string()))?;
 
-            let cwd = std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-
             *session_lock = Some(TerminalSession {
                 child,
                 stdin,
                 stdout_reader: BufReader::new(stdout),
                 stderr_reader: BufReader::new(stderr),
-                cwd,
             });
         }
         Ok(self.session.clone())

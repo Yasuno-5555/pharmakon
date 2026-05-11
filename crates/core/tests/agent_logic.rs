@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use pharmakon_common::Config;
-use pharmakon_common::ToolRegistry;
+
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{
     AgentModel, AgentResult, CompletionRequest, CompletionResponse, MessageContent,
@@ -86,7 +86,7 @@ async fn setup_test_agent_with_model(
 #[tokio::test]
 async fn test_chat_calls_complete_when_no_tools() {
     let model = Arc::new(InspectableMockModel::new());
-    let mut agent = setup_test_agent_with_model(model.clone()).await;
+    let agent = setup_test_agent_with_model(model.clone()).await;
 
     let _ = agent.chat("test message").await;
 
@@ -100,7 +100,7 @@ async fn test_chat_calls_complete_when_no_tools() {
 #[tokio::test]
 async fn test_chat_calls_complete_when_tools_are_present() {
     let model = Arc::new(InspectableMockModel::new());
-    let mut agent = setup_test_agent_with_model(model.clone()).await;
+    let agent = setup_test_agent_with_model(model.clone()).await;
 
     agent.add_tool(Arc::new(ShellTool)).await;
 

@@ -349,7 +349,7 @@ mod tests {
         });
 
         executor.add_task("depends_on_fail", vec!["failing".to_string()],
-            |deps: HashMap<String, serde_json::Value>| async move {
+            |_deps: HashMap<String, serde_json::Value>| async move {
                 // Should still execute even if dependency failed
                 Ok::<_, anyhow::Error>("ran anyway".to_string())
             },

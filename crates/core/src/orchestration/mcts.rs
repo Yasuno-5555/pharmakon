@@ -9,6 +9,7 @@ use tokio::fs;
 use tokio::process::Command;
 
 pub struct MctsSimulatorTool {
+    #[allow(dead_code)]
     agent_ref: Weak<Agent>,
 }
 

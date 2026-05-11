@@ -154,6 +154,7 @@ struct Candidate {
     #[allow(dead_code)]
     #[serde(rename = "safety_ratings", alias = "safetyRatings")]
     safety_ratings: Option<Vec<SafetyRating>>,
+    #[allow(dead_code)]
     #[serde(rename = "grounding_metadata", alias = "groundingMetadata")]
     grounding_metadata: Option<serde_json::Value>,
 }
@@ -270,7 +271,7 @@ impl GeminiModel {
             if m.role == "tool"
                 && let Some(ref content) = m.content {
                     let function_name = m.name.clone().filter(|n| !n.is_empty()).or_else(|| {
-                        log::warn!(
+                        log::debug!(
                             "Tool message is missing the 'name' field, attempting fallback lookup for tool_call_id: {:?}.",
                             m.tool_call_id
                         );

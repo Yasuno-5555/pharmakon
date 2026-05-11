@@ -1,4 +1,4 @@
-use pharmakon_common::ToolRegistry;
+
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{
     AgentModel, AgentResult, CompletionRequest, CompletionResponse, FunctionCall, MessageContent,
@@ -108,7 +108,6 @@ impl AgentModel for MultiAgentMockModel {
 
 #[tokio::test]
 #[ignore = "requires Ollama with llama3.2"]
-#[tokio::test]
 async fn test_multi_agent_collaboration() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

@@ -252,7 +252,7 @@ impl AgentEconomy {
 
     /// Model selection: Manual mode returns user-chosen model, Auto mode
     /// uses live performance-weighted ROI routing across all available providers.
-    pub fn select_model(&self, task: &str, complexity: f64) -> Option<Arc<dyn AgentModel>> {
+    pub fn select_model(&self, _task: &str, complexity: f64) -> Option<Arc<dyn AgentModel>> {
         match &self.mode {
             ModelMode::Manual(model_id) => {
                 crate::providers::registry::ModelRegistry::get_model(model_id)

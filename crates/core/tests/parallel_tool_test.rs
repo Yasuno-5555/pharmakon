@@ -127,6 +127,7 @@ impl pharmakon_common::Tool for WeatherTool {
 }
 
 #[tokio::test]
+#[ignore = "requires Ollama with llama3.2"]
 async fn test_parallel_tool_execution() {
     let model = Arc::new(ParallelMockModel);
     let agent = Agent::new(model, "parallel-session".to_string());

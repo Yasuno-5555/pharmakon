@@ -55,7 +55,7 @@ impl AutoReplyEngine {
             }
             "/reset" => {
                 let agent = self.agent.lock().await;
-                agent.reset_history().await;
+                let _ = agent.reset_history().await;
                 Ok(AutoReplyResult::Handled("Session history has been reset.".to_string()))
             }
             "/model" => {

@@ -615,7 +615,7 @@ impl Agent {
             log::info!("[SESSION: {}] Agent iteration start ({})...", session_id, current_iteration);
             
             // ... (rest of the message preparation logic remains the same)
-            let mut messages_to_send = Vec::new();
+            let mut messages_to_send;
             {
                 let prompt_manager = self.prompt_manager.lock().await;
 
@@ -1509,18 +1509,38 @@ impl Agent {
             }
             
             // ... (rest of the response handling logic remains the same)
-            if response.content.is_none() && response.tool_calls.is_none() {
-                log::warn!(
-                    "Model returned empty response. Breaking loop to avoid hang."
-                );
-                break Ok(String::new());
-            }
-
             let raw_content = response
                 .content
                 .as_ref()
                 .map(|c| c.to_string())
                 .unwrap_or_default();
+
+            if raw_content.trim().is_empty() && response.tool_calls.is_none() {
+                log::warn!(
+                    "Model returned empty content with no tool calls. Constructing fallback execution acknowledgment."
+                );
+                
+                let last_tool_info = {
+                    let state = state_arc.lock().await;
+                    state.history.iter().rev()
+                        .find(|m| m.role == "tool")
+                        .map(|m| (m.name.clone().unwrap_or_else(|| "unknown".to_string()), m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()))
+                };
+
+                let fallback = match last_tool_info {
+                    Some((name, content)) => {
+                        let preview = if content.len() > 150 {
+                            format!("{}...", content.chars().take(150).collect::<String>())
+                        } else {
+                            content
+                        };
+                        format!("Tool '{}' execution completed. Result preview:\n\n{}\n\n(Note: The model completed its execution path but did not generate further text.)", name, preview)
+                    }
+                    None => "Tool execution completed successfully, but the model did not generate additional commentary.".to_string()
+                };
+                
+                break Ok(fallback);
+            }
             
             log::info!("[SESSION: {}] Processing final content response...", session_id);
             let mut final_content = raw_content.clone();
