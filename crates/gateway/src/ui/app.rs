@@ -301,10 +301,12 @@ impl AppData {
     pub fn send_message(&mut self) {
         let msg = self.input_text.trim().to_string();
         if msg.is_empty() { return; }
-        self.messages.push(ChatMessage { role: "user".into(), content: msg.clone(), thought: None, tool_name: None });
+        // Prepend workspace context so the agent knows which directory to operate on
+        let workspace_hint = format!("[Current workspace: {}]\n{}", self.workspace_root, msg);
+        self.messages.push(ChatMessage { role: "user".into(), content: workspace_hint.clone(), thought: None, tool_name: None });
         self.input_text.clear();
         let agent = self.agent.clone();
-        tokio::spawn(async move { let _ = agent.chat(&msg).await; });
+        tokio::spawn(async move { let _ = agent.chat(&workspace_hint).await; });
     }
 
     pub fn open_file(&mut self, path: &str) {
