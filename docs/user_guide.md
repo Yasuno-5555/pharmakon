@@ -116,8 +116,10 @@ pharmakon onboard
 
 Walks through API key setup and creates the default config.
 
-## Desktop GUI (experimental)
+## Desktop GUI (egui-based IDE)
 
 ```bash
 pharmakon gui
 ```
+
+Launches a native desktop IDE built with egui/eframe. Features include a chat panel, file browser, session graph, and real-time event stream.

@@ -31,3 +31,7 @@ rfd = "0.15"
 pharmakon-tools = { path = "../tools" }
 async-trait.workspace = true
 chrono.workspace = true
+diffy.workspace = true
+syntect.workspace = true
+gitignore.workspace = true
+

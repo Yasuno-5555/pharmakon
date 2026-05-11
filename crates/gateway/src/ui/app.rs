@@ -1,14 +1,42 @@
-// Pharmakon IDE — egui-based embedded GUI
-// Cursor-style: file tree + code viewer + agent terminal + status bar
-// Lightweight companion to the WebUI dashboard (localhost:19999)
-
 use pharmakon_core::agent::Agent;
 use pharmakon_core::automation::cron::CronManager;
 use pharmakon_core::persistence::DbSessionStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use std::path::{Path, PathBuf};
+use syntect::parsing::SyntaxSet;
+use syntect::highlighting::ThemeSet;
 
 // ─── App State ───
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileNode {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub children: Vec<FileNode>,
+    pub expanded: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DiffLine {
+    Unchanged { text: String, line_no: usize },
+    Added { text: String, line_no: usize },
+    Removed { text: String, line_no: usize },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InlineSuggestion {
+    pub ghost_text: String,
+    pub position: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerminalLine {
+    pub text: String,
+    pub is_input: bool,
+    pub timestamp: String,
+}
 
 pub struct AppData {
     pub input_text: String,
@@ -25,21 +53,36 @@ pub struct AppData {
     pub health_stats: HealthStats,
     pub active_swarms: Vec<SwarmStatus>,
     pub cron_jobs: Vec<CronJobInfoData>,
-pub graph_relations: Vec<String>,
+    pub graph_relations: Vec<String>,
     pub cognitive_timeline: Vec<TimelineEvent>,
     pub plan_dag: Vec<DagNode>,
     pub event_rx: mpsc::UnboundedReceiver<UiEvent>,
     pub agent: Arc<Agent>,
     pub db: Arc<DbSessionStore>,
     pub cron_manager: Arc<CronManager>,
-    // File tree state
-    pub file_tree: Vec<String>,
+    // File tree state (hierarchical)
+    pub file_tree_nodes: Vec<FileNode>,
     pub selected_file: Option<String>,
     pub file_content: String,
     pub workspace_root: String,
     pub last_snapshot_id: Option<String>,
     pub pending_approval: Option<(String, String, String)>,
+    
+    // Tab, Diff, Syntax and Suggestion state
+    pub open_tabs: Vec<String>,
+    pub active_tab_index: Option<usize>,
+    pub original_content: String,
+    pub diff_preview_mode: bool,
+    pub show_save_confirm_dialog: bool,
+    pub diff_lines: Vec<DiffLine>,
+    pub inline_suggestion: Option<InlineSuggestion>,
+    pub terminal_lines: Vec<TerminalLine>,
+    pub terminal_input: String,
+    pub syntax_set: SyntaxSet,
+    pub theme_set: ThemeSet,
+    pub event_tx: mpsc::UnboundedSender<UiEvent>,
 }
+
 
 #[derive(Clone, PartialEq)]
 pub struct ChatMessage {
@@ -83,22 +126,80 @@ pub enum UiEvent {
     SnapshotCreated(String),
     ApprovalRequest { id: String, tool: String, args: String },
     ApprovalResolved(String),
+    TerminalOutput { text: String, is_input: bool },
+    FileTreeLoaded(Vec<FileNode>),
+}
+
+
+fn build_tree(root: &Path, gi: Option<&gitignore::File>, depth: usize) -> Vec<FileNode> {
+    if depth > 10 { return Vec::new(); }
+    let mut nodes = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for e in entries.flatten() {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            
+            // Skip target, node_modules, .git
+            if name == ".git" || name == "target" || name == "node_modules" {
+                continue;
+            }
+            
+            if let Some(gi_file) = gi {
+                if gi_file.is_excluded(&path).unwrap_or(false) {
+                    continue;
+                }
+            }
+            
+            let is_dir = path.is_dir();
+            let mut children = Vec::new();
+            if is_dir {
+                children = build_tree(&path, gi, depth + 1);
+            }
+            
+            nodes.push(FileNode {
+                name,
+                path,
+                is_dir,
+                children,
+                expanded: false,
+            });
+        }
+    }
+    // Sort nodes: directories first, then files alphabetically
+    nodes.sort_by(|a, b| {
+        if a.is_dir != b.is_dir {
+            b.is_dir.cmp(&a.is_dir)
+        } else {
+            a.name.cmp(&b.name)
+        }
+    });
+    nodes
 }
 
 impl AppData {
     pub fn new(
         agent: Arc<Agent>, db: Arc<DbSessionStore>,
         cron_manager: Arc<CronManager>, event_rx: mpsc::UnboundedReceiver<UiEvent>,
+        event_tx: mpsc::UnboundedSender<UiEvent>,
     ) -> Self {
         let ws = std::env::current_dir().unwrap_or_default();
-        let mut file_tree = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&ws) {
-            for e in entries.flatten() {
-                let n = e.file_name().to_string_lossy().to_string();
-                let prefix = if e.path().is_dir() { "📁 " } else { "📄 " };
-                file_tree.push(format!("{}{}", prefix, n));
-            }
-        }
+        let ws_str = ws.to_string_lossy().to_string();
+        
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let theme_set = ThemeSet::load_defaults();
+        
+        // Spawn file tree building in background to avoid blocking GUI thread at startup
+        let tx = event_tx.clone();
+        let ws_clone = ws.clone();
+        tokio::spawn(async move {
+            let gitignore_path = ws_clone.join(".gitignore");
+            let gi = gitignore::File::new(&gitignore_path).ok();
+            let nodes = build_tree(&ws_clone, gi.as_ref(), 0);
+            let _ = tx.send(UiEvent::FileTreeLoaded(nodes));
+        });
+        
+        let file_tree_nodes = Vec::new(); // empty initially, loaded by background task
+
         Self {
             input_text: String::new(), messages: Vec::new(), tool_trace: Vec::new(),
             system_logs: vec!["💊 Pharmakon IDE — Ready".into()],
@@ -110,11 +211,22 @@ impl AppData {
             cron_jobs: Vec::new(), graph_relations: Vec::new(),
             cognitive_timeline: vec![TimelineEvent { timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(), event: "IDE started".into(), kind: TimelineKind::Plan }],
             plan_dag: Vec::new(),
-            event_rx, agent, db, cron_manager,
-            file_tree, selected_file: None, file_content: String::new(),
-            workspace_root: ws.to_string_lossy().to_string(),
+            event_rx, event_tx, agent, db, cron_manager,
+            file_tree_nodes, selected_file: None, file_content: String::new(),
+            workspace_root: ws_str,
             last_snapshot_id: None,
             pending_approval: None,
+            open_tabs: Vec::new(),
+            active_tab_index: None,
+            original_content: String::new(),
+            diff_preview_mode: false,
+            show_save_confirm_dialog: false,
+            diff_lines: Vec::new(),
+            inline_suggestion: None,
+            terminal_lines: Vec::new(),
+            terminal_input: String::new(),
+            syntax_set,
+            theme_set,
         }
     }
 
@@ -165,6 +277,21 @@ impl AppData {
                         self.pending_approval = None;
                     }
                 }
+                UiEvent::TerminalOutput { text, is_input } => {
+                    let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
+                    self.terminal_lines.push(TerminalLine {
+                        text,
+                        is_input,
+                        timestamp,
+                    });
+                    if self.terminal_lines.len() > 200 {
+                        self.terminal_lines.remove(0);
+                    }
+                }
+                UiEvent::FileTreeLoaded(nodes) => {
+                    self.file_tree_nodes = nodes;
+                    self.system_logs.push("📂 Workspace file tree loaded successfully".into());
+                }
             }
             if self.system_logs.len() > 200 { self.system_logs.remove(0); }
             if self.messages.len() > 50 { self.messages.remove(0); }
@@ -181,13 +308,94 @@ impl AppData {
     }
 
     pub fn open_file(&mut self, path: &str) {
-        self.selected_file = Some(path.to_string());
+        let path_str = path.to_string();
+        self.selected_file = Some(path_str.clone());
+        
+        // Add to tabs if not already open
+        if !self.open_tabs.contains(&path_str) {
+            self.open_tabs.push(path_str.clone());
+        }
+        self.active_tab_index = self.open_tabs.iter().position(|t| t == &path_str);
+        
         if let Ok(content) = std::fs::read_to_string(path) {
-            self.file_content = content;
+            self.file_content = content.clone();
+            self.original_content = content;
+        }
+        
+        self.diff_preview_mode = false;
+        self.diff_lines.clear();
+        self.inline_suggestion = None;
+    }
+
+    pub fn close_tab(&mut self, index: usize) {
+        if index < self.open_tabs.len() {
+            let _removed = self.open_tabs.remove(index);
+            if self.open_tabs.is_empty() {
+                self.selected_file = None;
+                self.file_content.clear();
+                self.original_content.clear();
+                self.active_tab_index = None;
+            } else {
+                let new_idx = if index >= self.open_tabs.len() {
+                    self.open_tabs.len() - 1
+                } else {
+                    index
+                };
+                self.active_tab_index = Some(new_idx);
+                let next_file = self.open_tabs[new_idx].clone();
+                self.open_file(&next_file);
+            }
         }
     }
 
-    
+    pub fn compute_diff(&mut self) {
+        if let Some(ref _path) = self.selected_file {
+            self.diff_lines.clear();
+            
+            let mut options = diffy::DiffOptions::new();
+            options.set_context_len(100000); // include everything in context
+            let patch = options.create_patch(&self.original_content, &self.file_content);
+            let patch_str = patch.to_string();
+            
+            let mut line_no_orig = 1;
+            let mut line_no_curr = 1;
+            
+            for line in patch_str.lines() {
+                if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+                    continue;
+                }
+                
+                if line.starts_with('+') {
+                    self.diff_lines.push(DiffLine::Added {
+                        text: line[1..].to_string(),
+                        line_no: line_no_curr,
+                    });
+                    line_no_curr += 1;
+                } else if line.starts_with('-') {
+                    self.diff_lines.push(DiffLine::Removed {
+                        text: line[1..].to_string(),
+                        line_no: line_no_orig,
+                    });
+                    line_no_orig += 1;
+                } else if line.starts_with(' ') {
+                    self.diff_lines.push(DiffLine::Unchanged {
+                        text: line[1..].to_string(),
+                        line_no: line_no_curr,
+                    });
+                    line_no_orig += 1;
+                    line_no_curr += 1;
+                } else if line.is_empty() {
+                    self.diff_lines.push(DiffLine::Unchanged {
+                        text: String::new(),
+                        line_no: line_no_curr,
+                    });
+                    line_no_orig += 1;
+                    line_no_curr += 1;
+                }
+            }
+        }
+    }
+
     pub fn rollback(&mut self) {
         if let Some(ref snap_id) = self.last_snapshot_id.clone() {
             let sid = snap_id.clone();
@@ -211,13 +419,15 @@ impl AppData {
     }
 
     pub fn refresh_file_tree(&mut self) {
-        self.file_tree.clear();
-        if let Ok(entries) = std::fs::read_dir(&self.workspace_root) {
-            for e in entries.flatten() {
-                let n = e.file_name().to_string_lossy().to_string();
-                let prefix = if e.path().is_dir() { "📁 " } else { "📄 " };
-                self.file_tree.push(format!("{}{}", prefix, n));
-            }
-        }
+        let ws_path = Path::new(&self.workspace_root).to_path_buf();
+        let tx = self.event_tx.clone();
+        self.system_logs.push("Refreshing workspace tree...".into());
+        tokio::spawn(async move {
+            let gitignore_path = ws_path.join(".gitignore");
+            let gi = gitignore::File::new(&gitignore_path).ok();
+            let nodes = build_tree(&ws_path, gi.as_ref(), 0);
+            let _ = tx.send(UiEvent::FileTreeLoaded(nodes));
+        });
     }
 }
+

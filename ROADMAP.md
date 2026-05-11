@@ -1,193 +1,316 @@
-完了済み Phase 0-8 / A1-A8 / R1-R10 / W1-W5 / P0-1 ~ P0-8, P1-1 ~ P1-9, P2-1 ~ P2-18 すべての機能を完全実装！
-ここでは**完了した機能の詳細と実績**を最終記録として管理する。
+# Pharmakon IDE — Cursor-like GUI 実装計画
+
+現在の egui IDE (`pharmakon gui`) を Cursor ライクな開発環境に昇華する。
 
 ---
 
-## 優先順位
+## 現状
 
 ```
-🔥 P0: 実用上の障害。次に触る人/自分が必ず遭遇する。 -> すべて完了！
-📌 P1: あると便利。効率・体験の向上。 -> すべて完了！
-🔧 P2: 完成度向上。余裕があれば。 -> すべて完了！
-```
-
----
-
-## 🔥 P0: 完了済み項目 (P0-1 ~ P0-8)
-
-### P0-2: PlanNode::Script の追加 [DONE (2026-05-11)]
-* **内容**: Plan AST に `PlanNode::Script` を追加。
-* **実績**: World Model の計画内で Rhai や Python などの LLM 生成コードを直接実行可能にし、従来の Rust ツール単一操作と CodeAct の柔軟性を 1 つの計画ツールチェーンで融合。
-
-### P0-3: `pharmakon --workspace` フラグ [DONE (2026-05-11)]
-* **内容**: CLI グローバルフラグ `--workspace` の実装。
-* **実績**: 起動時に自動でカレントディレクトリを切り替え、すべてのファイル・シェル・World Model 操作を安全にサンドボックス化。
-
-### P0-6: diff プレビュー [DONE (2026-05-11)]
-* **内容**: ツール実行時の承認プロンプトでの diff プレビュー表示。
-* **実績**: ファイル編集を伴うツール（`replace_file_content`, `write_file`）の実行直前に変更箇所のプレビューを行い、非対話型フラグ `-y`/`--yes` による自動承認フローも完全実装。
-
----
-
-## 📌 P1: 完了済み項目 (P1-1 ~ P1-9)
-
-### P1-1: プログレス表示 [DONE (2026-05-11)]
-* **内容**: CLI 実行中にエージェントが現在どのような状態にあるかを表示。
-* **実績**: ツール実行時に `Executing '...' with args ...` とストリーミングログをリアルタイム出力し、長時間のモデル対話でも極めて高い視認性を確保。
-
-### P1-2: ログレベルの調整 [DONE (2026-05-11)]
-* **内容**: `warn` ログや `weaver` インデクシングログの適切な抑制。
-* **実績**: 通常起動時のノイズを最小化。`--verbose` / `--quiet` フラグで出力量をきめ細かく制御可能。
-
-### P1-3: セッション管理の整備 [DONE (2026-05-11)]
-* **内容**: セッション履歴の一覧表示、論理削除、物理削除、命名、JSON エクスポート、および最初のユーザーメッセージの先頭 40 文字から自動タイトル生成。
-* **実績**: SQLite データベースの `DbSessionStore` に自動でマイグレーションカラムを追加し、セッション管理 CLI コマンド (`pharmakon sessions`) およびインラインコマンド `/model` からシームレスに利用可能。
-
-### P1-5: `pharmakon config` CLI [DONE (2026-05-11)]
-* **内容**: 設定値の表示、設定の動的な変更とセーブ、および設定ウィザード。
-* **実績**: `pharmakon config` サブコマンド群を完全実装。ユーザーは対話型ウィザード (`pharmakon config interactive`) や、特定キーの永続的書き込み (`pharmakon config set <key> <value> --save`) がいつでも実行可能。
-
-### P1-6: stdin パイプ入力対応 [DONE (2026-05-11)]
-* **内容**: パイプによる標準入力検知とメッセージ結合。
-* **実績**: `is_terminal()` による TTY 検知を介し、パイプ経由のコンテキストデータをメッセージに自動連結してエージェントに転送。
-
-### P1-7: `pharmakon status --watch` [DONE (2026-05-11)]
-* **内容**: health probes を定期表示する watch モードの実装。
-* **実績**: `pharmakon status --watch --interval <sec>` サブコマンドを実装し、リアルタイムでのシステムヘルス監視・ログ出力を実現。
-
-### P1-8: `/model --save` によるモデル永続化 [DONE (2026-05-11)]
-* **内容**: TUI/REPL での永続的モデル設定保存。
-* **実績**: `/model --save <model_id>` で設定を永続化し、次回起動時にもお気に入りモデルを自動ロードする仕組みを完了。
-
-### P1-9: Task Taxonomy（タスク分類）ベースのモデル選定・学習 [DONE (2026-05-11)]
-* **内容**: タスク説明文から自動判定するタスクタクソノミー検出。
-* **実績**: `refactor`, `bugfix`, `shell task`, `planning`, `architecture`, `retrieval`, `summarization` の 7 つにタスクを分類。SwarmEconomy の意思決定エンジンと統合し、タスクの性質に適したモデルにインセンティブ (ROI 補正) を付与して費用対効果を最大化。
-
----
-
-## 🔧 P2: 完了済み項目 (P2-1 ~ P2-18)
-
-### P2-1: embed 失敗ログの抑制 [DONE (2026-05-11)]
-* **内容**: KnowledgeNexus 初期化時の embedding エラーの gracefully disable / 警告への抑制。
-* **実績**: macOS 環境などの fastembed 初期化失敗を適切に catch し、起動エラーを起こさずにベクター検索を自動無効化して安定動作を保証。
-
-### P2-2: self-review の定期実行 [DONE (2026-05-11)]
-* **内容**: cron タスクによる週次での自己コードレビューと結果の蓄積。
-* **実績**: 統合された `CronManager` を介した定期的なセルフレビューフローを実装。
-
-### P2-3: Recursive Pharmakon（自己呼び出しAPI） [DONE (2026-05-11)]
-* **内容**: 自分自身をツールとして再帰的に呼び出す `PharmakonTaskTool` の追加。
-* **実績**: ゲートウェイ REST API（`http://localhost:19999/api/v1/agent/chat`）を呼び出し、複数タスクの階層的な並行処理を可能にするツールレジストリ統合を完了。
-
-### P2-4: 自動 Regression Test 生成＋実行 [DONE (2026-05-11)]
-* **内容**: git 変更箇所に応じた自動テストの生成・実行ループ。
-* **実績**: `pharmakon --regression` グローバルフラグを通じて、コードの変更点を検出し、自動でユニットテストを生成し、`cargo test` を回して検証する自律ループを実装。
-
-### P2-5: 知識ベースの自動クローリング [DONE (2026-05-11)]
-* **内容**: docs 更新や web 検索の自動バックグラウンドクローラーの実装。
-* **実績**: バックグラウンドでの自動クローリングにより、KnowledgeNexus へ継続的に知識を蓄積。
-
-### P2-6: リソース枯渇予測（doctor --forecast） [DONE (2026-05-11)]
-* **内容**: リソース枯渇予測シミュレーション。
-* **実績**: `pharmakon doctor --forecast` によって、SnapshotStore や EventLog、セッション数、トークン予算などの将来の枯渇時期をシミュレーション推計し出力する機能を実装。
-
-### P2-7: マルチアームドバンディット導入（モデル探索最適化） [DONE (2026-05-11)]
-* **内容**: 探索と活用の最適化。
-* **実績**: 成功確率に基づくモデルの動的優先度計算とタスク適合率補正により、最適なコストとパフォーマンスのバランス（バンディット探索）を実装。
-
-### P2-8: 統計機能の拡充（`pharmakon stats`） [DONE (2026-05-11)]
-* **内容**: Telemetry の多角的なグラフ化とダッシュボード表示。
-* **実績**: `pharmakon stats` サブコマンドを介し、後述する P2-9 ~ P2-18 の高度な分析グラフを完全に表現・実装。
-
-### P2-9: モデル切替のデッドウェイトコスト表示 [DONE (2026-05-11)]
-* **内容**: 会話履歴再処理に伴うコストの推計と警告表示。
-* **実績**: インラインモデル切り替え時に `⚠ Context re-processing cost` としてトークン数とコストを算出し、安易な往復切り替えを抑制。
-
-### P2-10: 予算アラーム + サーキットブレーカー [DONE (2026-05-11)]
-* **内容**: 週間予算設定と超過時の警告・自動 fallback。
-* **実績**: コスト監視サーキットブレーカーを完全に稼働。
-
-### P2-11: 機会費用ダッシュボード [DONE (2026-05-11)]
-* **内容**: 最速・最安・最良モデルの差分比較による機会費用可視化。
-* **実績**: `pharmakon stats --opportunity-cost` コマンドで、週次での機会費用サマリーを提示。
-
-### P2-12: トークンインフレーション指標 [DONE (2026-05-11)]
-* **内容**: 基準日（baseline）と比較したレイテンシ・成功率の変動指標化。
-* **実績**: `pharmakon stats --inflation` コマンドで、LLM モデルのトレンド変化を監視可能。
-
-### P2-13: エラー種別の内訳（パレート分析） [DONE (2026-05-11)]
-* **内容**: 発生エラー原因のパレートサマリー。
-* **実績**: `pharmakon stats --errors` によって、429 や ToolNotFound などのエラー傾向の順位と削減期待値をパレート出力。
-
-### P2-14: リトライ回数分布（リトライ税） [DONE (2026-05-11)]
-* **内容**: 同一ツールの連続失敗から発生する余分なトークン消費（税）の特定。
-* **実績**: `pharmakon stats --retries` によって、成功分布とワーストツールを抽出。
-
-### P2-15: フォールバック連鎖の統計 [DONE (2026-05-11)]
-* **内容**: 一次モデルが失敗した際のフォールバック発生頻度の推移。
-* **実績**: `pharmakon stats --fallback` によって、連鎖成功率とモデル切替傾向を分析表示。
-
-### P2-16: コンテキストウィンドウ使用率 [DONE (2026-05-11)]
-* **内容**: モデル上限と実際の平均使用トークン比率の可視化。
-* **実績**: `pharmakon stats --context` によって、ウィンドウ制約ボトルネックの発生率を特定。
-
-### P2-17: 情報密度（トークンあたりの意味比率） [DONE (2026-05-11)]
-* **内容**: 挨拶や不要プレアンブル（filler）によるトークン浪費率。
-* **実績**: `pharmakon stats --density` によって、削減可能領域を数値化して提示。
-
-### P2-18: 統計フィードバックループ（stats --feedback） [DONE (2026-05-11)]
-* **内容**: 統計情報に基づき、システム設定やプロンプト指示を自動調整するクローズドループ。
-* **実績**: `pharmakon stats --feedback --apply` を介し、自動でモデル選定優先度のフィードバック適用・プロンプトへの教訓注入を行う自律的改善サイクルを完成。
-
----
-
-## 優先順位マップ（全ロードマップ完了！）
-
-```
-今週やるべき & 繰り上げ & 余裕があれば項目:
-  P0-2  PlanNode::Script                 [DONE (2026-05-11)]
-  P0-3  --workspace フラグ               [DONE (2026-05-11)]
-  P0-6  diff プレビュー                  [DONE (2026-05-11)]
-  P1-1  プログレス表示                   [DONE (2026-05-11)]
-  P1-2  ログレベル調整                   [DONE (2026-05-11)]
-  P1-3  セッション管理                   [DONE (2026-05-11)]
-  P1-5  pharmakon config CLI             [DONE (2026-05-11)]
-  P1-6  stdin パイプ入力                 [DONE (2026-05-11)]
-  P1-7  status --watch                   [DONE (2026-05-11)]
-  P1-8  /model --save                    [DONE (2026-05-11)]
-  P1-9  Task Taxonomy経済モデル          [DONE (2026-05-11)]
-  P2-1  embed エラー抑制                 [DONE (2026-05-11)]
-  P2-2  self-review cron                 [DONE (2026-05-11)]
-  P2-3  Recursive Pharmakon              [DONE (2026-05-11)]
-  P2-4  Regression Test生成              [DONE (2026-05-11)]
-  P2-5  知識ベース自動クロール           [DONE (2026-05-11)]
-  P2-6  doctor --forecast                [DONE (2026-05-11)]
-  P2-7  マルチアームドバンディット       [DONE (2026-05-11)]
-  P2-8  統計機能拡充                     [DONE (2026-05-11)]
-  P2-9  デッドウェイトコスト表示         [DONE (2026-05-11)]
-  P2-10 予算アラーム+CB                  [DONE (2026-05-11)]
-  P2-11 機会費用ダッシュボード           [DONE (2026-05-11)]
-  P2-12 トークンインフレーション指標     [DONE (2026-05-11)]
-  P2-13 エラー種別パレート               [DONE (2026-05-11)]
-  P2-14 リトライ税                       [DONE (2026-05-11)]
-  P2-15 フォールバック連鎖統計           [DONE (2026-05-11)]
-  P2-16 コンテキスト利用率               [DONE (2026-05-11)]
-  P2-17 情報密度                         [DONE (2026-05-11)]
-  P2-18 統計フィードバックループ         [DONE (2026-05-11)]
+レイアウト:     Cursor風（左ファイルツリー + 中央エディタ + 右チャット）
+エディタ:      egui TextEdit (code_editor) — シンタックスハイライトなし
+ファイルツリー: フラットリスト、📁絵文字のみ、ネスト非対応
+チャットパネル: メッセージ履歴のみ、インラインコード表示なし
+差分:          なし
 ```
 
 ---
 
-## ファイル別影響範囲と実績
+## Phase 1: コードエディタの強化（3h）
 
-| ファイル | 内容 | 実績 |
+### 1-a: シンタックスハイライト (`syntect`)
+
+```bash
+cargo add syntect -p pharmakon-gateway
+```
+
+```rust
+use syntect::parsing::SyntaxSet;
+use syntect::highlighting::ThemeSet;
+use syntect::html::highlighted_html_for_string;
+
+struct HighlightedEditor {
+    syntax_set: SyntaxSet,
+    theme_set: ThemeSet,
+    // ファイル拡張子 → SyntaxReference のキャッシュ
+    syntax_cache: HashMap<String, SyntaxReference>,
+}
+```
+
+- `SyntaxSet::load_defaults_newlines()` で全言語対応
+- ファイル保存時に拡張子からシンタックスを自動選択
+- egui の `custom_painter` でハイライト描画（文字色だけ変える）
+
+### 1-b: 行番号表示
+
+```rust
+// 各行の左側に行番号を描画
+ui.horizontal(|ui| {
+    // 行番号カラム（右寄せ、グレー）
+    ui.add_sized([40.0, editor_height], |ui: &mut egui::Ui| {
+        for i in 1..=line_count {
+            ui.label(format!("{:>4}", i));
+        }
+    });
+    // コード本文
+    ui.add_sized([code_width, editor_height], egui::TextEdit::multiline(&mut content));
+});
+```
+
+### 1-c: ファイル種別アイコン + タブバー
+
+```
+📘 main.rs          📗 types.rs          📙 Cargo.toml     [+]
+```
+- 開いているファイルをタブで管理
+- 拡張子ごとにアイコン変更（rs→🦀, toml→📋, md→📝）
+- タブクリックで切り替え、✕ で閉じる
+
+---
+
+## Phase 2: ファイルツリーの階層化（2h）
+
+### 現在の問題
+
+```rust
+// app.rs: フラットリスト
+if let Ok(entries) = std::fs::read_dir(&ws) {
+    for e in entries.flatten() {
+        let prefix = if e.path().is_dir() { "📁 " } else { "📄 " };
+        file_tree.push(format!("{}{}", prefix, n));
+    }
+}
+```
+
+### 2-a: ツリーデータ構造
+
+```rust
+struct FileNode {
+    name: String,
+    path: PathBuf,
+    is_dir: bool,
+    children: Vec<FileNode>,
+    expanded: bool,  // 開閉状態
+}
+
+fn build_tree(root: &Path, depth: usize) -> Vec<FileNode> {
+    // .gitignore パターンを無視
+    // target/ node_modules/ をスキップ
+    // 深さ10まで再帰
+}
+```
+
+### 2-b: .gitignore 対応
+
+`gitignore` クレートで `.gitignore` パターンをパースし、無視ファイルをツリーから除外。
+
+```rust
+use gitignore::File as GitIgnore;
+
+let gi = GitIgnore::new(&workspace_root.join(".gitignore")).ok();
+// ...
+if let Some(ref gi) = gi && gi.is_ignored(&path) { continue; }
+```
+
+### 2-c: 開閉アニメーション
+
+```rust
+egui::collapsing_header::CollapsingState::load(...)
+    .show_header(|ui| { ui.label("📁 src"); })
+    .body(|ui| { /* 子ノード */ });
+```
+
+---
+
+## Phase 3: 差分プレビュー（2h）
+
+### 3-a: ファイル編集時の変更検出
+
+```rust
+struct FileEditorState {
+    original_content: String,
+    current_content: String,
+    path: PathBuf,
+}
+
+impl FileEditorState {
+    fn has_changes(&self) -> bool { self.original_content != self.current_content }
+    fn diff(&self) -> Vec<DiffLine> { /* diffy::create_patch */ }
+}
+```
+
+### 3-b: インライン差分表示
+
+```rust
+enum DiffLine {
+    Unchanged { text: String, line_no: usize },
+    Added { text: String, line_no: usize },    // 緑背景
+    Removed { text: String, line_no: usize },  // 赤背景
+}
+```
+
+エディタ内で差分行を色分け表示。`original_content` と比較して変更行を自動検出。
+
+### 3-c: 保存確認ダイアログ
+
+```rust
+if editor.has_changes() && ui.button("Save 💾").clicked() {
+    // 確認ダイアログ
+    // "4 lines changed. Are you sure? [Save] [Cancel] [Diff]"
+}
+```
+
+---
+
+## Phase 4: チャットパネルの強化（1.5h）
+
+### 現状の問題
+
+```
+- コードブロックが整形されずに生テキスト表示
+- ファイルツリーと連携なし
+- メッセージが多くなると重い
+```
+
+### 4-a: コードブロックの視覚的改善
+
+```rust
+// チャットメッセージ内の ```code``` を検出して枠付き表示
+struct ChatMessage {
+    role: String,
+    segments: Vec<MessageSegment>,
+}
+
+enum MessageSegment {
+    Text(String),
+    CodeBlock { language: String, code: String },
+}
+```
+
+### 4-b: Apply-to-editor ボタン
+
+```rust
+// コードブロックに "Apply to Editor" ボタンを表示
+if ui.button("△ Apply to Editor").clicked() && self.data.selected_file.is_some() {
+    // コードブロックの内容をエディタの現在位置に挿入
+    self.data.file_content = code.clone();
+}
+```
+
+### 4-c: メッセージの仮想スクロール
+
+現在は全メッセージを毎フレーム描画。100件超えると重くなる。`egui::ScrollArea` で表示範囲だけ描画するよう最適化（egui は自動でやるので大きな問題ではないが確認）。
+
+---
+
+## Phase 5: AI インライン候補（3h）
+
+### 5-a: インラインゴーストテキスト
+
+Cursor のような「次に書きそうなコード」のグレー表示。
+
+```rust
+struct InlineSuggestion {
+    ghost_text: String,
+    position: usize,  // カーソル位置
+}
+
+// エディタのカーソル位置にゴーストテキストを描画
+if let Some(suggestion) = &self.inline_suggestion {
+    let painter = ui.painter();
+    painter.text(ghost_pos, egui::Align::LEFT, &suggestion.ghost_text,
+        egui::TextStyle::Monospace.resolve(ui.style()), egui::Color32::from_gray(100));
+}
+```
+
+### 5-b: Tab で確定
+
+```rust
+if ui.input(|i| i.key_pressed(egui::Key::Tab)) && self.inline_suggestion.is_some() {
+    // ゴーストテキストを実際のコードに挿入
+    self.data.file_content.insert_str(cursor_pos, &suggestion.ghost_text);
+    self.inline_suggestion = None;
+}
+```
+
+### 発火条件
+
+- ユーザーの編集中に 500ms のデバウンス
+- 変更範囲を含む関数全体を LLM に送信
+- LLM が「次に来るコード」を予測
+- 結果をゴースト表示
+
+---
+
+## Phase 6: ターミナルパネル（4h）
+
+### 現状の問題
+
+```
+- ツール実行ログが単なるテキスト表示
+- 実際のターミナルではない（疑似すらない）
+- スクロールのみ、コマンド入力不可
+```
+
+### 6-a: Shell ツールの出力を専用ターミナルバッファに表示
+
+```rust
+struct TerminalBuffer {
+    lines: VecDeque<TerminalLine>,
+    max_lines: usize,
+}
+
+struct TerminalLine {
+    text: String,
+    is_input: bool,  // $ command か stdout か
+    timestamp: String,
+}
+```
+
+### 6-b: 埋め込みターミナル（コマンド入力可能）
+
+egui のテキスト入力を利用して簡易ターミナルを実装。`shell` ツールにコマンドを送信し、結果を表示する。
+
+```rust
+// ターミナルパネル内でコマンド入力
+ui.text_edit_singleline(&mut self.terminal_input);
+if ui.button("Run") || enter_pressed {
+    let agent = self.agent.clone();
+    let cmd = self.terminal_input.clone();
+    tokio::spawn(async move {
+        let result = agent.chat(&format!("Run shell command: {}", cmd)).await;
+        // 結果を terminal_lines に追加
+    });
+    self.terminal_input.clear();
+}
+```
+
+---
+
+## 優先順位マップ
+
+```
+今週やるべき（効果が大きい）:
+  Phase 1-a  シンタックスハイライト     (1.5h)
+  Phase 2    ファイルツリー階層化       (2h)
+  Phase 3    差分プレビュー             (2h)
+
+来週やるべき:
+  Phase 1-b  行番号 + タブ             (1.5h)
+  Phase 4    チャット強化 + Apply      (1.5h)
+  Phase 5    AI インライン候補          (3h)  ← 工数に対して効果未知
+
+余裕があれば:
+  Phase 6    ターミナルパネル           (4h)
+```
+
+---
+
+## ファイル別影響範囲
+
+| ファイル | 内容 | 工数 |
 |---|---|---|
-| `world.rs` | P0-2 ScriptNode | Plan AST 統合完了 |
-| `agent.rs` | P0-3 workspace + P1-8 /model save | ディレクトリ操作、モデル永続化統合 |
-| `cli/src/main.rs` | ほぼ全 CLI 項目 | サブコマンド、リアルタイム Telemetry 画面の完全実装 |
-| `cli/src/tui.rs` | P0-6 diff preview + /model | TUI インラインコマンド、コスト予測、差分表示 |
-| `persistence.rs` | P1-3 sessions テーブル CRUD | スキーマ自動マイグレーション、命名、論理/物理削除、JSON エクスポート |
-| `tools/src/` | P2-3 PharmakonTaskTool | 階層的な自己呼び出しツール (Recursive Pharmakon) |
-| `weaver.rs` | P2-1 embed 抑制 + P2-5 自動クロール | embedding 初期化エラー回避、自動クローリング |
-| `model_router.rs` | P2-7 バンディット + P2-9 切替コスト | 成功率重み付け、切替デッドウェイト補正 |
-| `orchestration/economy_v2.rs` | P2-10 予算アラーム | サーキットブレーカー、予算超過自動フォールバック |
+| `gateway/src/ui/app.rs` | エディタ状態管理、DiffLine, FileNode, InlineSuggestion 追加 | — |
+| `gateway/src/ui/mod.rs` | 描画ロジック全面改修 | — |
+| `Cargo.toml` (root) | `syntect`, `gitignore` 依存追加 | — |
+| `gateway/Cargo.toml` | 同上 | — |

@@ -32,9 +32,11 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     use pharmakon_tools::orchestration::EphemeralRedTeamTool;
     use pharmakon_tools::media::ImageGenTool;
     use pharmakon_tools::NativeGuiEmulatorTool;
+    use pharmakon_tools::tool_discovery::DiscoverToolsTool;
 
 
     // --- Core System Tools ---
+    agent.add_tool(Arc::new(DiscoverToolsTool::default())).await;
     agent.add_tool(Arc::new(LoadToolsTool {
         active_categories: agent.active_categories.clone(),
     })).await;

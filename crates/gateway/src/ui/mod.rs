@@ -2,12 +2,13 @@ pub mod app;
 pub mod tray;
 pub mod widgets;
 
-pub use app::{AppData, UiEvent};
+pub use app::{AppData, UiEvent, FileNode, DiffLine, TerminalLine};
 use pharmakon_core::agent::Agent;
 use pharmakon_core::automation::cron::CronManager;
 use pharmakon_core::persistence::DbSessionStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use std::path::{Path, PathBuf};
 
 /// Bridge agent broadcast events to the UI mpsc channel.
 fn spawn_event_bridge(agent: Arc<Agent>, tx: mpsc::UnboundedSender<UiEvent>) {
@@ -106,9 +107,9 @@ pub fn run_app(
     cron_manager: Arc<CronManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = mpsc::unbounded_channel();
-    spawn_event_bridge(agent.clone(), tx);
+    spawn_event_bridge(agent.clone(), tx.clone());
 
-    let app_data = AppData::new(agent, db, cron_manager, rx);
+    let app_data = AppData::new(agent, db, cron_manager, rx, tx.clone());
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -120,8 +121,152 @@ pub fn run_app(
     eframe::run_native(
         "Pharmakon IDE",
         options,
-        Box::new(move |_cc| Ok(Box::new(PharmakonIde::new(app_data)))),
+        Box::new(move |_cc| Ok(Box::new(PharmakonIde::new(app_data, tx)))),
     ).map_err(|e| e.into())
+}
+
+#[derive(Debug, Clone)]
+enum MessageSegment {
+    Text(String),
+    CodeBlock { language: String, code: String },
+}
+
+fn parse_message(content: &str) -> Vec<MessageSegment> {
+    let mut segments = Vec::new();
+    let mut current_text = String::new();
+    let mut in_code_block = false;
+    let mut current_lang = String::new();
+    let mut current_code = String::new();
+    
+    for line in content.lines() {
+        if line.trim().starts_with("```") {
+            if in_code_block {
+                segments.push(MessageSegment::CodeBlock {
+                    language: current_lang.clone(),
+                    code: current_code.clone(),
+                });
+                current_code.clear();
+                current_lang.clear();
+                in_code_block = false;
+            } else {
+                if !current_text.is_empty() {
+                    segments.push(MessageSegment::Text(current_text.clone()));
+                    current_text.clear();
+                }
+                current_lang = line.trim().trim_start_matches("```").to_string();
+                in_code_block = true;
+            }
+        } else if in_code_block {
+            current_code.push_str(line);
+            current_code.push('\n');
+        } else {
+            current_text.push_str(line);
+            current_text.push('\n');
+        }
+    }
+    
+    if in_code_block {
+        segments.push(MessageSegment::CodeBlock {
+            language: current_lang,
+            code: current_code,
+        });
+    } else if !current_text.is_empty() {
+        segments.push(MessageSegment::Text(current_text));
+    }
+    
+    segments
+}
+
+fn syntax_highlight(
+    _ctx: &egui::Context,
+    syntax_set: &syntect::parsing::SyntaxSet,
+    theme_set: &syntect::highlighting::ThemeSet,
+    text: &str,
+    extension: &str,
+    inline_suggestion: Option<&str>,
+) -> egui::text::LayoutJob {
+    use syntect::easy::HighlightLines;
+    use egui::text::LayoutJob;
+    use egui::TextFormat;
+    
+    let syntax = syntax_set
+        .find_syntax_by_extension(extension)
+        .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
+        
+    let theme = &theme_set.themes["base16-ocean.dark"];
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    
+    let mut job = LayoutJob::default();
+    
+    for line in text.split_inclusive('\n') {
+        let regions = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
+        for (style, r_text) in regions {
+            let color = egui::Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+            job.append(
+                r_text,
+                0.0,
+                TextFormat {
+                    font_id: egui::FontId::monospace(12.0),
+                    color,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+    
+    if let Some(ghost) = inline_suggestion {
+        job.append(
+            ghost,
+            0.0,
+            TextFormat {
+                font_id: egui::FontId::monospace(12.0),
+                color: egui::Color32::from_gray(100),
+                italics: true,
+                ..Default::default()
+            },
+        );
+    }
+    
+    job
+}
+
+fn draw_file_tree(ui: &mut egui::Ui, nodes: &mut [FileNode], selected_file: Option<&str>) -> Option<String> {
+    let mut clicked_file = None;
+    for node in nodes {
+        if node.is_dir {
+            let icon = if node.expanded { "📂 " } else { "📁 " };
+            let label = format!("{}{}", icon, node.name);
+            
+            let id = ui.make_persistent_id(&node.path);
+            let header = egui::CollapsingHeader::new(label)
+                .id_source(id)
+                .default_open(false);
+                
+            let res = header.show(ui, |ui| {
+                if let Some(f) = draw_file_tree(ui, &mut node.children, selected_file) {
+                    clicked_file = Some(f);
+                }
+            });
+            
+            if res.header_response.clicked() {
+                node.expanded = !node.expanded;
+            }
+        } else {
+            let ext = node.path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let icon = match ext {
+                "rs" => "🦀 ",
+                "toml" => "📋 ",
+                "md" => "📝 ",
+                _ => "📄 ",
+            };
+            let label = format!("{}{}", icon, node.name);
+            let is_selected = selected_file == Some(node.path.to_str().unwrap_or(""));
+            if ui.selectable_label(is_selected, label).clicked() {
+                clicked_file = Some(node.path.to_str().unwrap_or("").to_string());
+            }
+        }
+    }
+    clicked_file
 }
 
 /// Main egui application.
@@ -130,21 +275,24 @@ struct PharmakonIde {
     folder_input: String,
     bottom_tab: BottomTab,
     is_console_open: bool,
+    event_tx: mpsc::UnboundedSender<UiEvent>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum BottomTab { Tools, Logs, Graph, Swarms }
+enum BottomTab { Tools, Logs, Graph, Swarms, Terminal }
 
 impl PharmakonIde {
-    fn new(data: AppData) -> Self {
+    fn new(data: AppData, event_tx: mpsc::UnboundedSender<UiEvent>) -> Self {
         Self {
             data,
             folder_input: String::new(),
             bottom_tab: BottomTab::Tools,
             is_console_open: true,
+            event_tx,
         }
     }
 }
+
 
 impl eframe::App for PharmakonIde {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -208,17 +356,11 @@ impl eframe::App for PharmakonIde {
                 self.data.refresh_file_tree();
             }
             ui.separator();
+            
+            // Recursive hierarchical file tree
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for file in self.data.file_tree.clone() {
-                    let is_dir = file.starts_with("📁");
-                    let path: String = file.chars().skip(2).collect(); let path = path.trim().to_string();
-                    if ui.selectable_label(
-                        self.data.selected_file.as_deref() == Some(&path),
-                        &file,
-                    ).clicked() && !is_dir {
-                        let full = format!("{}/{}", self.data.workspace_root, path);
-                        self.data.open_file(&full);
-                    }
+                if let Some(clicked_p) = draw_file_tree(ui, &mut self.data.file_tree_nodes, self.data.selected_file.as_deref()) {
+                    self.data.open_file(&clicked_p);
                 }
             });
         });
@@ -265,7 +407,36 @@ impl eframe::App for PharmakonIde {
                             if let Some(thought) = &msg.thought {
                                 ui.colored_label(egui::Color32::from_rgb(139, 92, 246), format!("  🧠 thought: {}", thought));
                             }
-                            ui.label(&msg.content);
+                            
+                            // Parse and render segments (including code blocks with copy/apply buttons)
+                            let segments = parse_message(&msg.content);
+                            for segment in segments {
+                                match segment {
+                                    MessageSegment::Text(text) => {
+                                        ui.label(text);
+                                    }
+                                    MessageSegment::CodeBlock { language, code } => {
+                                        ui.group(|ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.colored_label(egui::Color32::from_rgb(139, 92, 246), format!("💻 {}", language));
+                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                    if ui.button("△ Apply to Editor").clicked() {
+                                                        self.data.file_content = code.clone();
+                                                        self.data.system_logs.push("Applied code block to editor".into());
+                                                    }
+                                                });
+                                            });
+                                            ui.separator();
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(&code)
+                                                    .font(egui::FontId::monospace(11.0))
+                                                    .color(egui::Color32::from_rgb(220, 220, 220))
+                                            ));
+                                        });
+                                    }
+                                }
+                            }
+
                             if let Some(tool) = &msg.tool_name {
                                 ui.label(format!("  ⚡ {}", tool));
                             }
@@ -295,6 +466,7 @@ impl eframe::App for PharmakonIde {
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Logs, "📋 Logs");
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Graph, "🗄 Graph relations");
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Swarms, "⚙ Swarms list");
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Terminal, "📟 Terminal");
                 });
                 ui.separator();
                 
@@ -341,26 +513,154 @@ impl eframe::App for PharmakonIde {
                             }
                         });
                     }
+                    BottomTab::Terminal => {
+                        ui.vertical(|ui| {
+                            let available_height = ui.available_height() - 40.0;
+                            egui::ScrollArea::vertical().stick_to_bottom(true).max_height(available_height).show(ui, |ui| {
+                                for line in &self.data.terminal_lines {
+                                    let color = if line.is_input {
+                                        egui::Color32::from_rgb(139, 92, 246) // Input purple
+                                    } else {
+                                        egui::Color32::from_rgb(220, 220, 220) // Output white
+                                    };
+                                    let prefix = if line.is_input { "$ " } else { "" };
+                                    ui.horizontal(|ui| {
+                                        ui.colored_label(egui::Color32::from_gray(120), format!("[{}]", line.timestamp));
+                                        ui.colored_label(color, format!("{}{}", prefix, line.text));
+                                    });
+                                }
+                                if self.data.terminal_lines.is_empty() {
+                                    ui.colored_label(egui::Color32::GRAY, "Embedded Terminal Ready. Type command and hit Enter.");
+                                }
+                            });
+                            
+                            ui.separator();
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("$");
+                                let resp = ui.add_sized(
+                                    [ui.available_width() - 80.0, 25.0],
+                                    egui::TextEdit::singleline(&mut self.data.terminal_input)
+                                        .hint_text("cargo build / git status / echo hello...")
+                                );
+                                
+                                let enter_pressed = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                if ui.button("Run").clicked() || enter_pressed {
+                                    let cmd = self.data.terminal_input.trim().to_string();
+                                    if !cmd.is_empty() {
+                                        let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
+                                        
+                                        // Self-insert prompt input locally immediately
+                                        let _ = self.event_tx.send(UiEvent::TerminalOutput {
+                                            text: cmd.clone(),
+                                            is_input: true,
+                                        });
+                                        
+                                        let tx = self.event_tx.clone();
+                                        tokio::spawn(async move {
+                                            let output = if cfg!(target_os = "windows") {
+                                                std::process::Command::new("cmd")
+                                                    .args(&["/C", &cmd])
+                                                    .output()
+                                            } else {
+                                                std::process::Command::new("sh")
+                                                    .args(&["-c", &cmd])
+                                                    .output()
+                                            };
+                                            
+                                            match output {
+                                                Ok(out) => {
+                                                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                    if !stdout.is_empty() {
+                                                        let _ = tx.send(UiEvent::TerminalOutput {
+                                                            text: stdout,
+                                                            is_input: false,
+                                                        });
+                                                    }
+                                                    if !stderr.is_empty() {
+                                                        let _ = tx.send(UiEvent::TerminalOutput {
+                                                            text: stderr,
+                                                            is_input: false,
+                                                        });
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    let _ = tx.send(UiEvent::TerminalOutput {
+                                                        text: format!("Execution Error: {}", e),
+                                                        is_input: false,
+                                                    });
+                                                }
+                                            }
+                                        });
+                                        self.data.terminal_input.clear();
+                                    }
+                                }
+                            });
+                        });
+                    }
                 }
             });
         }
 
-        // 5. Central Panel: Integrated Multi-line Code Editor (main panel)
+        // 5. Central Panel: Integrated Multi-line Code Editor with file tabs, line numbers, highlighting and diffing
         egui::CentralPanel::default().show(ctx, |ui| {
+            // Render tabs at the top of Central Panel
+            if !self.data.open_tabs.is_empty() {
+                ui.horizontal(|ui| {
+                    for (idx, path) in self.data.open_tabs.clone().iter().enumerate() {
+                        let filename = std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(path);
+                        let ext = std::path::Path::new(path)
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("");
+                        let icon = match ext {
+                            "rs" => "🦀 ",
+                            "toml" => "📋 ",
+                            "md" => "📝 ",
+                            _ => "📄 ",
+                        };
+                        
+                        let label = format!("{}{}", icon, filename);
+                        let is_active = self.data.active_tab_index == Some(idx);
+                        
+                        let tab_btn = ui.selectable_label(is_active, label);
+                        if tab_btn.clicked() {
+                            self.data.open_file(path);
+                        }
+                        if ui.button("✕").clicked() {
+                            self.data.close_tab(idx);
+                        }
+                        ui.separator();
+                    }
+                });
+                ui.separator();
+            }
+
             let selected_file_path = self.data.selected_file.clone();
             if let Some(path) = selected_file_path {
                 ui.horizontal(|ui| {
                     ui.heading(format!("📄 {}", path));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("💾 Save changes").clicked() {
-                            if let Err(e) = std::fs::write(&path, &self.data.file_content) {
-                                self.data.system_logs.push(format!("ERR: Failed to save {}: {}", path, e));
+                            if self.data.original_content != self.data.file_content {
+                                self.data.show_save_confirm_dialog = true;
                             } else {
-                                self.data.system_logs.push(format!("SUCCESS: Saved changes to {}", path));
+                                self.data.system_logs.push("No changes to save".into());
                             }
                         }
                         if ui.button("⏪ Rollback code").clicked() {
                             self.data.rollback();
+                        }
+                        let diff_btn_text = if self.data.diff_preview_mode { "👁️ Edit Mode" } else { "🔍 Preview Diff" };
+                        if ui.button(diff_btn_text).clicked() {
+                            self.data.diff_preview_mode = !self.data.diff_preview_mode;
+                            if self.data.diff_preview_mode {
+                                self.data.compute_diff();
+                            }
                         }
                     });
                 });
@@ -371,9 +671,131 @@ impl eframe::App for PharmakonIde {
                 
                 ui.group(|ui| {
                     ui.set_height(editor_height);
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        ui.add_sized(ui.available_size(), egui::TextEdit::multiline(&mut self.data.file_content).font(egui::TextStyle::Monospace).code_editor());
-                    });
+                    
+                    if self.data.diff_preview_mode {
+                        // Render Diff View
+                        egui::ScrollArea::both().show(ui, |ui| {
+                            for diff_line in &self.data.diff_lines {
+                                match diff_line {
+                                    DiffLine::Unchanged { text, line_no } => {
+                                        ui.horizontal(|ui| {
+                                            ui.add_sized([35.0, 18.0], egui::Label::new(
+                                                egui::RichText::new(format!("{:>3}", line_no))
+                                                    .color(egui::Color32::from_gray(100))
+                                                    .font(egui::FontId::monospace(12.0))
+                                            ));
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(text)
+                                                    .font(egui::FontId::monospace(12.0))
+                                                    .color(egui::Color32::from_rgb(220, 220, 220))
+                                            ));
+                                        });
+                                    }
+                                    DiffLine::Added { text, line_no } => {
+                                        ui.horizontal(|ui| {
+                                            ui.add_sized([35.0, 18.0], egui::Label::new(
+                                                egui::RichText::new(format!("{:>3}", line_no))
+                                                    .color(egui::Color32::from_rgb(16, 185, 129))
+                                                    .font(egui::FontId::monospace(12.0))
+                                            ));
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(format!("+ {}", text))
+                                                    .font(egui::FontId::monospace(12.0))
+                                                    .color(egui::Color32::from_rgb(52, 211, 153))
+                                            ));
+                                        });
+                                    }
+                                    DiffLine::Removed { text, line_no } => {
+                                        ui.horizontal(|ui| {
+                                            ui.add_sized([35.0, 18.0], egui::Label::new(
+                                                egui::RichText::new(format!("{:>3}", line_no))
+                                                    .color(egui::Color32::from_rgb(239, 68, 68))
+                                                    .font(egui::FontId::monospace(12.0))
+                                            ));
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(format!("- {}", text))
+                                                    .font(egui::FontId::monospace(12.0))
+                                                    .color(egui::Color32::from_rgb(248, 113, 113))
+                                            ));
+                                        });
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        // Render Code Editor with Line Numbers and Syntax Highlighting
+                        let ext = std::path::Path::new(&path)
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("");
+                        
+                        let syntax_set = &self.data.syntax_set;
+                        let theme_set = &self.data.theme_set;
+                        
+                        // Suggest brace completion ghost text as prototype suggestion
+                        if self.data.inline_suggestion.is_none() && self.data.file_content.trim_end().ends_with('{') {
+                            self.data.inline_suggestion = Some(app::InlineSuggestion {
+                                ghost_text: "\n    // Suggestion: implement reflection triggers\n}".into(),
+                                position: self.data.file_content.len(),
+                            });
+                        }
+                        
+                        let suggestion_text = self.data.inline_suggestion.as_ref().map(|s| s.ghost_text.clone());
+                        let suggestion_text_ref = suggestion_text.as_deref();
+                        
+                        let mut layouter = |ui: &egui::Ui, string: &str, _wrap_width: f32| {
+                            let job = syntax_highlight(ui.ctx(), syntax_set, theme_set, string, ext, suggestion_text_ref);
+                            ui.fonts(|f| f.layout_job(job))
+                        };
+                        
+                        let total_lines = self.data.file_content.lines().count().max(1);
+                        let mut apply_autocomplete = false;
+                        let mut suggestion_to_apply = String::new();
+                        
+                        egui::ScrollArea::both().show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                // Draw Line Numbers
+                                ui.vertical(|ui| {
+                                    ui.set_width(35.0);
+                                    for i in 1..=total_lines {
+                                        ui.add_sized([35.0, 16.0], egui::Label::new(
+                                            egui::RichText::new(format!("{:>3}", i))
+                                                .color(egui::Color32::from_gray(100))
+                                                .font(egui::FontId::monospace(12.0))
+                                        ));
+                                    }
+                                });
+                                
+                                // Draw Editor
+                                ui.vertical(|ui| {
+                                    let resp = ui.add_sized(
+                                        ui.available_size(),
+                                        egui::TextEdit::multiline(&mut self.data.file_content)
+                                            .font(egui::FontId::monospace(12.0))
+                                            .code_editor()
+                                            .desired_width(f32::INFINITY)
+                                            .desired_rows(total_lines)
+                                            .layouter(&mut layouter)
+                                    );
+                                    
+                                    // Handle autocomplete selection with TAB
+                                    if resp.has_focus() && suggestion_text.is_some() {
+                                        if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                                            apply_autocomplete = true;
+                                            if let Some(ref sugg) = suggestion_text {
+                                                suggestion_to_apply = sugg.clone();
+                                            }
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                        
+                        if apply_autocomplete {
+                            self.data.inline_suggestion = None;
+                            self.data.file_content.push_str(&suggestion_to_apply);
+                        }
+                    }
                 });
 
                 ui.separator();
@@ -464,6 +886,38 @@ impl eframe::App for PharmakonIde {
             }
         });
 
+        // Safe Confirmation Save Dialog Window Popup
+        if self.data.show_save_confirm_dialog {
+            let mut open = true;
+            let current_path = self.data.selected_file.clone().unwrap_or_default();
+            egui::Window::new("💾 Confirm Saving Changes?")
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label("Are you sure you want to save changes to this file?");
+                    ui.colored_label(egui::Color32::YELLOW, format!("Path: {}", current_path));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Save ✅").clicked() {
+                            if let Err(e) = std::fs::write(&current_path, &self.data.file_content) {
+                                self.data.system_logs.push(format!("ERR: Failed to save: {}", e));
+                            } else {
+                                self.data.system_logs.push(format!("SUCCESS: Saved changes to {}", current_path));
+                                self.data.original_content = self.data.file_content.clone();
+                            }
+                            self.data.show_save_confirm_dialog = false;
+                        }
+                        if ui.button("Cancel ❌").clicked() {
+                            self.data.show_save_confirm_dialog = false;
+                        }
+                    });
+                });
+            if !open {
+                self.data.show_save_confirm_dialog = false;
+            }
+        }
+
         // Bottom status info
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -477,3 +931,4 @@ impl eframe::App for PharmakonIde {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
+

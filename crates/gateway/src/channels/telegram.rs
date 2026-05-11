@@ -200,6 +200,10 @@ impl Channel for TelegramChannel {
                                     "coder"
                                 };
                                 worker_agent.set_soul(pharmakon_core::soul::Soul::expert(soul_role)).await;
+                                // Ensure worker has all tools registered (the fresh Agent::new() has none)
+                                if let Err(e) = pharmakon_core::tool_init::init_all_agent_tools(&worker_agent).await {
+                                    log::error!("Failed to init worker agent tools: {}", e);
+                                }
 
                                 tokio::spawn(async move {
                                     match worker_agent.chat(&text_owned).await {
@@ -212,9 +216,16 @@ impl Channel for TelegramChannel {
                                             }
                                         }
                                         Err(e) => {
+                                            let err_msg = e.to_string();
+                                            // Provide helpful fallback instead of cryptic error
+                                            let friendly = if err_msg.contains("LoopDetected") || err_msg.contains("HangDetected") {
+                                                format!("⚠️ ワーカーがループを検出して停止しました。\n原因: ツールの呼び出しに失敗した可能性があります。\n\nもう一度試すか、より具体的な手順を指定してください。\n\n技術的詳細: {}", err_msg.chars().take(200).collect::<String>())
+                                            } else {
+                                                format!("⚠️ エラーが発生しました:\n{}", err_msg.chars().take(300).collect::<String>())
+                                            };
                                             let _ = b.send_message(
                                                 cid,
-                                                format!("⚠️ **Worker Agent Failed (Session: {})**\n\n💀 {}", worker_session_id, e)
+                                                format!("⚠️ **Worker Agent Failed (Session: {})**\n\n{}", worker_session_id, friendly)
                                             ).await;
                                         }
                                     }
