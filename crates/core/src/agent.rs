@@ -538,7 +538,11 @@ impl Agent {
             
             // --- Entropy Check (Loop Detection) ---
             let entropy = self.event_log.recent_tool_entropy(10).await;
-            self.economy.lock().unwrap().update_inflation(current_iteration as u64 * 400, 4000);
+            {
+                let mut econ = self.economy.lock().unwrap();
+                econ.sample_system_telemetry();
+                econ.update_inflation(current_iteration as u64 * 400, 4000);
+            }
             if entropy > 0.8 {
                 log::warn!("[SESSION: {}] High entropy detected ({:.2}). Possible loop.", session_id, entropy);
                 self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {

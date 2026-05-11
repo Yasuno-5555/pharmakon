@@ -364,6 +364,11 @@ fn walk_dir(dir: &Path) -> Result<Vec<PathBuf>> {
             if name.starts_with('.') || name == "target" || name == "node_modules" {
                 continue;
             }
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_symlink() {
+                    continue;
+                }
+            }
             if path.is_dir() {
                 paths.extend(walk_dir(&path)?);
             } else if path.is_file() {

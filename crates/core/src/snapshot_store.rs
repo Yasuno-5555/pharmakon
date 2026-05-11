@@ -387,6 +387,11 @@ impl SnapshotStore {
             let path = entry.path();
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
+            if let Ok(file_type) = entry.file_type().await {
+                if file_type.is_symlink() {
+                    continue;
+                }
+            }
             if path.is_dir() {
                 if skip_dirs.contains(&name_str.as_ref()) {
                     continue;

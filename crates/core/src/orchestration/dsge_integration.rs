@@ -5,6 +5,7 @@
 //!   [3] Shadow price → economy.shadow_directive()            (line ~641)
 //!   [4] Latency → economy.observe_latency()                  (line ~765)
 //!   [5] Model routing → economy.select_model()               (line ~687)
+extern crate sysinfo;
 
 use crate::orchestration::cognitive_economics::{
     CognitiveBudget, CognitiveMacroState, KnowledgeCapital,
@@ -13,6 +14,7 @@ use crate::orchestration::cognitive_economics::{
 };
 use crate::model::AgentModel;
 use std::collections::HashMap;
+use sysinfo::System;
 use std::sync::Arc;
 
 /// Real-time model performance tracking per provider+model.
@@ -139,6 +141,8 @@ pub struct AgentEconomy {
     pub observations: Vec<CallObservation>,
     /// Accumulated trajectory telemetry for the current task.
     pub current_telemetry: Option<TrajectoryTelemetry>,
+    /// System telemetrist for active environment awareness.
+    pub sys: Arc<std::sync::Mutex<System>>,
 }
 
 impl AgentEconomy {
@@ -155,6 +159,29 @@ impl AgentEconomy {
             regime: RegimeSwitcher::new(),
             observations: Vec::with_capacity(64),
             current_telemetry: None,
+            sys: Arc::new(std::sync::Mutex::new(System::new_all())),
+        }
+    }
+
+    /// Sample the host OS CPU usage and memory stats to update our cognitive macro state.
+    pub fn sample_system_telemetry(&mut self) {
+        if let Ok(mut sys) = self.sys.lock() {
+            sys.refresh_cpu_all();
+            sys.refresh_memory();
+            let cpu_usage = sys.global_cpu_usage() as f64;
+            let free_mem = sys.free_memory() / 1024 / 1024; // B to MB
+            let total_mem = sys.total_memory() / 1024 / 1024; // B to MB
+
+            self.macro_state.system_cpu_usage = cpu_usage;
+            self.macro_state.system_memory_free_mb = free_mem;
+            self.macro_state.system_memory_total_mb = total_mem;
+
+            // Immediately let system health condition dictate macro economy status
+            let api_unavailable = self.budget.llm_gated;
+            let rate_limit_prob = self.model_perf.rate_limit_prob(
+                &self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
+            );
+            self.macro_state.detect_crisis(rate_limit_prob, api_unavailable);
         }
     }
 
@@ -185,16 +212,42 @@ impl AgentEconomy {
     pub fn shadow_directive(&self) -> String {
         let rem = self.budget.remaining();
         let liq = self.macro_state.model_liquidity;
-        if liq < 0.3 {
-            return "// ⚡ High API latency. NO deep reasoning. Use cached skills.\n".into();
-        }
-        if liq < 0.6 {
+        let mut base_directive = if liq < 0.3 {
+            "// ⚡ High API latency. NO deep reasoning. Use cached skills.\n".to_string()
+        } else if liq < 0.6 {
             let base = if rem > 2000 { String::new() }
                 else if rem > 500 { format!("\n// ⚠ {} tokens left. Be concise.\n", rem) }
                 else { format!("\n// 🚨 {} tokens left. MAX concise.\n", rem) };
-            return format!("// 🌊 Moderate latency. Prefer cached.{}", base);
+            format!("// 🌊 Moderate latency. Prefer cached.{}", base)
+        } else {
+            self.budget.shadow_directive()
+        };
+
+        // Inject active environment host system awareness directives
+        let cpu = self.macro_state.system_cpu_usage;
+        let free_mem = self.macro_state.system_memory_free_mb;
+        let total_mem = self.macro_state.system_memory_total_mb;
+
+        if cpu > 85.0 {
+            base_directive.push_str(&format!(
+                "\n// 🚨 HOST SYSTEM WARNING: CPU usage is critically high ({:.1}%). System load is high. Avoid spawning parallel processes, speculative execution, or heavy filesystem search loops. Terminate loops immediately.\n",
+                cpu
+            ));
+        } else if cpu > 60.0 {
+            base_directive.push_str(&format!(
+                "\n// ⚠ HOST SYSTEM NOTICE: CPU load is elevated ({:.1}%). Optimize command pipelines and avoid heavy background execution.\n",
+                cpu
+            ));
         }
-        self.budget.shadow_directive()
+
+        if free_mem < 512 && total_mem > 1024 {
+            base_directive.push_str(&format!(
+                "\n// 🚨 HOST SYSTEM WARNING: Free physical memory is critically low ({} MB). Restrict memory-intensive compilation, caching, or database interactions.\n",
+                free_mem
+            ));
+        }
+
+        base_directive
     }
 
     /// Model selection: Manual mode returns user-chosen model, Auto mode

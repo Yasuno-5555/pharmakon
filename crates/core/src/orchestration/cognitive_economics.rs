@@ -424,6 +424,12 @@ pub struct CognitiveMacroState {
     pub active_cognitive_debt: f64,
     pub productivity_index: f64,
     pub crisis_mode: bool,
+    /// Host OS CPU usage percentage (0.0 to 100.0)
+    pub system_cpu_usage: f64,
+    /// Host OS free memory in MB
+    pub system_memory_free_mb: u64,
+    /// Host OS total memory in MB
+    pub system_memory_total_mb: u64,
 }
 
 impl CognitiveMacroState {
@@ -434,6 +440,9 @@ impl CognitiveMacroState {
             hallucination_rate: 0.05, memory_capital_stock: 0.0,
             memory_depreciation_rate: 0.02, active_cognitive_debt: 0.0,
             productivity_index: 1.0, crisis_mode: false,
+            system_cpu_usage: 0.0,
+            system_memory_free_mb: 4096,
+            system_memory_total_mb: 8192,
         }
     }
 
@@ -464,12 +473,16 @@ impl CognitiveMacroState {
         (base_rate + entropy_pressure + inflation_pressure).clamp(0.1, 5.0)
     }
 
-    /// Crisis regime detection: API outage, rate limit, extreme inflation
+    /// Crisis regime detection: API outage, rate limit, extreme inflation, or host OS resource exhaustion
     pub fn detect_crisis(&mut self, rate_limit_prob: f64, api_unavailable: bool) {
+        // Trigger crisis_mode if host CPU is saturated (> 85%) or free memory is critically low (< 512 MB)
+        let system_saturated = self.system_cpu_usage > 85.0 || (self.system_memory_free_mb < 512 && self.system_memory_total_mb > 1024);
+
         self.crisis_mode = api_unavailable
             || rate_limit_prob > 0.7
             || self.context_inflation > 2.0
-            || self.active_cognitive_debt > 2.0;
+            || self.active_cognitive_debt > 2.0
+            || system_saturated;
         if self.crisis_mode { self.model_liquidity *= 0.5; }
     }
 

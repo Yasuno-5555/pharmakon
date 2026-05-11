@@ -205,19 +205,34 @@ impl Tool for ShellTool {
             return Ok(format!("[DRY RUN] Simulation of shell command: {}", command));
         }
 
-        let output = std::process::Command::new("sh")
+        let timeout_duration = std::time::Duration::from_secs(60);
+
+        let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(command)
-            .output()
-            .map_err(|e| AgentError(format!("Shell execution failed: {}", e)))?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| AgentError(format!("Failed to spawn shell: {}", e)))?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let result = tokio::time::timeout(timeout_duration, child.wait_with_output()).await;
 
-        if output.status.success() {
-            Ok(stdout)
-        } else {
-            Ok(format!("Error: {}\nStdout: {}", stderr, stdout))
+        match result {
+            Ok(Ok(output)) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                if output.status.success() {
+                    Ok(stdout)
+                } else {
+                    Ok(format!("Error: {}\nStdout: {}", stderr, stdout))
+                }
+            }
+            Ok(Err(e)) => Err(AgentError(format!("Shell execution failed: {}", e))),
+            Err(_) => {
+                Err(AgentError(format!("Shell command timed out after 60 seconds (prevented infinite hang)")))
+            }
         }
     }
 }
