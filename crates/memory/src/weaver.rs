@@ -135,7 +135,7 @@ impl KnowledgeNexus {
                                 v
                             }
                             Err(e) => {
-                                log::error!("Failed to generate embedding for {}: {}. Marking as FAILED.", job.id, e);
+                                log::warn!("Failed to generate embedding for {}: {}. Marking as FAILED.", job.id, e);
                                 let _ = graph_clone.update_embedding_status(&job.id, "FAILED", None).await;
                                 continue;
                             }

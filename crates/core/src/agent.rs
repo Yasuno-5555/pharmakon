@@ -191,6 +191,14 @@ impl Agent {
 
         let mut active_categories = std::collections::HashSet::new();
         active_categories.insert(ToolCategory::Core);
+        active_categories.insert(ToolCategory::FileSystem);
+        active_categories.insert(ToolCategory::System);
+        active_categories.insert(ToolCategory::Coding);
+        active_categories.insert(ToolCategory::Network);
+        active_categories.insert(ToolCategory::Media);
+        active_categories.insert(ToolCategory::Autonomous);
+        active_categories.insert(ToolCategory::Orchestration);
+        active_categories.insert(ToolCategory::Custom("generic".to_string()));
         let active_categories = Arc::new(Mutex::new(active_categories));
 
         let mut hooks = crate::hooks::HookRegistry::new();
