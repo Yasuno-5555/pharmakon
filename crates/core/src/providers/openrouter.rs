@@ -114,7 +114,16 @@ fn map_content(content: &MessageContent) -> serde_json::Value {
 }
 
 fn build_or_messages(request: &CompletionRequest) -> Vec<ORMessage> {
-    request
+    let mut msgs = Vec::new();
+    if let Some(ref sys) = request.system_instruction {
+        msgs.push(ORMessage {
+            role: "system".to_string(),
+            content: Some(serde_json::json!(sys)),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+    msgs.extend(request
         .messages
         .iter()
         .map(|m| ORMessage {
@@ -134,8 +143,18 @@ fn build_or_messages(request: &CompletionRequest) -> Vec<ORMessage> {
                     .collect()
             }),
             tool_call_id: m.tool_call_id.clone(),
-        })
-        .collect()
+        }));
+    msgs
+}
+
+fn map_openrouter_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_lowercase().as_str() {
+        "stop" => pharmakon_common::FinishReason::Stop,
+        "length" => pharmakon_common::FinishReason::MaxTokens,
+        "tool_calls" | "function_call" => pharmakon_common::FinishReason::ToolCalls,
+        "content_filter" => pharmakon_common::FinishReason::SafetyFilter,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
 }
 
 // ── implementation ─────────────────────────────────────────────────────────────
@@ -185,6 +204,14 @@ impl OpenRouterModel {
 impl AgentModel for OpenRouterModel {
     fn name(&self) -> &str {
         &self.model_id
+    }
+
+    fn context_window(&self) -> usize {
+        128000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
     }
 
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
@@ -256,7 +283,7 @@ impl AgentModel for OpenRouterModel {
                 total_tokens: u.total_tokens,
                 thoughts_tokens: None,
             }),
-            finish_reason: choice.finish_reason.clone(),
+            finish_reason: map_openrouter_finish_reason(choice.finish_reason.as_deref()),
         })
     }
 

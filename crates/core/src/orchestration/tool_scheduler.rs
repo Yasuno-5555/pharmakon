@@ -6,7 +6,7 @@
 //! hosts an asynchronous Virtual File System & Indexing Daemon (VFS / Living Graph)
 //! for instant project topology queries.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, Duration};
@@ -153,19 +153,20 @@ impl ToolPolicyEngine {
 
     pub fn enforce(&self, tool: &str, args: &Value) -> Result<()> {
         let now = Instant::now();
-        
-        // Cooldown check
+
+        // Cooldown check — key by tool:path to avoid independent operations blocking each other
         if let Some(policy) = self.policies.get(tool) {
             let mut last_exec = self.last_executed.lock().unwrap();
-            if let Some(last) = last_exec.get(tool)
+            let key = format!("{}:{}", tool, args.get("path").and_then(|p| p.as_str()).unwrap_or("*"));
+            if let Some(last) = last_exec.get(&key)
                 && now.duration_since(*last) < policy.cooldown {
                     let wait_needed = policy.cooldown - now.duration_since(*last);
                     return Err(anyhow!(
-                        "Tool '{}' is on cooldown. Please wait {:.1}s or consolidate calls.",
+                        "Tool '{}' for this path is on cooldown. Please wait {:.1}s or consolidate calls.",
                         tool, wait_needed.as_secs_f32()
                     ));
                 }
-            last_exec.insert(tool.to_string(), now);
+            last_exec.insert(key, now);
 
             // Require reason check
             if policy.require_reason {
@@ -289,7 +290,8 @@ pub struct FileMetadata {
 pub struct DirectoryIndexingDaemon {
     pub workspace_root: PathBuf,
     pub index: Arc<Mutex<HashMap<PathBuf, FileMetadata>>>,
-    pub is_building: Arc<Mutex<bool>>,
+    pub is_building: Arc<AtomicBool>,
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 impl DirectoryIndexingDaemon {
@@ -297,7 +299,8 @@ impl DirectoryIndexingDaemon {
         let daemon = Self {
             workspace_root,
             index: Arc::new(Mutex::new(HashMap::new())),
-            is_building: Arc::new(Mutex::new(false)),
+            is_building: Arc::new(AtomicBool::new(false)),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
         };
         // Non-blocking background initialization
         daemon.rebuild_async();
@@ -305,34 +308,50 @@ impl DirectoryIndexingDaemon {
     }
 
     pub fn rebuild_async(&self) {
+        // Cancel any previous rebuild in progress
+        self.cancel_flag.store(true, Ordering::SeqCst);
+
         let is_building = self.is_building.clone();
+        let cancel_flag = self.cancel_flag.clone();
         let index = self.index.clone();
         let root = self.workspace_root.clone();
 
-        tokio::spawn(async move {
-            {
-                let mut building = is_building.lock().unwrap();
-                if *building { return; }
-                *building = true;
+        // Use spawn_blocking for synchronous I/O to avoid blocking tokio threads
+        tokio::task::spawn_blocking(move || {
+            if is_building.swap(true, Ordering::SeqCst) {
+                log::debug!("IndexingDaemon: rebuild already in progress, skipping");
+                return;
             }
+            // Reset cancel flag for the new build
+            cancel_flag.store(false, Ordering::SeqCst);
 
-            log::info!("⚡ Living Graph Indexing Daemon: Rebuilding index for {}...", root.display());
+            log::info!("IndexingDaemon: Rebuilding index for {}...", root.display());
             let mut local_index = HashMap::new();
-            
+
             if let Ok(entries) = walk_dir(&root) {
                 for path in entries {
+                    // Check cancellation at each file
+                    if cancel_flag.load(Ordering::SeqCst) {
+                        log::info!("IndexingDaemon: rebuild cancelled");
+                        is_building.store(false, Ordering::SeqCst);
+                        return;
+                    }
                     if let Ok(meta) = extract_metadata(&path) {
                         local_index.insert(path.strip_prefix(&root).unwrap_or(&path).to_path_buf(), meta);
                     }
                 }
             }
 
-            let mut index_lock = index.lock().unwrap();
-            *index_lock = local_index;
-            
-            let mut building = is_building.lock().unwrap();
-            *building = false;
-            log::info!("🏁 Living Graph Indexing Daemon: Successfully indexed {} files", index_lock.len());
+            {
+                let mut index_lock = index.lock().unwrap();
+                *index_lock = local_index;
+            }
+
+            is_building.store(false, Ordering::SeqCst);
+            log::info!("IndexingDaemon: indexed {} files", {
+                let l = index.lock().unwrap();
+                l.len()
+            });
         });
     }
 
@@ -440,28 +459,41 @@ pub enum RedirectTarget {
 pub struct CodeActGate;
 
 impl CodeActGate {
+    /// Extract the base command and args from a shell command string.
+    /// Handles `ls -la src/`, `cat -n file.rs`, `grep -r pattern .` etc.
+    fn parse_shell_command(cmd: &str) -> Option<(&str, Vec<&str>)> {
+        let trimmed = cmd.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        // Simple space-based split: first token is the command, rest are args
+        let mut parts = trimmed.split_whitespace();
+        let command = parts.next()?;
+        let args: Vec<&str> = parts.collect();
+        Some((command, args))
+    }
+
     pub fn should_redirect(tool: &str, args: &Value) -> Option<RedirectTarget> {
         if tool == "shell" {
             let cmd = args.get("command").and_then(|s| s.as_str()).unwrap_or("").trim();
-            
-            // Match simple ls or find command
-            if cmd.starts_with("ls ") || cmd == "ls" {
-                let path = cmd.strip_prefix("ls ").unwrap_or(".").trim().to_string();
-                return Some(RedirectTarget::ListDir { path: if path.is_empty() { ".".to_string() } else { path } });
-            }
-            if cmd.starts_with("find ") {
-                let path = cmd.strip_prefix("find ").unwrap_or(".").trim().to_string();
-                return Some(RedirectTarget::ListDir { path });
-            }
-            // Match simple cat command
-            if cmd.starts_with("cat ") {
-                let path = cmd.strip_prefix("cat ").unwrap_or("").trim().to_string();
-                return Some(RedirectTarget::ReadFile { path });
-            }
-            // Match simple grep command
-            if cmd.starts_with("grep ") {
-                let query = cmd.strip_prefix("grep ").unwrap_or("").trim().to_string();
-                return Some(RedirectTarget::GrepFiles { query, path: ".".to_string() });
+            let (base_cmd, cmd_args) = Self::parse_shell_command(cmd)?;
+
+            match base_cmd {
+                "ls" | "find" | "eza" | "exa" => {
+                    // Extract first non-flag argument as the path
+                    let path = cmd_args.iter().find(|a| !a.starts_with('-')).unwrap_or(&".").to_string();
+                    Some(RedirectTarget::ListDir { path })
+                }
+                "cat" | "head" | "tail" | "less" | "more" | "nl" => {
+                    let path = cmd_args.iter().find(|a| !a.starts_with('-')).unwrap_or(&"").to_string();
+                    if path.is_empty() { None } else { Some(RedirectTarget::ReadFile { path }) }
+                }
+                "grep" | "rg" | "ripgrep" | "ag" | "ack" => {
+                    // Find the first non-flag argument as the pattern
+                    let query = cmd_args.iter().find(|a| !a.starts_with('-')).unwrap_or(&"").to_string();
+                    if query.is_empty() { None } else { Some(RedirectTarget::GrepFiles { query, path: ".".to_string() }) }
+                }
+                _ => None,
             }
         } else if tool == "codeact" {
             let script = args.get("script").and_then(|s| s.as_str()).unwrap_or("").trim();
@@ -471,12 +503,14 @@ impl CodeActGate {
                && script.lines().count() <= 2 {
                 return Some(RedirectTarget::ListDir { path: ".".to_string() });
             }
-            if (script.contains("read_file") || script.contains("std::fs::read_to_string")) 
+            if (script.contains("read_file") || script.contains("std::fs::read_to_string"))
                && script.lines().count() <= 2 {
                 return Some(RedirectTarget::ReadFile { path: ".".to_string() });
             }
+            None
+        } else {
+            None
         }
-        None
     }
 }
 

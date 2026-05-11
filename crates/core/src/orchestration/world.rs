@@ -650,6 +650,7 @@ pub async fn generate_candidate_plans(
             max_tokens: Some(1536), // reduced from 3072 — plans don't need that many tokens
             tools: Some(vec![tool_def.clone()]),
             complexity: None,
+            system_instruction: None,
         };
 
         match model.complete(request).await {
@@ -968,14 +969,38 @@ pub fn execute_node<'a>(
                     return Ok(combined);
                 }
 
-                // Real concurrent parallel execution using tokio::spawn multithreading!
+                // Safe Fallback: If there are too many nodes (> 16), execute them serially to prevent scheduler overload.
+                if nodes.len() > 16 {
+                    log::info!("Too many parallel nodes ({}). Safely falling back to serial execution to prevent thread pool exhaustion.", nodes.len());
+                    let mut combined = String::new();
+                    for child in nodes {
+                        let out = execute_node(agent, child, workspace_root, snapshotted_files).await?;
+                        combined.push_str(&out);
+                        combined.push('\n');
+                    }
+                    return Ok(combined);
+                }
+
+                // Real concurrent parallel execution with Semaphore limiting max concurrency to 4
+                use std::sync::Arc;
+                use tokio::sync::Semaphore;
+                let semaphore = Arc::new(Semaphore::new(4));
                 let mut handles = Vec::new();
+
                 for child in nodes {
                     let agent_cloned = agent.clone();
                     let child_cloned = child.clone();
                     let workspace_cloned = workspace_root.to_path_buf();
+                    let sem_cloned = semaphore.clone();
                     
                     let handle = tokio::spawn(async move {
+                        let _permit = match sem_cloned.acquire().await {
+                            Ok(p) => Some(p),
+                            Err(e) => {
+                                log::warn!("Semaphore acquire failed: {}, executing without concurrency restriction", e);
+                                None
+                            }
+                        };
                         let mut local_snapshots = Vec::new();
                         let res = execute_node(&agent_cloned, &child_cloned, &workspace_cloned, &mut local_snapshots).await;
                         (res, local_snapshots)
@@ -1035,7 +1060,8 @@ pub fn execute_node<'a>(
             PlanNode::Verify { node, assertion_script } => {
                 let out = execute_node(agent, node, workspace_root, snapshotted_files).await?;
                 if assertion_script == "cargo_success" {
-                    if run_cargo_check(workspace_root).await {
+                    let changed_paths: Vec<PathBuf> = snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
+                    if run_cargo_check_optimized(workspace_root, &changed_paths).await {
                         Ok(out)
                     } else {
                         Err(anyhow!("Verification failed: cargo check broke"))
@@ -1208,7 +1234,8 @@ pub async fn execute_world_model(
             log::info!("WorldModel V2: executing compiled plan '{}' on real workspace", plan.id);
             let exec_result = execute_node(agent, &ast, &workspace_root, &mut snapshotted_files).await;
 
-            let cargo_ok = run_cargo_check(&workspace_root).await;
+            let changed_paths: Vec<PathBuf> = snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
+            let cargo_ok = run_cargo_check_optimized(&workspace_root, &changed_paths).await;
 
             if exec_result.is_ok() && cargo_ok {
                 log::info!("WorldModel V2: Plan '{}' executed successfully", plan.id);
@@ -1274,13 +1301,157 @@ pub async fn execute_world_model(
 // ═══════════════════════════════════════════════════════
 
 async fn run_cargo_check(dir: &Path) -> bool {
-    tokio::process::Command::new("cargo")
-        .arg("check")
-        .current_dir(dir)
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    run_cargo_check_optimized(dir, &[]).await
+}
+
+async fn run_cargo_check_optimized(dir: &Path, changed_files: &[PathBuf]) -> bool {
+    // 1. キャッシュウォーム（初回実行時に自動でバックグラウンド実行してコンパイルキャッシュを温める）
+    lazy_static::lazy_static! {
+        static ref WARM_UP_ONCE: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::new();
+    }
+    let dir_cloned = dir.to_path_buf();
+    let _ = WARM_UP_ONCE.get_or_init(|| async {
+        tokio::spawn(async move {
+            log::info!("⚡ Cache Warmup: Running initial cargo check in background...");
+            let mut cmd = tokio::process::Command::new("cargo");
+            cmd.arg("check").current_dir(&dir_cloned);
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await;
+            log::info!("⚡ Cache Warmup: Initial cargo check background warmup completed.");
+        });
+        ()
+    }).await;
+
+    // 2. 結果キャッシュチェック（5分以内の同一状態での再チェックをスキップ）
+    use std::sync::Mutex as StdMutex;
+    use std::time::{Instant, Duration};
+    use std::collections::HashMap;
+
+    struct CheckCache {
+        last_global_success: Option<Instant>,
+        crate_success: HashMap<String, Instant>,
+    }
+
+    lazy_static::lazy_static! {
+        static ref CHECK_CACHE: StdMutex<CheckCache> = StdMutex::new(CheckCache {
+            last_global_success: None,
+            crate_success: HashMap::new(),
+        });
+    }
+
+    // 変更ファイルがない（または同一状態の）場合は、グローバルキャッシュが5分以内ならスキップ
+    if changed_files.is_empty() {
+        let cache = CHECK_CACHE.lock().unwrap();
+        if let Some(last) = cache.last_global_success {
+            if last.elapsed() < Duration::from_secs(300) {
+                log::info!("⚡ Cargo Check Skip: Global check skipped due to active cache (< 5 min).");
+                return true;
+            }
+        }
+    }
+
+    // 3. 変更があった crate を特定して、差分 `cargo check -p <crate>` を組み立て
+    let mut target_crates = std::collections::HashSet::new();
+    for path in changed_files {
+        if let Some(crate_name) = find_crate_name(path) {
+            target_crates.insert(crate_name);
+        }
+    }
+
+    // 変更されたすべての crate がそれぞれ5分以内にチェック成功しているならスキップ
+    if !target_crates.is_empty() {
+        let cache = CHECK_CACHE.lock().unwrap();
+        let mut all_cached = true;
+        for krate in &target_crates {
+            if let Some(last) = cache.crate_success.get(krate) {
+                if last.elapsed() >= Duration::from_secs(300) {
+                    all_cached = false;
+                    break;
+                }
+            } else {
+                all_cached = false;
+                break;
+            }
+        }
+        if all_cached {
+            log::info!("⚡ Cargo Check Skip: Targeted check for {:?} skipped due to active cache (< 5 min).", target_crates);
+            return true;
+        }
+    }
+
+    // 4. `cargo check` コマンドのビルド
+    let mut cmd = tokio::process::Command::new("cargo");
+    cmd.arg("check");
+    cmd.current_dir(dir);
+
+    if !target_crates.is_empty() {
+        for krate in &target_crates {
+            cmd.arg("-p").arg(krate);
+        }
+        log::info!("⚡ Cargo Check Optimized: Running targeted check for crates: {:?}", target_crates);
+    } else {
+        log::info!("⚡ Cargo Check: Running full workspace cargo check...");
+    }
+
+    // 5. タイムアウト（30秒）を設定して実行
+    let check_future = cmd.output();
+    let success = match tokio::time::timeout(Duration::from_secs(30), check_future).await {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                // キャッシュ更新
+                let mut cache = CHECK_CACHE.lock().unwrap();
+                let now = Instant::now();
+                if target_crates.is_empty() {
+                    cache.last_global_success = Some(now);
+                } else {
+                    for krate in target_crates {
+                        cache.crate_success.insert(krate, now);
+                    }
+                }
+                true
+            } else {
+                log::warn!("cargo check failed: {}", String::from_utf8_lossy(&output.stderr));
+                false
+            }
+        }
+        Ok(Err(e)) => {
+            log::warn!("cargo check execution failed: {}", e);
+            false
+        }
+        Err(_) => {
+            log::warn!("cargo check timed out after 30 seconds");
+            false
+        }
+    };
+
+    success
+}
+
+fn find_crate_name(file_path: &Path) -> Option<String> {
+    let mut current = file_path.parent();
+    while let Some(dir) = current {
+        let cargo_toml = dir.join("Cargo.toml");
+        if cargo_toml.exists() {
+            if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+                let mut in_package = false;
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed == "[package]" {
+                        in_package = true;
+                    } else if trimmed.starts_with('[') {
+                        in_package = false;
+                    }
+                    if in_package && trimmed.starts_with("name") {
+                        if let Some(val) = trimmed.split('=').nth(1) {
+                            let name = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                            return Some(name);
+                        }
+                    }
+                }
+            }
+        }
+        current = dir.parent();
+    }
+    None
 }
 
 fn resolve_path(root: &Path, path: &str) -> PathBuf {

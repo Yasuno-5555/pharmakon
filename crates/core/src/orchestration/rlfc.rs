@@ -114,12 +114,8 @@ impl Tool for RlfcTool {
                     path, code, last_error
                 );
 
+                let system_prompt = "You are an expert Rust engineer specializing in Clippy fixes.";
                 let messages = vec![
-                    Message {
-                        role: "system".to_string(),
-                        content: Some(MessageContent::Text("You are an expert Rust engineer specializing in Clippy fixes.".to_string())),
-                        ..Default::default()
-                    },
                     Message {
                         role: "user".to_string(),
                         content: Some(MessageContent::Text(prompt)),
@@ -138,6 +134,7 @@ impl Tool for RlfcTool {
                     max_tokens: Some(2048),
                     tools: None,
                     complexity: None,
+                    system_instruction: Some(system_prompt.to_string()),
                 };
 
                 let response = model.complete(req).await.map_err(|e| AgentError(e.to_string()))?;

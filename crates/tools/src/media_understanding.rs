@@ -79,6 +79,7 @@ impl Tool for MediaUnderstandingTool {
             max_tokens: Some(500),
             tools: None,
             complexity: None,
+            system_instruction: None,
         };
 
         log::info!(

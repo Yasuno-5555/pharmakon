@@ -9,6 +9,7 @@ use lancedb::query::{ExecutableQuery, QueryBase};
 use lancedb::{Connection, connect};
 use pharmakon_common::{AgentError, AgentResult, EmbeddingModel};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 pub struct LocalEmbeddingModel {
     model: TextEmbedding,
@@ -35,11 +36,18 @@ impl EmbeddingModel for LocalEmbeddingModel {
 
 use tokio::sync::Mutex;
 
+pub struct EmbeddingJob {
+    pub id: String,
+    pub text: String,
+}
+
 pub struct KnowledgeNexus {
     embedding_model: Arc<LocalEmbeddingModel>,
     conn: Arc<Mutex<Connection>>,
     table_name: String,
     pub graph: Arc<crate::graph::GraphStore>,
+    // Asynchronous embedding queue sender
+    pub tx: tokio::sync::mpsc::Sender<EmbeddingJob>,
     // Isolated delta buffers
     local_nodes: Arc<Mutex<Vec<crate::graph::Node>>>,
     local_edges: Arc<Mutex<Vec<crate::graph::Edge>>>,
@@ -83,11 +91,125 @@ impl KnowledgeNexus {
                 .await?;
         }
 
+        // Initialize high-performance, bounded non-blocking embedding queue with backpressure control
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<EmbeddingJob>(1000);
+
+        let conn_clone = conn.clone();
+        let embedding_model_clone = embedding_model.clone();
+        let graph_clone = graph.clone();
+        let table_name_clone = table_name.clone();
+
+        tokio::spawn(async move {
+            log::info!("🚀 KnowledgeNexus: Embedding Queue Worker Started.");
+            let mut deduplication_cache: HashMap<String, Vec<f32>> = HashMap::new();
+
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Utf8, false),
+                Field::new("text", DataType::Utf8, false),
+                Field::new("decay_score", DataType::Float32, false),
+                Field::new("access_count", DataType::UInt32, false),
+                Field::new("node_type", DataType::Utf8, false),
+                Field::new(
+                    "vector",
+                    DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 384),
+                    false,
+                ),
+            ]));
+
+            while let Some(job) = rx.recv().await {
+                let node_info = match graph_clone.get_node(&job.id).await {
+                    Ok(Some(n)) => n,
+                    _ => continue, // Skip if node is missing in SQLite (e.g. race condition/delete)
+                };
+
+                // Check text-level deduplication cache to completely bypass expensive neural inference
+                let vector = match deduplication_cache.get(&job.text) {
+                    Some(v) => {
+                        log::debug!("⚡ EmbeddingQueue Deduplication Hit: Avoided neural inference for node: {}", job.id);
+                        v.clone()
+                    }
+                    None => {
+                        match embedding_model_clone.generate_embedding(&job.text).await {
+                            Ok(v) => {
+                                deduplication_cache.insert(job.text.clone(), v.clone());
+                                v
+                            }
+                            Err(e) => {
+                                log::error!("Failed to generate embedding for {}: {}. Marking as FAILED.", job.id, e);
+                                let _ = graph_clone.update_embedding_status(&job.id, "FAILED", None).await;
+                                continue;
+                            }
+                        }
+                    }
+                };
+
+                let id_array = StringArray::from(vec![job.id.clone()]);
+                let text_array = StringArray::from(vec![job.text.clone()]);
+                let decay_array = Float32Array::from(vec![1.0]);
+                let access_array = UInt32Array::from(vec![node_info.access_count]);
+                let node_type_array = StringArray::from(vec![node_info.node_type]);
+                let vector_data = Float32Array::from(vector);
+                
+                let vector_array = match FixedSizeListArray::try_new(
+                    Arc::new(Field::new("item", DataType::Float32, true)),
+                    384,
+                    Arc::new(vector_data),
+                    None,
+                ) {
+                    Ok(arr) => arr,
+                    Err(e) => {
+                        log::error!("Failed to construct FixedSizeListArray for {}: {}", job.id, e);
+                        continue;
+                    }
+                };
+
+                let batch = match RecordBatch::try_new(
+                    schema.clone(),
+                    vec![
+                        Arc::new(id_array) as ArrayRef,
+                        Arc::new(text_array) as ArrayRef,
+                        Arc::new(decay_array) as ArrayRef,
+                        Arc::new(access_array) as ArrayRef,
+                        Arc::new(node_type_array) as ArrayRef,
+                        Arc::new(vector_array) as ArrayRef,
+                    ],
+                ) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        log::error!("Failed to build RecordBatch for {}: {}", job.id, e);
+                        continue;
+                    }
+                };
+
+                let table_opt = {
+                    let lock = conn_clone.lock().await;
+                    lock.open_table(&table_name_clone).execute().await
+                };
+
+                let table = match table_opt {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::error!("Failed to open table for embedding write of node {}: {}", job.id, e);
+                        continue;
+                    }
+                };
+
+                if let Err(e) = table.add(vec![batch]).execute().await {
+                    log::error!("Failed to insert batch into LanceDB for node {}: {}", job.id, e);
+                    continue;
+                }
+
+                // sqlite status complete
+                let _ = graph_clone.update_embedding_status(&job.id, "COMPLETED", Some(&job.id)).await;
+            }
+        });
+
         Ok(Self {
             embedding_model,
             conn,
             table_name,
             graph,
+            tx,
             local_nodes: Arc::new(Mutex::new(Vec::new())),
             local_edges: Arc::new(Mutex::new(Vec::new())),
             base_node_ids: Arc::new(Vec::new()),
@@ -102,6 +224,7 @@ impl KnowledgeNexus {
             conn: self.conn.clone(),
             table_name: self.table_name.clone(),
             graph: self.graph.clone(),
+            tx: self.tx.clone(),
             local_nodes: Arc::new(Mutex::new(Vec::new())),
             local_edges: Arc::new(Mutex::new(Vec::new())),
             base_node_ids: self.base_node_ids.clone(), // Simplified base state
@@ -134,13 +257,17 @@ impl KnowledgeNexus {
                     node.id
                 );
             }
+            let id = node.id.clone();
+            let text = node.content.clone();
             self.graph.add_node(node).await?;
+
+            // Queue for async background embedding
+            let _ = self.tx.send(EmbeddingJob { id, text }).await;
         }
         for edge in edges {
             self.graph.add_edge(edge).await?;
         }
 
-        self.sync_embeddings().await?;
         Ok(())
     }
 
@@ -168,9 +295,13 @@ impl KnowledgeNexus {
             guard.extend(new_nodes);
         } else {
             for node in new_nodes {
+                let id = node.id.clone();
+                let text = node.content.clone();
                 self.graph.add_node(node).await?;
+
+                // Queue for async background embedding
+                let _ = self.tx.send(EmbeddingJob { id, text }).await;
             }
-            self.sync_embeddings().await?;
         }
 
         Ok(())
@@ -213,91 +344,9 @@ impl KnowledgeNexus {
 
     pub async fn sync_embeddings(&self) -> anyhow::Result<()> {
         let pending = self.graph.get_pending_embeddings().await?;
-        if pending.is_empty() {
-            return Ok(());
-        }
-
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Utf8, false),
-            Field::new("text", DataType::Utf8, false),
-            Field::new("decay_score", DataType::Float32, false),
-            Field::new("access_count", DataType::UInt32, false),
-            Field::new("node_type", DataType::Utf8, false),
-            Field::new(
-                "vector",
-                DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 384),
-                false,
-            ),
-        ]));
-
-        let mut batches = Vec::new();
-        let mut synced_ids = Vec::new();
-
         for (id, text) in pending {
-            let node_info = self
-                .graph
-                .get_node(&id)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("Node lost"))?;
-
-            let vector = match self.embedding_model.generate_embedding(&text).await {
-                Ok(v) => v,
-                Err(e) => {
-                    log::error!(
-                        "Failed to generate embedding for {}: {}. Marking as FAILED.",
-                        id,
-                        e
-                    );
-                    self.graph
-                        .update_embedding_status(&id, "FAILED", None)
-                        .await?;
-                    continue;
-                }
-            };
-
-            let id_array = StringArray::from(vec![id.clone()]);
-            let text_array = StringArray::from(vec![text]);
-            let decay_array = Float32Array::from(vec![1.0]);
-            let access_array = UInt32Array::from(vec![node_info.access_count]);
-            let node_type_array = StringArray::from(vec![node_info.node_type]);
-            let vector_data = Float32Array::from(vector);
-            let vector_array = FixedSizeListArray::try_new(
-                Arc::new(Field::new("item", DataType::Float32, true)),
-                384,
-                Arc::new(vector_data),
-                None,
-            )?;
-
-            batches.push(RecordBatch::try_new(
-                schema.clone(),
-                vec![
-                    Arc::new(id_array) as ArrayRef,
-                    Arc::new(text_array) as ArrayRef,
-                    Arc::new(decay_array) as ArrayRef,
-                    Arc::new(access_array) as ArrayRef,
-                    Arc::new(node_type_array) as ArrayRef,
-                    Arc::new(vector_array) as ArrayRef,
-                ],
-            )?);
-
-            synced_ids.push(id);
+            let _ = self.tx.send(EmbeddingJob { id, text }).await;
         }
-
-        if batches.is_empty() {
-            return Ok(());
-        }
-
-        // Perform LanceDB insertion
-        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
-        table.add(batches).execute().await?;
-
-        // ONLY AFTER SUCCESSFUL LANCEDB INSERTION, update SQLite status
-        for id in synced_ids {
-            self.graph
-                .update_embedding_status(&id, "COMPLETED", Some(&id))
-                .await?;
-        }
-
         Ok(())
     }
 

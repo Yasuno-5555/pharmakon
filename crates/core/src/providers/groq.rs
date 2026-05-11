@@ -28,20 +28,47 @@ impl GroqModel {
     }
 }
 
+fn map_groq_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_lowercase().as_str() {
+        "stop" => pharmakon_common::FinishReason::Stop,
+        "length" => pharmakon_common::FinishReason::MaxTokens,
+        "tool_calls" | "function_call" => pharmakon_common::FinishReason::ToolCalls,
+        "content_filter" => pharmakon_common::FinishReason::SafetyFilter,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 #[async_trait]
 impl AgentModel for GroqModel {
     fn name(&self) -> &str {
         &self.model_name
     }
 
+    fn context_window(&self) -> usize {
+        8192
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
+
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
+        let mut messages = Vec::new();
+        if let Some(ref sys) = request.system_instruction {
+            messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        messages.extend(request.messages.iter().map(|m| json!(m)));
+
         let res = self
             .client
             .post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model_name,
-                "messages": request.messages,
+                "messages": messages,
                 "tools": request.tools,
                 "temperature": request.temperature.unwrap_or(0.7),
             }))
@@ -79,13 +106,13 @@ impl AgentModel for GroqModel {
                     })
                     .collect());
 
-        let finish_reason = choice["finish_reason"].as_str().map(|s| s.to_string());
+        let finish_reason_str = choice["finish_reason"].as_str();
 
         Ok(CompletionResponse {
             content,
             tool_calls,
             usage: None,
-            finish_reason,
+            finish_reason: map_groq_finish_reason(finish_reason_str),
         })
     }
 
@@ -93,13 +120,22 @@ impl AgentModel for GroqModel {
         &self,
         request: CompletionRequest,
     ) -> AgentResult<Pin<Box<dyn Stream<Item = AgentResult<String>> + Send>>> {
+        let mut messages = Vec::new();
+        if let Some(ref sys) = request.system_instruction {
+            messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        messages.extend(request.messages.iter().map(|m| json!(m)));
+
         let response = self
             .client
             .post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model_name,
-                "messages": request.messages,
+                "messages": messages,
                 "tools": request.tools,
                 "temperature": request.temperature.unwrap_or(0.7),
                 "stream": true,

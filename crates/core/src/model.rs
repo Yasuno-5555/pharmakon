@@ -44,4 +44,12 @@ impl AgentModel for MockModel {
     fn name(&self) -> &str {
         "mock-model"
     }
+
+    fn context_window(&self) -> usize {
+        8192
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
 }

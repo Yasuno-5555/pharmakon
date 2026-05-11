@@ -70,14 +70,32 @@ impl AnthropicModel {
     }
 }
 
+fn map_anthropic_finish_reason(sr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    sr.map(|s| match s {
+        "end_turn" | "stop_sequence" => pharmakon_common::FinishReason::Stop,
+        "max_tokens" => pharmakon_common::FinishReason::MaxTokens,
+        "tool_use" => pharmakon_common::FinishReason::ToolCalls,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 #[async_trait]
 impl AgentModel for AnthropicModel {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
-        let system_prompt = request
+        let mut system_prompt = request
             .messages
             .iter()
             .find(|m| m.role == "system")
             .and_then(|m| m.content.as_ref().map(|c| c.to_string()));
+
+        if let Some(ref sys_inst) = request.system_instruction {
+            if let Some(ref mut sys) = system_prompt {
+                sys.push_str("\n\n");
+                sys.push_str(sys_inst);
+            } else {
+                system_prompt = Some(sys_inst.clone());
+            }
+        }
 
         let messages = self.map_messages(request.messages);
 
@@ -151,9 +169,7 @@ impl AgentModel for AnthropicModel {
             }
         }
 
-        let finish_reason = json["stop_reason"].as_str().map(|s| {
-            if s == "max_tokens" { "MAX_TOKENS" } else { s }.to_string()
-        });
+        let stop_reason_str = json["stop_reason"].as_str();
 
         Ok(CompletionResponse {
             content: if content_text.is_empty() {
@@ -167,7 +183,7 @@ impl AgentModel for AnthropicModel {
                 Some(tool_calls)
             },
             usage: None,
-            finish_reason,
+            finish_reason: map_anthropic_finish_reason(stop_reason_str),
         })
     }
 
@@ -193,5 +209,13 @@ impl AgentModel for AnthropicModel {
 
     fn name(&self) -> &str {
         &self.model_name
+    }
+
+    fn context_window(&self) -> usize {
+        200000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        8192
     }
 }

@@ -84,12 +84,20 @@ impl SnapshotStore {
         let blob_path = self.store_dir.join(hash);
         let data = data.to_vec(); // owned for spawn_blocking
         tokio::task::spawn_blocking(move || {
-            let file = std::fs::File::create(&blob_path)?;
-            let mut encoder = GzEncoder::new(file, Compression::default());
-            encoder.write_all(&data)?;
-            let file = encoder.finish()?;
-            let compressed_len = file.metadata()?.len();
-            Ok(compressed_len)
+            let mut file = std::fs::File::create(&blob_path)?;
+            if data.len() <= 4096 {
+                // 4KB以下は圧縮なしでそのまま書き込み
+                file.write_all(&data)?;
+                let len = file.metadata()?.len();
+                Ok(len)
+            } else {
+                // 4KB超のみ Compression::fast() で軽量圧縮
+                let mut encoder = GzEncoder::new(file, Compression::fast());
+                encoder.write_all(&data)?;
+                let file = encoder.finish()?;
+                let compressed_len = file.metadata()?.len();
+                Ok(compressed_len)
+            }
         })
         .await?
     }
@@ -97,10 +105,27 @@ impl SnapshotStore {
     async fn read_blob(&self, hash: &str) -> Result<Vec<u8>> {
         let blob_path = self.store_dir.join(hash);
         tokio::task::spawn_blocking(move || {
-            let file = std::fs::File::open(&blob_path)?;
-            let mut decoder = GzDecoder::new(file);
+            let mut file = std::fs::File::open(&blob_path)?;
+            // 先頭2バイトをチェックしてGzipマジックナンバー「1f 8b」を判定
+            let mut header = [0u8; 2];
+            let bytes_read = file.read(&mut header).unwrap_or(0);
+
+            // シーク位置を先頭に戻す
+            use std::io::Seek;
+            file.seek(std::io::SeekFrom::Start(0))?;
+
+            if bytes_read == 2 && header[0] == 0x1f && header[1] == 0x8b {
+                let mut decoder = GzDecoder::new(file);
+                let mut buf = Vec::new();
+                if decoder.read_to_end(&mut buf).is_ok() {
+                    return Ok(buf);
+                }
+                // デコードに失敗した場合は生データフォールバック
+                file = std::fs::File::open(&blob_path)?;
+            }
+
             let mut buf = Vec::new();
-            decoder.read_to_end(&mut buf)?;
+            file.read_to_end(&mut buf)?;
             Ok(buf)
         })
         .await?
@@ -569,27 +594,25 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = SnapshotStore::new(tmp.path().join("snapshots"));
 
-        let data = vec![b'A'; 4096]; // 4 KB of repeat data — compresses well
-        let hash = {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            data.hash(&mut hasher);
-            data.len().hash(&mut hasher);
-            let h1 = hasher.finish();
-            let h2 = hasher.finish();
-            format!("{:016x}{:016x}", h1, h2)
-        };
+        // 1. <= 4KB (uncompressed fast path)
+        let small_data = vec![b'A'; 4000];
+        let small_hash = content_hash(&small_data);
+        let written_len = store.write_blob(&small_hash, &small_data).await.unwrap();
+        assert_eq!(written_len, 4000); // Uncompressed size should match exactly
+        let small_roundtrip = store.read_blob(&small_hash).await.unwrap();
+        assert_eq!(small_roundtrip, small_data);
 
-        let compressed_len = store.write_blob(&hash, &data).await.unwrap();
-        // 4 KB of repeated bytes should compress to well under 100 bytes
+        // 2. > 4KB (fast compression path)
+        let large_data = vec![b'A'; 8192];
+        let large_hash = content_hash(&large_data);
+        let written_len_large = store.write_blob(&large_hash, &large_data).await.unwrap();
         assert!(
-            compressed_len < 200,
-            "expected compression, got {} bytes",
-            compressed_len
+            written_len_large < 200,
+            "expected high compression on repetitive large data, got {}",
+            written_len_large
         );
-
-        let roundtripped = store.read_blob(&hash).await.unwrap();
-        assert_eq!(roundtripped, data);
+        let large_roundtrip = store.read_blob(&large_hash).await.unwrap();
+        assert_eq!(large_roundtrip, large_data);
     }
 
     #[tokio::test]

@@ -22,6 +22,12 @@ pub struct ModelRouter {
     pub fallback_models: Arc<StdMutex<Vec<String>>>,
 }
 
+fn try_send_event(tx: &broadcast::Sender<Event>, event: Event) {
+    if let Err(e) = tx.send(event) {
+        log::warn!("ModelRouter event bus error: {}", e);
+    }
+}
+
 impl ModelRouter {
     pub fn new(
         economy: Arc<StdMutex<AgentEconomy>>,
@@ -85,6 +91,7 @@ impl ModelRouter {
             max_tokens: Some(self.recommend_max_tokens(target_model.name()) as u32),
             tools,
             complexity: Some(complexity),
+            system_instruction: None,
         };
 
         let mut response_result: Option<Result<pharmakon_common::agent_types::CompletionResponse>> = None;
@@ -94,12 +101,24 @@ impl ModelRouter {
 
         while response_result.is_none() {
             let model_lock = target_model.clone();
-            response_result = Some(model_lock.complete(request.clone()).await.map_err(|e| anyhow::anyhow!("{}", e)));
+            let request_clone = request.clone();
+            // Run in a spawned task so provider panics are caught (JoinError on panic)
+            response_result = Some(
+                match tokio::task::spawn(async move { model_lock.complete(request_clone).await }).await {
+                    Ok(Ok(resp)) => Ok(resp),
+                    Ok(Err(e)) => Err(anyhow::anyhow!("{}", e)),
+                    Err(join_err) => {
+                        let msg = if join_err.is_panic() { "model provider panicked" } else { "model task cancelled" };
+                        log::error!("{} for model '{}'", msg, target_model.name());
+                        Err(anyhow::anyhow!("{}", msg))
+                    }
+                }
+            );
 
             match &response_result {
                 Some(Ok(res)) => {
                     let is_max_tokens = res.finish_reason.as_ref()
-                        .map(|fr| fr.to_uppercase() == "MAX_TOKENS").unwrap_or(false)
+                        .map(|fr| matches!(fr, pharmakon_common::FinishReason::MaxTokens)).unwrap_or(false)
                         || res.content.as_ref()
                             .map(|c| c.to_string().contains("[Model stopped: Max tokens reached]")).unwrap_or(false);
 
@@ -108,7 +127,7 @@ impl ModelRouter {
                         if current_fallback_index < fallback_list.len() {
                             let fallback_id = &fallback_list[current_fallback_index];
                             log::warn!("Output token limit (MAX_TOKENS) for {}. Escalating to fallback: {}", target_model.name(), fallback_id);
-                            let _ = self.event_tx.send(Event::Error {
+                            try_send_event(&self.event_tx, Event::Error {
                                 message: format!("Output token limit reached (MAX_TOKENS) for {}. Escalating to fallback: {}", target_model.name(), fallback_id),
                             });
                             if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(fallback_id) {
@@ -134,7 +153,7 @@ impl ModelRouter {
                             if current_fallback_index < fallback_list.len() {
                                 let fallback_id = &fallback_list[current_fallback_index];
                                 log::warn!("Two empty responses from {}. Switching to fallback: {}", target_model.name(), fallback_id);
-                                let _ = self.event_tx.send(Event::Error {
+                                try_send_event(&self.event_tx, Event::Error {
                                     message: format!("Two consecutive empty responses from {}. Switching to fallback: {}", target_model.name(), fallback_id),
                                 });
                                 if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(fallback_id) {
@@ -168,7 +187,7 @@ impl ModelRouter {
                     if is_rate_limit && current_fallback_index < fallback_list.len() {
                         let fallback_id = &fallback_list[current_fallback_index];
                         log::warn!("Rate limit for {}. Falling back to: {}", target_model.name(), fallback_id);
-                        let _ = self.event_tx.send(Event::Error {
+                        try_send_event(&self.event_tx, Event::Error {
                             message: format!("API Rate limit reached for {}. Switching to fallback: {}", target_model.name(), fallback_id),
                         });
                         if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(fallback_id) {
@@ -185,7 +204,7 @@ impl ModelRouter {
                     }
 
                     self.record_model_result(target_model.name(), 0, false, is_rate_limit);
-                    let _ = self.event_tx.send(Event::Error { message: format!("Model error: {}", e) });
+                    try_send_event(&self.event_tx, Event::Error { message: format!("Model error: {}", e) });
                     return Err(anyhow::anyhow!("All fallback models exhausted. Final error: {}", e));
                 }
                 None => {

@@ -369,6 +369,22 @@ async fn main() -> Result<()> {
             println!("🩺 Pharmakon System Diagnostics");
             println!("===============================");
 
+            let report = pharmakon_core::flows::doctor::Doctor::run_check().await?;
+            println!("\n💓 System Heartbeat (Heartbeat 2.0):");
+            let state_color = match report.system_state.as_str() {
+                "Healthy" => "🟢 Healthy",
+                "Degraded" => "🟡 Degraded",
+                "Critical" => "🔴 Critical",
+                _ => "🔵 Recovering",
+            };
+            println!("  System Health State: {}", state_color);
+            let disk_status_icon = if report.disk_usage_ok { "✓" } else { "✗" };
+            println!("  [{}] Disk Space: {:.1}% free", disk_status_icon, report.disk_free_pct);
+            let mem_status_icon = if report.memory_ok { "✓" } else { "✗" };
+            println!("  [{}] Process RSS Memory: {:.1} MB", mem_status_icon, report.memory_rss_mb);
+            let snap_status_icon = if report.snapshot_quota_ok { "✓" } else { "✗" };
+            println!("  [{}] Snapshot Store Quota: {:.1}% used", snap_status_icon, report.snapshot_quota_pct);
+
             // Config
             println!("\n📋 Configuration:");
             println!("  Config path: ~/.pharmakon/config.json");

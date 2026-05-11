@@ -119,6 +119,17 @@ struct DeepSeekUsage {
     total_tokens: u32,
 }
 
+fn map_deepseek_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_lowercase().as_str() {
+        "stop" => pharmakon_common::FinishReason::Stop,
+        "length" => pharmakon_common::FinishReason::MaxTokens,
+        "tool_calls" | "function_call" => pharmakon_common::FinishReason::ToolCalls,
+        "content_filter" => pharmakon_common::FinishReason::SafetyFilter,
+        "error" => pharmakon_common::FinishReason::Error,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 impl DeepSeekModel {
     /// Create a new DeepSeek model provider.
     /// Uses DEEPSEEK_API_KEY from environment, with optional override.
@@ -141,8 +152,17 @@ impl DeepSeekModel {
         self
     }
 
-    fn map_messages(&self, messages: Vec<crate::model::Message>) -> Vec<DeepSeekMessage> {
-        messages
+    fn map_messages(&self, messages: Vec<crate::model::Message>, system_instruction: Option<&str>) -> Vec<DeepSeekMessage> {
+        let mut msgs = Vec::new();
+        if let Some(sys) = system_instruction {
+            msgs.push(DeepSeekMessage {
+                role: "system".to_string(),
+                content: Some(serde_json::json!(sys)),
+                tool_calls: None,
+                tool_call_id: None,
+            });
+        }
+        msgs.extend(messages
             .into_iter()
             .map(|m| DeepSeekMessage {
                 role: m.role,
@@ -161,8 +181,8 @@ impl DeepSeekModel {
                         .collect()
                 }),
                 tool_call_id: m.tool_call_id,
-            })
-            .collect()
+            }));
+        msgs
     }
 
     fn map_tools(
@@ -188,7 +208,7 @@ impl AgentModel for DeepSeekModel {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
         let body = DeepSeekRequest {
             model: self.model_id.clone(),
-            messages: self.map_messages(request.messages),
+            messages: self.map_messages(request.messages, request.system_instruction.as_deref()),
             temperature: request.temperature,
             tools: request.tools.map(|t| self.map_tools(t)),
             stream: None,
@@ -246,7 +266,7 @@ impl AgentModel for DeepSeekModel {
                 total_tokens: u.total_tokens,
                 thoughts_tokens: None,
             }),
-            finish_reason: choice.finish_reason.clone(),
+            finish_reason: map_deepseek_finish_reason(choice.finish_reason.as_deref()),
         })
     }
 
@@ -258,7 +278,7 @@ impl AgentModel for DeepSeekModel {
     > {
         let body = DeepSeekRequest {
             model: self.model_id.clone(),
-            messages: self.map_messages(request.messages),
+            messages: self.map_messages(request.messages, request.system_instruction.as_deref()),
             temperature: request.temperature,
             tools: request.tools.map(|t| self.map_tools(t)),
             stream: Some(true),
@@ -333,5 +353,13 @@ impl AgentModel for DeepSeekModel {
 
     fn name(&self) -> &str {
         &self.model_id
+    }
+
+    fn context_window(&self) -> usize {
+        64000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
     }
 }

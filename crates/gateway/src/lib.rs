@@ -135,7 +135,9 @@ impl Gateway {
             ));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
-        log::info!("Gateway listening on {}", addr);
+        log::info!("Gateway listening on http://{}", addr);
+        log::warn!("Gateway is using plain HTTP. Set PHARMAKON_GATEWAY_TLS_CERT and PHARMAKON_GATEWAY_TLS_KEY env vars for HTTPS.");
+        log::warn!("For production, place a reverse proxy (nginx/caddy) in front of the gateway for TLS termination.");
 
         // (CronManager is now managed externally via CronTool)
 

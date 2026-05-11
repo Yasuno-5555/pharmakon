@@ -91,7 +91,8 @@ const MAX_IN_MEMORY_EVENTS: usize = 10_000;
 
 /// Default max disk events (JSONL lines) before the file is truncated.
 /// At ~200 bytes/line, 50k events ≈ 10 MB on disk.
-const MAX_DISK_EVENTS: usize = 50_000;
+/// Set to 0 to disable disk persistence entirely (memory-only mode).
+pub const DEFAULT_MAX_DISK_EVENTS: usize = 50_000;
 
 /// Append-only event log with optional disk persistence.
 pub struct EventLog {
@@ -161,7 +162,7 @@ impl EventLog {
             if id.is_multiple_of(100) {
                 let p = path.clone();
                 tokio::task::spawn_blocking(move || {
-                    Self::truncate_disk_log(&p, MAX_DISK_EVENTS);
+                    Self::truncate_disk_log(&p, DEFAULT_MAX_DISK_EVENTS);
                 });
             }
         }

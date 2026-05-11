@@ -21,12 +21,8 @@ impl InsightSynthesizer {
             markdown
         );
 
+        let system_prompt = "You are an Meta-Cognitive Analyst. Your job is to extract wisdom from experience.";
         let messages = vec![
-            Message {
-                role: "system".to_string(),
-                content: Some(MessageContent::Text("You are an Meta-Cognitive Analyst. Your job is to extract wisdom from experience.".to_string())),
-                ..Default::default()
-            },
             Message {
                 role: "user".to_string(),
                 content: Some(MessageContent::Text(prompt)),
@@ -45,6 +41,7 @@ impl InsightSynthesizer {
             max_tokens: Some(2048),
             tools: None,
             complexity: None,
+            system_instruction: Some(system_prompt.to_string()),
         };
 
         let response = model.complete(req).await?;
@@ -63,13 +60,9 @@ impl InsightSynthesizer {
             insight
         );
 
+        let critic_system_prompt = "You are a Senior Architectural Critic. You are extremely conservative and only approve mandates that are universally true for this project.";
         let critic_req = CompletionRequest {
             messages: vec![
-                Message {
-                    role: "system".to_string(),
-                    content: Some(MessageContent::Text("You are a Senior Architectural Critic. You are extremely conservative and only approve mandates that are universally true for this project.".to_string())),
-                    ..Default::default()
-                },
                 Message {
                     role: "user".to_string(),
                     content: Some(MessageContent::Text(mandate_prompt)),
@@ -80,6 +73,7 @@ impl InsightSynthesizer {
             max_tokens: Some(512),
             tools: None,
             complexity: None,
+            system_instruction: Some(critic_system_prompt.to_string()),
         };
 
         if let Ok(critic_resp) = model.complete(critic_req).await {

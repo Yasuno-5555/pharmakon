@@ -165,6 +165,29 @@ pub struct FunctionCall {
     pub thought_signature: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FinishReason {
+    Stop,
+    MaxTokens,
+    ToolCalls,
+    SafetyFilter,
+    Error,
+    Unknown,
+}
+
+impl std::fmt::Display for FinishReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stop => write!(f, "stop"),
+            Self::MaxTokens => write!(f, "max_tokens"),
+            Self::ToolCalls => write!(f, "tool_calls"),
+            Self::SafetyFilter => write!(f, "safety_filter"),
+            Self::Error => write!(f, "error"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CompletionRequest {
     pub messages: Vec<Message>,
@@ -174,6 +197,8 @@ pub struct CompletionRequest {
     pub tools: Option<Vec<ToolDefinition>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_instruction: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -195,7 +220,7 @@ pub struct CompletionResponse {
     pub tool_calls: Option<Vec<ToolCall>>,
     pub usage: Option<Usage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub finish_reason: Option<String>,
+    pub finish_reason: Option<FinishReason>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -217,6 +242,8 @@ pub trait AgentModel: Send + Sync {
         std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
     >;
     fn name(&self) -> &str;
+    fn context_window(&self) -> usize;
+    fn max_output_tokens(&self) -> usize;
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
@@ -247,7 +274,7 @@ impl ToolCategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_str_tag(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "core" => Self::Core,
             "filesystem" => Self::FileSystem,

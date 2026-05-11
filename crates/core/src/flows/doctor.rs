@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::env;
 use std::fs;
+use crate::orchestration::health_monitor::HealthMonitor;
 
 pub struct Doctor;
 
@@ -15,6 +16,14 @@ pub struct HealthReport {
     pub docker_ok: bool,
     pub sqlite_ok: bool,
     pub config_dir_ok: bool,
+    // Heartbeat 2.0 extension
+    pub disk_usage_ok: bool,
+    pub disk_free_pct: f64,
+    pub memory_ok: bool,
+    pub memory_rss_mb: f64,
+    pub snapshot_quota_ok: bool,
+    pub snapshot_quota_pct: f64,
+    pub system_state: String,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +69,13 @@ impl Doctor {
         let db_path = config_dir.join("pharmakon.db");
         let sqlite_ok = db_path.exists();
 
+        // Heartbeat 2.0 probers
+        let monitor = HealthMonitor::new(0.2);
+        let disk_probe = monitor.check_disk_usage();
+        let mem_probe = monitor.check_memory_pressure();
+        let snap_probe = monitor.check_snapshot_quota();
+        let state = monitor.update_state(0);
+
         Ok(HealthReport {
             openai_ok,
             anthropic_ok,
@@ -70,6 +86,13 @@ impl Doctor {
             docker_ok,
             sqlite_ok,
             config_dir_ok,
+            disk_usage_ok: disk_probe.ok,
+            disk_free_pct: disk_probe.value,
+            memory_ok: mem_probe.ok,
+            memory_rss_mb: mem_probe.value,
+            snapshot_quota_ok: snap_probe.ok,
+            snapshot_quota_pct: snap_probe.value,
+            system_state: format!("{:?}", state),
         })
     }
 

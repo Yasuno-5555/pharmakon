@@ -90,7 +90,7 @@ impl ToolCategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_str_tag(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "core" => Self::Core, "filesystem" => Self::FileSystem,
             "network" => Self::Network, "media" => Self::Media,

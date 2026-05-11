@@ -129,6 +129,7 @@ pub struct TrajectoryTelemetry {
     pub human_correction_needed: bool,
     pub downstream_reuse: bool,
     pub failure_category: Option<String>,
+    pub python_fallback_count: u64,
 }
 
 pub struct AgentEconomy {
@@ -410,6 +411,7 @@ let complexity_bonus = |id: &str| -> f64 {
             human_correction_needed: false,
             downstream_reuse: false,
             failure_category: None,
+            python_fallback_count: 0,
         });
     }
 
@@ -433,6 +435,9 @@ let complexity_bonus = |id: &str| -> f64 {
 
     /// Finalize and return the current telemetry, resetting the tracker.
     pub fn emit_telemetry(&mut self) -> Option<TrajectoryTelemetry> {
+        if let Some(ref mut t) = self.current_telemetry {
+            t.python_fallback_count = crate::orchestration::codeact::PYTHON_FALLBACK_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+        }
         self.current_telemetry.take()
     }
 }

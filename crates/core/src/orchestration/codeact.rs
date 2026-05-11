@@ -20,6 +20,10 @@ use rhai::{Engine, Scope, Dynamic, EvalAltResult};
 use std::sync::Arc;
 use std::path::PathBuf;
 
+lazy_static::lazy_static! {
+    pub static ref PYTHON_FALLBACK_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+}
+
 pub struct CodeActToolbox {
     pub workspace_root: PathBuf,
 }
@@ -204,6 +208,10 @@ impl CodeActEngine {
 
         if first_result.success { return first_result; }
 
+        if order.0 == ScriptLanguage::Rhai && order.1 == ScriptLanguage::Python {
+            PYTHON_FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
         log::debug!(
             "CodeAct: {:?} failed ({}), falling back to {:?}",
             order.0,
@@ -320,6 +328,7 @@ def list_dir(path):
             }
             Err(rhai_err) => {
                 log::debug!("CodeAct with_context: Rhai failed ({}), falling back to Python", rhai_err);
+                PYTHON_FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
 

@@ -19,6 +19,7 @@ impl HeartbeatManager {
         let agent = self.agent.clone();
         let interval = self.interval;
         let initiative_engine = super::initiative::InitiativeEngineWorker::new(agent.clone());
+        let shutdown_token = self.agent.shutdown_token.clone();
 
         tokio::spawn(async move {
             let mut timer = tokio::time::interval(interval);
@@ -27,6 +28,10 @@ impl HeartbeatManager {
 
             loop {
                 timer.tick().await;
+                if shutdown_token.load(std::sync::atomic::Ordering::SeqCst) {
+                    log::info!("HeartbeatManager: shutdown requested, stopping");
+                    break;
+                }
                 log::info!("HeartbeatManager: Triggering autonomous check...");
 
                 match agent.heartbeat().await {

@@ -144,8 +144,12 @@ impl Config {
         fs::create_dir_all(parent_dir)?;
 
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&config_path, content)
-            .context(format!("Failed to write config to {:?}", config_path))?;
+        // Atomic write: temp file → rename to prevent partial writes from crashes
+        let tmp_path = config_path.with_extension("json.tmp");
+        fs::write(&tmp_path, &content)
+            .context(format!("Failed to write config to {:?}", tmp_path))?;
+        fs::rename(&tmp_path, &config_path)
+            .context(format!("Failed to rename config {:?} -> {:?}", tmp_path, config_path))?;
         Ok(())
     }
 

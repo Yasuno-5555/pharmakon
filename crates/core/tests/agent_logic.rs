@@ -43,6 +43,14 @@ impl AgentModel for InspectableMockModel {
         "inspectable-mock-model"
     }
 
+    fn context_window(&self) -> usize {
+        8192
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
+
     async fn stream_complete(
         &self,
         _request: CompletionRequest,

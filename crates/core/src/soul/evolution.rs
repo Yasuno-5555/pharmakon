@@ -48,11 +48,6 @@ impl SoulEvolutionWorker {
         let request = CompletionRequest {
             messages: vec![
                 Message {
-                    role: "system".to_string(),
-                    content: Some(MessageContent::Text(system_prompt.to_string())),
-                    ..Default::default()
-                },
-                Message {
                     role: "user".to_string(),
                     content: Some(MessageContent::Text(user_prompt)),
                     ..Default::default()
@@ -62,6 +57,7 @@ impl SoulEvolutionWorker {
             max_tokens: Some(500),
             tools: None,
             complexity: None,
+            system_instruction: Some(system_prompt.to_string()),
         };
 
         let response = model

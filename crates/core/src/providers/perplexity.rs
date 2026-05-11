@@ -25,20 +25,45 @@ impl PerplexityModel {
     }
 }
 
+fn map_perplexity_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_lowercase().as_str() {
+        "stop" => pharmakon_common::FinishReason::Stop,
+        "length" => pharmakon_common::FinishReason::MaxTokens,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 #[async_trait]
 impl AgentModel for PerplexityModel {
     fn name(&self) -> &str {
         &self.model_name
     }
 
+    fn context_window(&self) -> usize {
+        32768
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
+
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
+        let mut messages = Vec::new();
+        if let Some(ref sys) = request.system_instruction {
+            messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        messages.extend(request.messages.iter().map(|m| json!(m)));
+
         let res = self
             .client
             .post("https://api.perplexity.ai/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model_name,
-                "messages": request.messages,
+                "messages": messages,
             }))
             .send()
             .await
@@ -50,15 +75,18 @@ impl AgentModel for PerplexityModel {
         }
 
         let json: Value = res.json().await.map_err(|e| AgentError(e.to_string()))?;
-        let content = json["choices"][0]["message"]["content"]
+        let choice = &json["choices"][0];
+        let content = choice["message"]["content"]
             .as_str()
             .map(|s| pharmakon_common::MessageContent::Text(s.to_string()));
+
+        let finish_reason_str = choice["finish_reason"].as_str();
 
         Ok(CompletionResponse {
             content,
             tool_calls: None,
             usage: None,
-            finish_reason: None,
+            finish_reason: map_perplexity_finish_reason(finish_reason_str),
         })
     }
 
@@ -66,13 +94,22 @@ impl AgentModel for PerplexityModel {
         &self,
         request: CompletionRequest,
     ) -> AgentResult<Pin<Box<dyn Stream<Item = AgentResult<String>> + Send>>> {
+        let mut messages = Vec::new();
+        if let Some(ref sys) = request.system_instruction {
+            messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        messages.extend(request.messages.iter().map(|m| json!(m)));
+
         let response = self
             .client
             .post("https://api.perplexity.ai/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model_name,
-                "messages": request.messages,
+                "messages": messages,
                 "stream": true,
             }))
             .send()

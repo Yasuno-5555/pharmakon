@@ -25,14 +25,37 @@ impl OllamaModel {
     }
 }
 
+fn map_ollama_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_lowercase().as_str() {
+        "stop" => pharmakon_common::FinishReason::Stop,
+        "length" => pharmakon_common::FinishReason::MaxTokens,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 #[async_trait]
 impl AgentModel for OllamaModel {
     fn name(&self) -> &str {
         &self.model_name
     }
 
+    fn context_window(&self) -> usize {
+        8192
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
+
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
-        let ollama_messages: Vec<serde_json::Value> = request
+        let mut ollama_messages: Vec<serde_json::Value> = Vec::new();
+        if let Some(ref sys) = request.system_instruction {
+            ollama_messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        ollama_messages.extend(request
             .messages
             .iter()
             .map(|m| {
@@ -40,8 +63,7 @@ impl AgentModel for OllamaModel {
                     "role": m.role,
                     "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
                 })
-            })
-            .collect();
+            }));
 
         let response = self
             .client
@@ -71,11 +93,13 @@ impl AgentModel for OllamaModel {
             AgentError("Failed to parse content from Ollama response".to_string())
         })?;
 
+        let done_reason = body["done_reason"].as_str();
+
         Ok(CompletionResponse {
             content: Some(MessageContent::Text(content.to_string())),
             tool_calls: None,
             usage: None,
-            finish_reason: None,
+            finish_reason: map_ollama_finish_reason(done_reason),
         })
     }
 
@@ -85,7 +109,14 @@ impl AgentModel for OllamaModel {
     ) -> AgentResult<
         std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
     > {
-        let ollama_messages: Vec<serde_json::Value> = request
+        let mut ollama_messages: Vec<serde_json::Value> = Vec::new();
+        if let Some(ref sys) = request.system_instruction {
+            ollama_messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        ollama_messages.extend(request
             .messages
             .iter()
             .map(|m| {
@@ -93,8 +124,7 @@ impl AgentModel for OllamaModel {
                     "role": m.role,
                     "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
                 })
-            })
-            .collect();
+            }));
 
         let response = self
             .client

@@ -107,6 +107,17 @@ struct OpenAIUsage {
     total_tokens: u32,
 }
 
+fn map_openai_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_lowercase().as_str() {
+        "stop" => pharmakon_common::FinishReason::Stop,
+        "length" => pharmakon_common::FinishReason::MaxTokens,
+        "tool_calls" | "function_call" => pharmakon_common::FinishReason::ToolCalls,
+        "content_filter" => pharmakon_common::FinishReason::SafetyFilter,
+        "error" => pharmakon_common::FinishReason::Error,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 impl OpenAIModel {
     pub fn new(api_key: String, model_id: String) -> Self {
         Self {
@@ -166,28 +177,39 @@ impl AgentModel for OpenAIModel {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
         let openai_req = OpenAIRequest {
             model: self.model_id.clone(),
-            messages: request
-                .messages
-                .into_iter()
-                .map(|m| OpenAIMessage {
-                    role: m.role,
-                    content: m.content.as_ref().map(map_to_openai_content),
-                    tool_calls: m.tool_calls.map(|calls| {
-                        calls
-                            .into_iter()
-                            .map(|c| OpenAIToolCall {
-                                id: c.id,
-                                r#type: c.r#type,
-                                function: OpenAIFunctionCall {
-                                    name: c.function.name,
-                                    arguments: c.function.arguments,
-                                },
-                            })
-                            .collect()
-                    }),
-                    tool_call_id: m.tool_call_id,
-                })
-                .collect(),
+            messages: {
+                let mut msgs = Vec::new();
+                if let Some(ref sys_inst) = request.system_instruction {
+                    msgs.push(OpenAIMessage {
+                        role: "system".to_string(),
+                        content: Some(serde_json::json!(sys_inst)),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                }
+                msgs.extend(request
+                    .messages
+                    .into_iter()
+                    .map(|m| OpenAIMessage {
+                        role: m.role,
+                        content: m.content.as_ref().map(map_to_openai_content),
+                        tool_calls: m.tool_calls.map(|calls| {
+                            calls
+                                .into_iter()
+                                .map(|c| OpenAIToolCall {
+                                    id: c.id,
+                                    r#type: c.r#type,
+                                    function: OpenAIFunctionCall {
+                                        name: c.function.name,
+                                        arguments: c.function.arguments,
+                                    },
+                                })
+                                .collect()
+                        }),
+                        tool_call_id: m.tool_call_id,
+                    }));
+                msgs
+            },
             temperature: request.temperature,
             tools: request.tools.map(|tools| {
                 tools
@@ -253,7 +275,7 @@ impl AgentModel for OpenAIModel {
                 total_tokens: u.total_tokens,
                 thoughts_tokens: None,
             }),
-            finish_reason: choice.finish_reason.clone(),
+            finish_reason: map_openai_finish_reason(choice.finish_reason.as_deref()),
         })
     }
 
@@ -265,28 +287,39 @@ impl AgentModel for OpenAIModel {
     > {
         let openai_req = OpenAIRequest {
             model: self.model_id.clone(),
-            messages: request
-                .messages
-                .into_iter()
-                .map(|m| OpenAIMessage {
-                    role: m.role,
-                    content: m.content.as_ref().map(map_to_openai_content),
-                    tool_calls: m.tool_calls.map(|calls| {
-                        calls
-                            .into_iter()
-                            .map(|c| OpenAIToolCall {
-                                id: c.id,
-                                r#type: c.r#type,
-                                function: OpenAIFunctionCall {
-                                    name: c.function.name,
-                                    arguments: c.function.arguments,
-                                },
-                            })
-                            .collect()
-                    }),
-                    tool_call_id: m.tool_call_id,
-                })
-                .collect(),
+            messages: {
+                let mut msgs = Vec::new();
+                if let Some(ref sys_inst) = request.system_instruction {
+                    msgs.push(OpenAIMessage {
+                        role: "system".to_string(),
+                        content: Some(serde_json::json!(sys_inst)),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                }
+                msgs.extend(request
+                    .messages
+                    .into_iter()
+                    .map(|m| OpenAIMessage {
+                        role: m.role,
+                        content: m.content.as_ref().map(map_to_openai_content),
+                        tool_calls: m.tool_calls.map(|calls| {
+                            calls
+                                .into_iter()
+                                .map(|c| OpenAIToolCall {
+                                    id: c.id,
+                                    r#type: c.r#type,
+                                    function: OpenAIFunctionCall {
+                                        name: c.function.name,
+                                        arguments: c.function.arguments,
+                                    },
+                                })
+                                .collect()
+                        }),
+                        tool_call_id: m.tool_call_id,
+                    }));
+                msgs
+            },
             temperature: request.temperature,
             tools: request.tools.map(|tools| {
                 tools
@@ -376,5 +409,23 @@ impl AgentModel for OpenAIModel {
 
     fn name(&self) -> &str {
         &self.model_id
+    }
+
+    fn context_window(&self) -> usize {
+        if self.model_id.contains("gpt-4o") {
+            128000
+        } else if self.model_id.contains("o1") || self.model_id.contains("o3") {
+            200000
+        } else {
+            128000
+        }
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        if self.model_id.contains("o1") || self.model_id.contains("o3") {
+            32768
+        } else {
+            4096
+        }
     }
 }

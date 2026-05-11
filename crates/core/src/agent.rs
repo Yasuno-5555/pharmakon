@@ -1,5 +1,8 @@
 use crate::orchestration::budget::{self, IterationSnapshot, ProgressTracker, TerminationSignal, TerminationPolicy};
 use crate::orchestration::dsge_integration::AgentEconomy;
+
+/// Sentinel value for SnapshotStore: file did not exist before mutation.
+const SNAPSHOT_DID_NOT_EXIST: &str = "__snapshot_did_not_exist__";
 use crate::model::{
     AgentError, AgentErrorCode, AgentModel, CompletionRequest,
     Message, MessageContent, ToolDefinition, ToolCategory,
@@ -8,6 +11,14 @@ use crate::system_prompt::SystemPromptManager;
 use anyhow::{Result, anyhow};
 use pharmakon_common::Event;
 use pharmakon_memory::BeliefSystem;
+/// Wrapper for broadcast::Sender::send that logs warnings on overflow.
+macro_rules! try_send_event {
+    ($tx:expr, $event:expr) => {
+        if let Err(e) = $tx.send($event) {
+            log::warn!("Event bus error (capacity full or receiver lagged): {}", e);
+        }
+    };
+}
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::{Mutex, broadcast};
@@ -34,51 +45,73 @@ pub struct SessionState {
 }
 
 pub struct Agent {
+    // ── Model & Model Routing ──
     pub model: Arc<Mutex<Arc<dyn AgentModel>>>,
-    pub session_id: Arc<Mutex<String>>, // Current global session ID (legacy/default)
+    pub model_router: Arc<crate::model_router::ModelRouter>,
+    pub planner_model: Option<Arc<Mutex<Arc<dyn AgentModel>>>>,
+    pub fallback_models: Arc<StdMutex<Vec<String>>>,
+    pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
+    pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
+    pub total_cost: Arc<Mutex<f64>>,
+    pub token_budget: u64,
+    pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
+
+    // ── Session & Conversation ──
+    pub session_id: Arc<Mutex<String>>,
     pub session_states: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<SessionState>>>>>,
+    pub session_store: Option<Arc<crate::persistence::DbSessionStore>>,
+    pub trajectory: Arc<Mutex<crate::trajectory::Trajectory>>,
+    pub compactor: Arc<Mutex<crate::memory::compactor::ContextCompactor>>,
+    pub interaction_count: Arc<std::sync::atomic::AtomicU32>,
+    pub start_time: std::time::Instant,
+
+    // ── Prompt & System Context ──
     pub prompt_manager: Arc<Mutex<SystemPromptManager>>,
     pub context_manager: Arc<Mutex<crate::context::ContextManager>>,
     pub active_categories: Arc<Mutex<std::collections::HashSet<crate::model::ToolCategory>>>,
+    pub hooks: Arc<crate::hooks::HookRegistry>,
+    pub research_notebook: Arc<Mutex<crate::orchestration::research::ResearchNotebook>>,
+
+    // ── Event Bus ──
     pub event_tx: broadcast::Sender<Event>,
     pub approval_tx: broadcast::Sender<(String, bool)>,
-    pub trajectory: Arc<Mutex<crate::trajectory::Trajectory>>,
-    pub compactor: Arc<Mutex<crate::memory::compactor::ContextCompactor>>,
-    pub hooks: Arc<crate::hooks::HookRegistry>,
+
+    // ── Tools & Execution ──
+    pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
+    pub tool_scheduler: Arc<crate::orchestration::tool_scheduler::ToolScheduler>,
+    pub policy_engine: Arc<crate::security::policy::PolicyEngine>,
+    pub tool_call_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+    pub dry_run: Arc<std::sync::atomic::AtomicBool>,
+    pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
+
+    // ── Event Log & Rollback ──
+    pub event_log: Arc<crate::event_log::EventLog>,
+    pub snapshot_store: Arc<crate::snapshot_store::SnapshotStore>,
+    pub last_workspace_snapshot: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,
+
+    // ── Long-term Memory ──
     pub fact_memory: Option<Arc<Mutex<crate::memory::BeliefSystem>>>,
     pub semantic_search: Option<Arc<pharmakon_memory::semantic_search::SemanticSearch>>,
     pub knowledge_nexus: Option<Arc<pharmakon_memory::weaver::KnowledgeNexus>>,
-    pub health_monitor: crate::orchestration::health_monitor::HealthMonitor,
-    pub policy_engine: Arc<crate::security::policy::PolicyEngine>,
-    pub session_store: Option<Arc<crate::persistence::DbSessionStore>>,
-    pub planner_model: Option<Arc<Mutex<Arc<dyn AgentModel>>>>,
     pub graph_store: Option<Arc<crate::memory::graph::GraphStore>>,
-    pub interaction_count: Arc<std::sync::atomic::AtomicU32>,
-    pub fallback_models: Arc<StdMutex<Vec<String>>>,
-    pub total_tokens: Arc<std::sync::atomic::AtomicU64>,
-    pub total_cost: Arc<Mutex<f64>>,
-    /// Hard cumulative token budget per session. Exceeding this stops API calls.
-    pub token_budget: u64,
-    pub start_time: std::time::Instant,
-    pub dry_run: Arc<std::sync::atomic::AtomicBool>,
-    pub tool_call_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+
+    // ── Health & Security ──
+    pub health_monitor: crate::orchestration::health_monitor::HealthMonitor,
+
+    // ── Territory (workspace awareness) ──
     pub territory_manager: Arc<crate::orchestration::territory::TerritoryManager>,
-    pub research_notebook: Arc<Mutex<crate::orchestration::research::ResearchNotebook>>,
-    pub usage_history: Arc<Mutex<Vec<(chrono::DateTime<chrono::Utc>, u64, f64)>>>,
-    pub event_log: Arc<crate::event_log::EventLog>,
-    pub snapshot_store: Arc<crate::snapshot_store::SnapshotStore>,
-    /// Throttle whole-workspace snapshots: only one per cooldown period (seconds)
-    pub last_workspace_snapshot: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,
-    pub registry: Arc<Mutex<pharmakon_tools::registry::ToolMetaRegistry>>,
-    pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
-    pub economy: Arc<std::sync::Mutex<AgentEconomy>>,
+
+    // ── Swarm Economy ──
     pub bank_of_pharmakon: Arc<Mutex<crate::orchestration::economy_v2::BankOfPharmakon>>,
+
+    // ── Background Processes ──
     pub dream_started: Arc<std::sync::atomic::AtomicBool>,
     pub cron_manager: Arc<StdMutex<Option<Arc<crate::automation::cron::CronManager>>>>,
     pub skill_library: Arc<std::sync::Mutex<crate::orchestration::skill_library::RhaiSkillLibrary>>,
+    pub shutdown_token: Arc<std::sync::atomic::AtomicBool>,
+
+    // ── Peripheral I/O ──
     pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
-    pub tool_scheduler: Arc<crate::orchestration::tool_scheduler::ToolScheduler>,
-    pub model_router: Arc<crate::model_router::ModelRouter>,
 }
 
 impl Clone for Agent {
@@ -127,6 +160,7 @@ impl Clone for Agent {
             vision_stream: self.vision_stream.clone(),
             tool_scheduler: self.tool_scheduler.clone(),
             model_router: self.model_router.clone(),
+            shutdown_token: self.shutdown_token.clone(),
         }
     }
 }
@@ -252,7 +286,14 @@ impl Agent {
                 token_budget,
                 fallback_models,
             )),
+            shutdown_token: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Signal all background tasks to shut down gracefully.
+    pub fn shutdown(&self) {
+        self.shutdown_token.store(true, std::sync::atomic::Ordering::SeqCst);
+        log::info!("Agent shutdown signal sent");
     }
 
     pub fn with_fallback_models(self, models: Vec<String>) -> Self {
@@ -437,14 +478,17 @@ impl Agent {
             return;
         }
         let skill_lib = self.skill_library.clone();
+        let shutdown = self.shutdown_token.clone();
         tokio::spawn(async move {
             log::info!("Dream Mode started");
-            loop {
+            while !shutdown.load(std::sync::atomic::Ordering::SeqCst) {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                if shutdown.load(std::sync::atomic::Ordering::SeqCst) { break; }
                 let mut lib = skill_lib.lock().unwrap();
                 lib.decay();
                 log::debug!("Dream Mode: decay cycle complete, {} entries", lib.entries.len());
             }
+            log::info!("Dream Mode stopped");
         });
     }
 
@@ -579,7 +623,7 @@ impl Agent {
             });
         }
 
-        let _ = self.event_tx.send(Event::AgentResponse {
+        try_send_event!(self.event_tx, Event::AgentResponse {
             content: raw_response.content.clone().unwrap_or(MessageContent::Text(String::new())),
         });
     }
@@ -709,7 +753,7 @@ impl Agent {
                 }
             }
 
-        let _ = self.event_tx.send(Event::AgentThought {
+        try_send_event!(self.event_tx, Event::AgentThought {
             content: MessageContent::Text("Thinking...".to_string()),
         });
 
@@ -996,7 +1040,7 @@ impl Agent {
                 );
             }
 
-            let _ = self.event_tx.send(Event::InteractionFinished {
+            try_send_event!(self.event_tx, Event::InteractionFinished {
                 response: response.clone(),
             });
 
@@ -1109,7 +1153,7 @@ impl Agent {
                                 obj.insert("dry_run".to_string(), serde_json::json!(true));
                             }
 
-                        let _ = event_tx.send(Event::ToolCall {
+                        try_send_event!(event_tx, Event::ToolCall {
                             name: tool.name().to_string(),
                             args: args.clone(),
                         });
@@ -1155,7 +1199,7 @@ impl Agent {
                                 approval_id,
                                 args
                             );
-                            let _ = event_tx.send(Event::ApprovalRequest {
+                            try_send_event!(event_tx, Event::ApprovalRequest {
                                 id: approval_id.clone(),
                                 tool: tool.name().to_string(),
                                 args: args.clone(),
@@ -1187,7 +1231,7 @@ impl Agent {
                             *counts.entry(tool.name().to_string()).or_insert(0) += 1;
                         }
 
-                        let _ = event_tx.send(Event::ForensicLog {
+                        try_send_event!(event_tx, Event::ForensicLog {
                             id: forensic_id.clone(),
                             action: format!("Executing {}", tool.name()),
                             hypothesis: format!("Using {} with args {}", tool.name(), args),
@@ -1242,7 +1286,7 @@ impl Agent {
                                         snapshot_before_id = Some(id);
                                     }
                                 } else {
-                                    snapshot_before_id = Some("none".to_string());
+                                    snapshot_before_id = Some(SNAPSHOT_DID_NOT_EXIST.to_string());
                                 }
                             }
 
@@ -1287,7 +1331,7 @@ impl Agent {
                             }
                         }
 
-                        let _ = event_tx.send(Event::ForensicLog {
+                        try_send_event!(event_tx, Event::ForensicLog {
                             id: forensic_id,
                             action: format!("Completed {}", tool.name()),
                             hypothesis: "".to_string(),
@@ -1389,7 +1433,7 @@ impl Agent {
                                     log::warn!("Failed to register playbook: {}", e);
                                 }
                             }
-                        let _ = self.event_tx.send(Event::ToolResult {
+                        try_send_event!(self.event_tx, Event::ToolResult {
                             result: result.clone(),
                         });
                         let _ = self.record_step(crate::trajectory::TrajectoryStep::Observation {
@@ -1540,7 +1584,7 @@ impl Agent {
                     content: thought.clone(),
                     timestamp: chrono::Utc::now(),
                 }).await;
-                let _ = self.event_tx.send(Event::AgentThought {
+                try_send_event!(self.event_tx, Event::AgentThought {
                     content: MessageContent::Text(thought.clone()),
                 });
                 self.event_log.append(session_id, crate::event_log::EventKind::ThoughtEmitted {
@@ -1661,14 +1705,8 @@ impl Agent {
         let request = CompletionRequest {
             messages: vec![
                 Message {
-                    role: "system".to_string(),
-                    content: Some(MessageContent::Text(system_prompt.to_string())),
-                    ..Default::default()
-                },
-                Message {
                     role: "user".to_string(),
-                    content: Some(MessageContent::Text(format!("Context:
-{}", context))),
+                    content: Some(MessageContent::Text(format!("Context:\n{}", context))),
                     ..Default::default()
                 },
             ],
@@ -1676,6 +1714,7 @@ impl Agent {
             max_tokens: Some(200),
             tools: None,
             complexity: None,
+            system_instruction: Some(system_prompt.to_string()),
         };
 
         let model = self.model.lock().await;
@@ -1729,7 +1768,7 @@ impl Agent {
             let mut model = self.model.lock().await;
             *model = new_model;
             self.economy.lock().unwrap().set_manual(model_id);
-            let _ = self.event_tx.send(Event::ModelSwitched { model_id: model_id.to_string() });
+            try_send_event!(self.event_tx, Event::ModelSwitched { model_id: model_id.to_string() });
             Ok(format!("Switched to model: {}", model_id))
         } else {
             let mut resp = format!("Model not found: {}\n\nAvailable:\n", model_id);
@@ -1855,7 +1894,10 @@ impl Agent {
     }
 
     pub async fn heartbeat(&self) -> Result<String> {
-        Ok("HEARTBEAT_OK".to_string())
+        let state = self.health_monitor.update_state(0);
+        self.health_monitor.trigger_auto_remedy_if_needed();
+        let report = self.health_monitor.status_report();
+        Ok(format!("HEARTBEAT_OK State: {:?}, Detail: {}", state, report))
     }
 
     pub async fn perform_maintenance(&self) -> Result<()> {
@@ -1882,7 +1924,7 @@ impl Agent {
         path: &std::path::Path,
         snapshot_id: &str,
     ) -> Result<()> {
-        if snapshot_id == "none" {
+        if snapshot_id == SNAPSHOT_DID_NOT_EXIST {
             // File didn't exist before the mutation — remove it
             if path.exists() {
                 tokio::fs::remove_file(path).await?;

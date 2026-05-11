@@ -75,13 +75,6 @@ impl InitiativeEngineWorker {
 
         let messages = vec![
             pharmakon_common::Message {
-                role: "system".to_string(),
-                content: Some(pharmakon_common::MessageContent::Text(
-                    system_prompt.to_string(),
-                )),
-                ..Default::default()
-            },
-            pharmakon_common::Message {
                 role: "user".to_string(),
                 content: Some(pharmakon_common::MessageContent::Text(user_prompt)),
                 ..Default::default()
@@ -94,6 +87,7 @@ impl InitiativeEngineWorker {
             max_tokens: Some(300),
             tools: None,
             complexity: None,
+            system_instruction: Some(system_prompt.to_string()),
         };
 
         let response = model.lock().await.complete(request).await?;

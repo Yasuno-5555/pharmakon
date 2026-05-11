@@ -27,4 +27,12 @@ impl AgentModel for TestModel {
     fn name(&self) -> &str {
         "test"
     }
+
+    fn context_window(&self) -> usize {
+        128000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
 }

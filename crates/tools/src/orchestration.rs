@@ -108,7 +108,7 @@ impl Tool for LoadToolsTool {
 
     async fn call(&self, args: Value) -> AgentResult<String> {
         let cat_str = args["category"].as_str().ok_or_else(|| pharmakon_common::AgentError("Missing category".to_string()))?;
-        let category = ToolCategory::from_str(cat_str);
+        let category = ToolCategory::from_str_tag(cat_str);
 
         let mut active = self.active_categories.lock().await;
         if active.contains(&category) {

@@ -56,6 +56,7 @@ impl ContextCompactor {
                 max_tokens: None,
                 tools: None,
                 complexity: None,
+                system_instruction: None,
             })
             .await
             .map_err(anyhow::Error::new)?;
@@ -101,6 +102,7 @@ impl ContextCompactor {
                 max_tokens: None,
                 tools: None,
                 complexity: None,
+                system_instruction: None,
             })
             .await
             .map_err(anyhow::Error::new)?;

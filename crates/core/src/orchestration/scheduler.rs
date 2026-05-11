@@ -218,6 +218,7 @@ async fn llm_classify(
         max_tokens: Some(64), // bumped for thinking models (Gemini Flash internally consumes some tokens for thought)
         tools: None,
         complexity: None,
+        system_instruction: None,
     };
 
     let response = model.complete(request).await.ok()?;

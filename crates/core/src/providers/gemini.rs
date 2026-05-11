@@ -179,6 +179,16 @@ struct GeminiUsage {
     thoughts_token_count: u32,
 }
 
+fn map_gemini_finish_reason(fr: Option<&str>) -> Option<pharmakon_common::FinishReason> {
+    fr.map(|s| match s.to_uppercase().as_str() {
+        "STOP" => pharmakon_common::FinishReason::Stop,
+        "MAX_TOKENS" => pharmakon_common::FinishReason::MaxTokens,
+        "SAFETY" => pharmakon_common::FinishReason::SafetyFilter,
+        "OTHER" => pharmakon_common::FinishReason::Unknown,
+        _ => pharmakon_common::FinishReason::Unknown,
+    })
+}
+
 impl GeminiModel {
     pub fn new(api_key: String, model_id: String) -> Self {
         Self {
@@ -386,7 +396,31 @@ impl GeminiModel {
 #[async_trait]
 impl AgentModel for GeminiModel {
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
-        let (contents, system_instruction) = self.map_to_gemini_content(request.messages);
+        let (contents, mut system_instruction) = self.map_to_gemini_content(request.messages);
+
+        if let Some(ref sys_inst) = request.system_instruction {
+            if let Some(ref mut sys) = system_instruction {
+                if let Some(ref mut part) = sys.parts.first_mut() {
+                    if let Some(ref mut t) = part.text {
+                        t.push_str("\n\n");
+                        t.push_str(sys_inst);
+                    } else {
+                        part.text = Some(sys_inst.clone());
+                    }
+                }
+            } else {
+                system_instruction = Some(GeminiContent {
+                    role: "system".to_string(),
+                    parts: vec![GeminiPart {
+                        text: Some(sys_inst.clone()),
+                        inline_data: None,
+                        function_call: None,
+                        function_response: None,
+                        thought: None,
+                    }],
+                });
+            }
+        }
 
         let gemini_req = GeminiRequest {
             contents,
@@ -689,7 +723,7 @@ impl AgentModel for GeminiModel {
                     None
                 },
             }),
-            finish_reason: candidate.finish_reason.clone(),
+            finish_reason: map_gemini_finish_reason(candidate.finish_reason.as_deref()),
         })
     }
 
@@ -699,7 +733,31 @@ impl AgentModel for GeminiModel {
     ) -> AgentResult<
         std::pin::Pin<Box<dyn futures::Stream<Item = AgentResult<String>> + Send + 'static>>,
     > {
-        let (contents, system_instruction) = self.map_to_gemini_content(request.messages);
+        let (contents, mut system_instruction) = self.map_to_gemini_content(request.messages);
+
+        if let Some(ref sys_inst) = request.system_instruction {
+            if let Some(ref mut sys) = system_instruction {
+                if let Some(ref mut part) = sys.parts.first_mut() {
+                    if let Some(ref mut t) = part.text {
+                        t.push_str("\n\n");
+                        t.push_str(sys_inst);
+                    } else {
+                        part.text = Some(sys_inst.clone());
+                    }
+                }
+            } else {
+                system_instruction = Some(GeminiContent {
+                    role: "system".to_string(),
+                    parts: vec![GeminiPart {
+                        text: Some(sys_inst.clone()),
+                        inline_data: None,
+                        function_call: None,
+                        function_response: None,
+                        thought: None,
+                    }],
+                });
+            }
+        }
 
         let gemini_req = GeminiRequest {
             contents,
@@ -933,5 +991,13 @@ impl AgentModel for GeminiModel {
 
     fn name(&self) -> &str {
         &self.model_id
+    }
+
+    fn context_window(&self) -> usize {
+        1000000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        8192
     }
 }
