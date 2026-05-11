@@ -65,7 +65,8 @@ impl AotCompiler {
         let mut code = String::new();
         code.push_str("//! 💎 Crystallized Native AST\n");
         code.push_str("//! Generated automatically by Pharmakon AOT Compiler.\n\n");
-        code.push_str("use crate::orchestration::world::PlanNode;\n");
+        code.push_str("use crate::orchestration::world::{PlanNode, Condition};\n");
+        code.push_str("use std::path::PathBuf;\n");
         code.push_str("use std::collections::HashMap;\n\n");
         code.push_str(&format!("/// Get crystallized plan for: {}\n", template.template_key));
         code.push_str(&format!("pub fn get_crystallized_{}() -> PlanNode {{\n", template.id.replace("-", "_")));
@@ -105,15 +106,29 @@ fn format_plan_node_as_rust(node: &crate::orchestration::world::PlanNode, indent
                 next_indent, next_indent, elements.join(&format!(",\n{}", next_indent)), next_indent, indent
             )
         }
-        crate::orchestration::world::PlanNode::Conditional { condition_script, then_branch, else_branch } => {
+        crate::orchestration::world::PlanNode::Conditional { condition, then_branch, else_branch } => {
             let then_code = format_plan_node_as_rust(then_branch, &next_indent);
             let else_code = match else_branch {
                 Some(b) => format!("Some(Box::new({}))", format_plan_node_as_rust(b, &next_indent)),
                 None => "None".to_string(),
             };
+            let cond_code = match condition {
+                crate::orchestration::world::Condition::FileExists { path } => {
+                    format!("Condition::FileExists {{ path: PathBuf::from(\"{}\") }}", path.display())
+                }
+                crate::orchestration::world::Condition::CargoCheckSuccess => {
+                    "Condition::CargoCheckSuccess".to_string()
+                }
+                crate::orchestration::world::Condition::Script { script } => {
+                    format!("Condition::Script {{ script: \"{}\".to_string() }}", script)
+                }
+                crate::orchestration::world::Condition::Legacy(script) => {
+                    format!("Condition::Legacy(\"{}\".to_string())", script)
+                }
+            };
             format!(
-                "PlanNode::Conditional {{\n{}condition_script: \"{}\".to_string(),\n{}then_branch: Box::new({}),\n{}else_branch: {},\n{}}}",
-                next_indent, condition_script, next_indent, then_code, next_indent, else_code, indent
+                "PlanNode::Conditional {{\n{}condition: {},\n{}then_branch: Box::new({}),\n{}else_branch: {},\n{}}}",
+                next_indent, cond_code, next_indent, then_code, next_indent, else_code, indent
             )
         }
         crate::orchestration::world::PlanNode::Retry { node, max_attempts } => {
@@ -216,9 +231,26 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                 nodes: nodes.iter().map(|n| substitute_node(n, params)).collect(),
             }
         }
-        crate::orchestration::world::PlanNode::Conditional { condition_script, then_branch, else_branch } => {
+        crate::orchestration::world::PlanNode::Conditional { condition, then_branch, else_branch } => {
+            let sub_condition = match condition {
+                crate::orchestration::world::Condition::FileExists { path } => {
+                    let path_str = substitute_string(&path.to_string_lossy(), params);
+                    crate::orchestration::world::Condition::FileExists { path: PathBuf::from(path_str) }
+                }
+                crate::orchestration::world::Condition::CargoCheckSuccess => {
+                    crate::orchestration::world::Condition::CargoCheckSuccess
+                }
+                crate::orchestration::world::Condition::Script { script } => {
+                    crate::orchestration::world::Condition::Script {
+                        script: substitute_string(script, params),
+                    }
+                }
+                crate::orchestration::world::Condition::Legacy(script) => {
+                    crate::orchestration::world::Condition::Legacy(substitute_string(script, params))
+                }
+            };
             crate::orchestration::world::PlanNode::Conditional {
-                condition_script: substitute_string(condition_script, params),
+                condition: sub_condition,
                 then_branch: Box::new(substitute_node(then_branch, params)),
                 else_branch: else_branch.as_ref().map(|b| Box::new(substitute_node(b, params))),
             }

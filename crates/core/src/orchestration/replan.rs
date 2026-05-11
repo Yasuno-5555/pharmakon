@@ -51,9 +51,9 @@ impl IncrementalPlanner {
                 }
                 PlanNode::Parallel { nodes: new_nodes }
             }
-            PlanNode::Conditional { condition_script, then_branch, else_branch } => {
+            PlanNode::Conditional { condition, then_branch, else_branch } => {
                 PlanNode::Conditional {
-                    condition_script: condition_script.clone(),
+                    condition: condition.clone(),
                     then_branch: Box::new(self.replan_node(then_branch, target_tool, replacement.clone())),
                     else_branch: else_branch.as_ref().map(|b| Box::new(self.replan_node(b, target_tool, replacement.clone()))),
                 }

@@ -317,6 +317,45 @@ impl Default for ExecutionProfile {
     }
 }
 
+impl ExecutionProfile {
+    pub fn risk_score(&self) -> f64 {
+        let mut score: f64 = 0.1; // Base risk
+
+        // Side effect level risk contributor
+        score += match self.side_effect_level {
+            SideEffectLevel::None => 0.0,
+            SideEffectLevel::Local => 0.2,
+            SideEffectLevel::Irreversible => 0.5,
+        };
+
+        // Filesystem scope risk contributor
+        score += match self.filesystem_scope {
+            FilesystemScope::None => 0.0,
+            FilesystemScope::Confined => 0.1,
+            FilesystemScope::Unrestricted => 0.3,
+        };
+
+        // Reversibility risk contributor
+        score += match self.reversibility {
+            Reversibility::Trivial => 0.0,
+            Reversibility::Possible => 0.1,
+            Reversibility::Impractical => 0.3,
+        };
+
+        // Network access contributor
+        if self.network_access {
+            score += 0.1;
+        }
+
+        // Requires approval contributor
+        if self.requires_human_approval {
+            score += 0.1;
+        }
+
+        score.min(1.0)
+    }
+}
+
 /// Lightweight tool metadata for deferred loading.
 /// Only ~80 bytes per tool — kept in memory permanently.
 /// Full Tool implementation is hydrated on demand.

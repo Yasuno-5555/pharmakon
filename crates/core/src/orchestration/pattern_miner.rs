@@ -96,14 +96,28 @@ fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
             let substituted = nodes.iter().map(|n| substitute_node(n, params)).collect();
             PlanNode::Parallel { nodes: substituted }
         }
-        PlanNode::Conditional { condition_script, then_branch, else_branch } => {
-            let sub_cond = substitute_string(condition_script, params);
-            let sub_then = Box::new(substitute_node(then_branch, params));
-            let sub_else = else_branch.as_ref().map(|b| Box::new(substitute_node(b, params)));
+        PlanNode::Conditional { condition, then_branch, else_branch } => {
+            let sub_condition = match condition {
+                crate::orchestration::world::Condition::FileExists { path } => {
+                    let path_str = substitute_string(&path.to_string_lossy(), params);
+                    crate::orchestration::world::Condition::FileExists { path: std::path::PathBuf::from(path_str) }
+                }
+                crate::orchestration::world::Condition::CargoCheckSuccess => {
+                    crate::orchestration::world::Condition::CargoCheckSuccess
+                }
+                crate::orchestration::world::Condition::Script { script } => {
+                    crate::orchestration::world::Condition::Script {
+                        script: substitute_string(script, params),
+                    }
+                }
+                crate::orchestration::world::Condition::Legacy(script) => {
+                    crate::orchestration::world::Condition::Legacy(substitute_string(script, params))
+                }
+            };
             PlanNode::Conditional {
-                condition_script: sub_cond,
-                then_branch: sub_then,
-                else_branch: sub_else,
+                condition: sub_condition,
+                then_branch: Box::new(substitute_node(then_branch, params)),
+                else_branch: else_branch.as_ref().map(|b| Box::new(substitute_node(b, params))),
             }
         }
         PlanNode::Retry { node, max_attempts } => {
@@ -243,9 +257,26 @@ fn generalize_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
         PlanNode::Parallel { nodes } => {
             PlanNode::Parallel { nodes: nodes.iter().map(|n| generalize_node(n, params)).collect() }
         }
-        PlanNode::Conditional { condition_script, then_branch, else_branch } => {
+        PlanNode::Conditional { condition, then_branch, else_branch } => {
+            let gen_condition = match condition {
+                crate::orchestration::world::Condition::FileExists { path } => {
+                    let path_str = generalize_string(&path.to_string_lossy(), params);
+                    crate::orchestration::world::Condition::FileExists { path: std::path::PathBuf::from(path_str) }
+                }
+                crate::orchestration::world::Condition::CargoCheckSuccess => {
+                    crate::orchestration::world::Condition::CargoCheckSuccess
+                }
+                crate::orchestration::world::Condition::Script { script } => {
+                    crate::orchestration::world::Condition::Script {
+                        script: generalize_string(script, params),
+                    }
+                }
+                crate::orchestration::world::Condition::Legacy(script) => {
+                    crate::orchestration::world::Condition::Legacy(generalize_string(script, params))
+                }
+            };
             PlanNode::Conditional {
-                condition_script: generalize_string(condition_script, params),
+                condition: gen_condition,
                 then_branch: Box::new(generalize_node(then_branch, params)),
                 else_branch: else_branch.as_ref().map(|b| Box::new(generalize_node(b, params))),
             }

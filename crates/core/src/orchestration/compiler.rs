@@ -84,9 +84,9 @@ impl PlanCompiler {
                 let optimized_nodes = nodes.into_iter().map(|n| self.optimize_dead_steps(n)).collect();
                 PlanNode::Parallel { nodes: optimized_nodes }
             }
-            PlanNode::Conditional { condition_script, then_branch, else_branch } => {
+            PlanNode::Conditional { condition, then_branch, else_branch } => {
                 PlanNode::Conditional {
-                    condition_script,
+                    condition,
                     then_branch: Box::new(self.optimize_dead_steps(*then_branch)),
                     else_branch: else_branch.map(|e| Box::new(self.optimize_dead_steps(*e))),
                 }
@@ -150,9 +150,9 @@ impl PlanCompiler {
                 let optimized_nodes = nodes.into_iter().map(|n| self.fuse_steps(n)).collect();
                 PlanNode::Parallel { nodes: optimized_nodes }
             }
-            PlanNode::Conditional { condition_script, then_branch, else_branch } => {
+            PlanNode::Conditional { condition, then_branch, else_branch } => {
                 PlanNode::Conditional {
-                    condition_script,
+                    condition,
                     then_branch: Box::new(self.fuse_steps(*then_branch)),
                     else_branch: else_branch.map(|e| Box::new(self.fuse_steps(*e))),
                 }

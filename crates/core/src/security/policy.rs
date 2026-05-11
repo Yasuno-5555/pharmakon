@@ -80,10 +80,10 @@ impl Policy for ConstitutionalPolicy {
 
         // Rule 3: Shell commands must pass constitutional review
         if tool_name == "shell" && args["command"].as_str().is_some_and(|c| {
-            c.contains("rm -rf /") || c.contains("sudo ") || c.contains("chmod 777")
+            c.contains("rm -rf /") || c.contains("sudo ") || c.contains("chmod 777") || c.contains("git clean")
         }) {
             return PolicyAction::Deny(
-                "Constitutional violation: Destructive system commands are prohibited.".to_string(),
+                "Constitutional violation: Destructive system or repository commands (like git clean) are prohibited.".to_string(),
             );
         }
 

@@ -16,6 +16,35 @@ use futures::future::{BoxFuture, FutureExt};
 // ═══════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "condition_type")]
+pub enum Condition {
+    FileExists { path: PathBuf },
+    CargoCheckSuccess,
+    Script { script: String },
+    #[serde(untagged)]
+    Legacy(String),
+}
+
+impl Condition {
+    pub async fn evaluate(&self, workspace_root: &Path) -> bool {
+        match self {
+            Condition::FileExists { path } => {
+                let resolved = if path.is_absolute() { path.clone() } else { workspace_root.join(path) };
+                resolved.exists()
+            }
+            Condition::CargoCheckSuccess => {
+                run_cargo_check(workspace_root).await
+            }
+            Condition::Script { script } | Condition::Legacy(script) => {
+                let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
+                let r = engine.execute(script);
+                r.success && r.output.trim() == "true"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum PlanNode {
     Step {
@@ -31,7 +60,7 @@ pub enum PlanNode {
         nodes: Vec<PlanNode>,
     },
     Conditional {
-        condition_script: String,
+        condition: Condition,
         then_branch: Box<PlanNode>,
         else_branch: Option<Box<PlanNode>>,
     },
@@ -113,15 +142,16 @@ impl StaticVerifier {
         Self { risk_ceiling }
     }
 
-    pub async fn verify(&self, node: &PlanNode, workspace_root: &Path) -> Result<Vec<String>> {
+    pub async fn verify(&self, agent: &Agent, node: &PlanNode, workspace_root: &Path) -> Result<Vec<String>> {
         let mut issues = Vec::new();
         let mut simulated_created_paths = HashSet::new();
-        self.verify_node(node, workspace_root, &mut issues, &mut simulated_created_paths).await?;
+        self.verify_node(agent, node, workspace_root, &mut issues, &mut simulated_created_paths).await?;
         Ok(issues)
     }
 
     async fn verify_node(
         &self,
+        agent: &Agent,
         node: &PlanNode,
         workspace_root: &Path,
         issues: &mut Vec<String>,
@@ -129,13 +159,21 @@ impl StaticVerifier {
     ) -> Result<()> {
         match node {
             PlanNode::Step { tool, args, .. } => {
-                // 1. Risk ceiling enforcement
-                let tool_risk = match tool.as_str() {
-                    "shell" => 0.9,
-                    "codeact" => 0.8,
-                    "write_file" => 0.6,
-                    "apply_patch" => 0.5,
-                    _ => 0.1,
+                // 1. Risk ceiling enforcement using unified ExecutionProfile score
+                let tool_risk = {
+                    let reg = agent.registry.lock().await;
+                    if let Some(meta) = reg.catalog.get(tool) {
+                        meta.profile.risk_score()
+                    } else {
+                        // Safe fallback risks for built-in/unknown custom tools
+                        match tool.as_str() {
+                            "shell" => 0.9,
+                            "codeact" => 0.8,
+                            "write_file" => 0.6,
+                            "apply_patch" => 0.5,
+                            _ => 0.1,
+                        }
+                    }
                 };
                 if tool_risk > self.risk_ceiling {
                     issues.push(format!("Risk ceiling violation: Tool '{}' has risk {} which exceeds ceiling {}", tool, tool_risk, self.risk_ceiling));
@@ -203,17 +241,17 @@ impl StaticVerifier {
             }
             PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                 for child in nodes {
-                    Box::pin(self.verify_node(child, workspace_root, issues, simulated_created_paths)).await?;
+                    Box::pin(self.verify_node(agent, child, workspace_root, issues, simulated_created_paths)).await?;
                 }
             }
-            PlanNode::Conditional { then_branch, else_branch, .. } => {
-                Box::pin(self.verify_node(then_branch, workspace_root, issues, simulated_created_paths)).await?;
+            PlanNode::Conditional { condition: _, then_branch, else_branch } => {
+                Box::pin(self.verify_node(agent, then_branch, workspace_root, issues, simulated_created_paths)).await?;
                 if let Some(else_b) = else_branch {
-                    Box::pin(self.verify_node(else_b, workspace_root, issues, simulated_created_paths)).await?;
+                    Box::pin(self.verify_node(agent, else_b, workspace_root, issues, simulated_created_paths)).await?;
                 }
             }
             PlanNode::Retry { node, .. } | PlanNode::Verify { node, .. } | PlanNode::Gate { node, .. } => {
-                Box::pin(self.verify_node(node, workspace_root, issues, simulated_created_paths)).await?;
+                Box::pin(self.verify_node(agent, node, workspace_root, issues, simulated_created_paths)).await?;
             }
         }
         Ok(())
@@ -422,12 +460,23 @@ impl PlanCache {
             let self_cloned = self.clone();
             tokio::spawn(async move {
                 log::info!("Background Thread: Starting pattern mining & AOT compilation...");
-                let miner = crate::orchestration::pattern_miner::PatternMiner::new();
-                let lib = miner.mine_patterns(&self_cloned);
-                if lib.save().is_ok() {
+                let res = std::panic::AssertUnwindSafe(async {
+                    let miner = crate::orchestration::pattern_miner::PatternMiner::new();
+                    let lib = miner.mine_patterns(&self_cloned);
+                    if let Err(e) = lib.save() {
+                        log::warn!("Background Thread: Failed to save pattern library: {}", e);
+                        return;
+                    }
                     let aot = crate::orchestration::aot::AotCompiler::new_with_thresholds(2, 0.90);
-                    let _ = aot.compile_and_cache(&lib);
-                    log::info!("Background Thread: Pattern mining & AOT compilation completed successfully!");
+                    if let Err(e) = aot.compile_and_cache(&lib) {
+                        log::warn!("Background Thread: Failed to compile and cache AOT pattern: {}", e);
+                    } else {
+                        log::info!("Background Thread: Pattern mining & AOT compilation completed successfully!");
+                    }
+                }).catch_unwind().await;
+
+                if res.is_err() {
+                    log::error!("Background Thread: Pattern mining & AOT compilation task panicked!");
                 }
             });
         }
@@ -667,10 +716,12 @@ fn calculate_static_bayesian_score(
         };
         let matches: Vec<_> = lib.entries.iter().filter(|e| e.category == category).collect();
         if matches.is_empty() {
-            0.8
+            0.5 // Uninformative prior Beta(1,1) expectation
         } else {
             let successes = matches.iter().filter(|e| e.label.is_success()).count() as f64;
-            successes / matches.len() as f64
+            let total_count = matches.len() as f64;
+            // Laplace's Rule of Succession (Beta-Binomial sequential updating expectation)
+            (successes + 1.0) / (total_count + 2.0)
         }
     };
 
@@ -884,7 +935,7 @@ pub fn execute_node<'a>(
                                     extract_write_paths(c, root, paths);
                                 }
                             }
-                            PlanNode::Conditional { then_branch, else_branch, .. } => {
+                            PlanNode::Conditional { condition: _, then_branch, else_branch } => {
                                 extract_write_paths(then_branch, root, paths);
                                 if let Some(e) = else_branch {
                                     extract_write_paths(e, root, paths);
@@ -959,10 +1010,8 @@ pub fn execute_node<'a>(
                 }
                 Ok(combined)
             }
-            PlanNode::Conditional { condition_script, then_branch, else_branch } => {
-                let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
-                let r = engine.execute(condition_script);
-                if r.success && r.output.trim() == "true" {
+            PlanNode::Conditional { condition, then_branch, else_branch } => {
+                if condition.evaluate(workspace_root).await {
                     execute_node(agent, then_branch, workspace_root, snapshotted_files).await
                 } else if let Some(else_b) = else_branch {
                     execute_node(agent, else_b, workspace_root, snapshotted_files).await
@@ -1076,7 +1125,7 @@ pub async fn execute_world_model(
             let compiled_ast = compiler.compile(raw_ast);
             plan.root = Some(compiled_ast.clone());
 
-            let verify_issues = verifier.verify(&compiled_ast, &workspace_root).await?;
+            let verify_issues = verifier.verify(agent, &compiled_ast, &workspace_root).await?;
             let valid = verify_issues.is_empty();
 
             if !valid {
@@ -1190,14 +1239,10 @@ pub async fn execute_world_model(
                 }
             }
 
-            // Revert all modified and untracked files to absolute pristine repository topology state!
+            // Revert all modified and untracked files safely via stash to avoid permanent data loss!
+            log::warn!("WorldModel V2: Stashing any uncommitted changes to git stash to avoid data loss...");
             std::process::Command::new("git")
-                .args(["checkout", "."])
-                .current_dir(&workspace_root)
-                .output()
-                .ok();
-            std::process::Command::new("git")
-                .args(["clean", "-fd"])
+                .args(["stash", "push", "--include-untracked", "-m", "Pharmakon Auto-Rollback Guard"])
                 .current_dir(&workspace_root)
                 .output()
                 .ok();
