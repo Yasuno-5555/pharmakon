@@ -46,7 +46,7 @@ impl Tool for TemporalAwarenessTool {
 
         let since_arg = format!("--since={} days ago", days);
         let log_cmd = Command::new("git")
-            .args(&["log", &since_arg, "--oneline", "--", path])
+            .args(["log", &since_arg, "--oneline", "--", path])
             .output()
             .map_err(|e| AgentError(format!("Git log failed: {}", e)))?;
 
@@ -58,7 +58,7 @@ impl Tool for TemporalAwarenessTool {
         };
 
         let author_cmd = Command::new("git")
-            .args(&["log", &since_arg, "--format=%an", "--", path])
+            .args(["log", &since_arg, "--format=%an", "--", path])
             .output()
             .map_err(|e| AgentError(format!("Git log (authors) failed: {}", e)))?;
             
@@ -74,7 +74,7 @@ impl Tool for TemporalAwarenessTool {
         sorted_authors.sort_by(|a, b| b.1.cmp(&a.1));
 
         let last_mod_cmd = Command::new("git")
-            .args(&["log", "-1", "--format=%cd", "--date=relative", "--", path])
+            .args(["log", "-1", "--format=%cd", "--date=relative", "--", path])
             .output()
             .map_err(|e| AgentError(format!("Git last mod failed: {}", e)))?;
             
@@ -184,7 +184,7 @@ impl Tool for FailurePredictionTool {
 
         // 2. Historical Analysis: Bug Fix Frequency
         let bug_cmd = Command::new("git")
-            .args(&["log", "--oneline", "-i", "-E", "--grep=(fix|bug|issue|resolve)", "--", path])
+            .args(["log", "--oneline", "-i", "-E", "--grep=(fix|bug|issue|resolve)", "--", path])
             .output()
             .map_err(|e| AgentError(format!("Git log failed: {}", e)))?;
         
@@ -192,7 +192,7 @@ impl Tool for FailurePredictionTool {
         let bug_fix_count = if bug_output.trim().is_empty() { 0 } else { bug_output.lines().count() };
 
         let total_cmd = Command::new("git")
-            .args(&["log", "--oneline", "--", path])
+            .args(["log", "--oneline", "--", path])
             .output()
             .unwrap_or_else(|_| std::process::Output {
                 status: std::os::unix::process::ExitStatusExt::from_raw(0),
@@ -312,7 +312,7 @@ impl Tool for ProactiveSelfOptimizationTool {
         match scan_type {
             "clippy_perf" => {
                 let cmd_output = Command::new("cargo")
-                    .args(&["clippy", "--message-format=short", "--", "-W", "clippy::perf"])
+                    .args(["clippy", "--message-format=short", "--", "-W", "clippy::perf"])
                     .output()
                     .map_err(|e| AgentError(format!("Cargo clippy failed: {}", e)))?;
 
@@ -341,7 +341,7 @@ impl Tool for ProactiveSelfOptimizationTool {
             },
             "hotspot_analysis" => {
                 let cmd = Command::new("git")
-                    .args(&["grep", "-n", "clone()", "--", "*.rs"])
+                    .args(["grep", "-n", "clone()", "--", "*.rs"])
                     .output()
                     .map_err(|e| AgentError(format!("Grep failed: {}", e)))?;
 

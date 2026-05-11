@@ -142,8 +142,8 @@ impl StaticVerifier {
                 }
 
                 // 2. Dangerous shell command patterns
-                if tool == "shell" {
-                    if let Some(cmd) = args.get("command").and_then(|c| c.as_str()) {
+                if tool == "shell"
+                    && let Some(cmd) = args.get("command").and_then(|c| c.as_str()) {
                         let dangerous = ["rm -rf /", "sudo ", "chmod 777", "mkfs", "dd if="];
                         for pattern in dangerous {
                             if cmd.contains(pattern) {
@@ -152,8 +152,8 @@ impl StaticVerifier {
                         }
 
                         // Heuristic symbolic package / workspace creation
-                        if cmd.contains("cargo new ") {
-                            if let Some(pos) = cmd.find("cargo new ") {
+                        if cmd.contains("cargo new ")
+                            && let Some(pos) = cmd.find("cargo new ") {
                                 let sub = &cmd[pos + 10..];
                                 let name = sub.split_whitespace().next().unwrap_or("");
                                 if !name.is_empty() {
@@ -163,32 +163,28 @@ impl StaticVerifier {
                                     simulated_created_paths.insert(pkg_root.join("src/main.rs"));
                                 }
                             }
-                        }
                     }
-                }
 
                 // 3. Symbolic creation registry to solve the "Time-Paradox" bug
-                if tool == "write_file" || tool == "apply_patch" {
-                    if let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
+                if (tool == "write_file" || tool == "apply_patch")
+                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
                         let resolved = resolve_path(workspace_root, path_str);
                         simulated_created_paths.insert(resolved);
                     }
-                }
 
                 // 4. Hallucinated path check (reading non-existent files)
-                if tool == "read_file" {
-                    if let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
+                if tool == "read_file"
+                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
                         let resolved = resolve_path(workspace_root, path_str);
                         if !resolved.exists() && !simulated_created_paths.contains(&resolved) {
                             issues.push(format!("Hallucinated path: File '{}' does not exist", path_str));
                         }
                     }
-                }
 
                 // 5. Patch applicability dry-run (incorporates symbolic tracking)
-                if tool == "apply_patch" {
-                    if let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
-                        if let Some(patch_str) = args.get("patch").and_then(|p| p.as_str()) {
+                if tool == "apply_patch"
+                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str())
+                        && let Some(patch_str) = args.get("patch").and_then(|p| p.as_str()) {
                             let resolved = resolve_path(workspace_root, path_str);
                             if resolved.exists() {
                                 if let Ok(original) = tokio::fs::read_to_string(&resolved).await {
@@ -204,8 +200,6 @@ impl StaticVerifier {
                                 issues.push(format!("Patch target path does not exist: '{}'", path_str));
                             }
                         }
-                    }
-                }
             }
             PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                 for child in nodes {
@@ -274,13 +268,11 @@ pub struct PlanCache {
 impl PlanCache {
     pub fn load() -> Self {
         let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/plan_cache.json");
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(cache) = serde_json::from_str(&content) {
+        if path.exists()
+            && let Ok(content) = std::fs::read_to_string(path)
+                && let Ok(cache) = serde_json::from_str(&content) {
                     return cache;
                 }
-            }
-        }
         Self::default()
     }
 
@@ -444,19 +436,17 @@ impl PlanCache {
 
 pub fn get_environment_fingerprint(workspace_root: &Path) -> String {
     let mut fingerprint = String::new();
-    if let Ok(meta) = std::fs::metadata(workspace_root.join("Cargo.toml")) {
-        if let Ok(modified) = meta.modified() {
+    if let Ok(meta) = std::fs::metadata(workspace_root.join("Cargo.toml"))
+        && let Ok(modified) = meta.modified() {
             fingerprint.push_str(&format!("{:?}", modified));
         }
-    }
     if let Ok(output) = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(workspace_root)
-        .output() {
-        if output.status.success() {
+        .output()
+        && output.status.success() {
             fingerprint.push_str(String::from_utf8_lossy(&output.stdout).trim());
         }
-    }
     crate::event_log::short_hash(&fingerprint)
 }
 
@@ -535,7 +525,7 @@ impl FailureKind {
                 kind: FailureKind::PatchFailed,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
-                feedback_for_planner: format!("Patch Applicability Error: The unified patch failed to apply to the target file. Check lines, context, and use fresh read_file to regenerate accurate diff hunk headers."),
+                feedback_for_planner: "Patch Applicability Error: The unified patch failed to apply to the target file. Check lines, context, and use fresh read_file to regenerate accurate diff hunk headers.".to_string(),
             }
         } else if err_lower.contains("dependency") || err_lower.contains("missing crate") || err_lower.contains("could not find") {
             PlanFailure {
@@ -618,18 +608,17 @@ pub async fn generate_candidate_plans(
                 let mut parsed_plan = None;
                 if let Some(tool_calls) = response.tool_calls {
                     for tc in tool_calls {
-                        if tc.function.name == "plan_generation" {
-                            if let Ok(p) = serde_json::from_str::<CandidatePlan>(&tc.function.arguments) {
+                        if tc.function.name == "plan_generation"
+                            && let Ok(p) = serde_json::from_str::<CandidatePlan>(&tc.function.arguments) {
                                 parsed_plan = Some(p);
                                 break;
                             }
-                        }
                     }
                 }
 
                 // Fallback: parse raw text content
-                if parsed_plan.is_none() {
-                    if let Some(text) = response.content.as_ref().and_then(|c| c.as_text()) {
+                if parsed_plan.is_none()
+                    && let Some(text) = response.content.as_ref().and_then(|c| c.as_text()) {
                         let json_text = if let Some(start) = text.find('{') {
                             let end = text.rfind('}').unwrap_or(text.len());
                             &text[start..end + 1]
@@ -640,7 +629,6 @@ pub async fn generate_candidate_plans(
                             parsed_plan = Some(p);
                         }
                     }
-                }
 
                 if let Some(mut plan) = parsed_plan {
                     plan.id = format!("plan-{}", i);
@@ -805,18 +793,17 @@ pub fn execute_node<'a>(
                     return Err(e);
                 }
 
-                if tool == "write_file" || tool == "apply_patch" {
-                    if let Some(path_str) = args.get("path").and_then(|s| s.as_str()) {
+                if (tool == "write_file" || tool == "apply_patch")
+                    && let Some(path_str) = args.get("path").and_then(|s| s.as_str()) {
                         let resolved = resolve_path(workspace_root, path_str);
-                        if resolved.exists() {
-                            if let Ok(snap_id) = agent.snapshot_store.snapshot_file(&resolved).await {
+                        if resolved.exists()
+                            && let Ok(snap_id) = agent.snapshot_store.snapshot_file(&resolved).await {
                                 snapshotted_files.push((resolved, snap_id));
                             }
-                        }
                     }
-                }
 
-                let result = match tool.as_str() {
+                
+                match tool.as_str() {
                     "codeact" => {
                         let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
                         let script = args.get("script").and_then(|s| s.as_str()).unwrap_or("");
@@ -869,8 +856,7 @@ pub fn execute_node<'a>(
                             None => Err(anyhow!("Tool not found: {}", tool)),
                         }
                     }
-                };
-                result
+                }
             }
             PlanNode::Sequence { nodes } => {
                 let mut last_out = String::new();
@@ -888,11 +874,10 @@ pub fn execute_node<'a>(
                     fn extract_write_paths(n: &PlanNode, root: &Path, paths: &mut std::collections::HashSet<PathBuf>) {
                         match n {
                             PlanNode::Step { tool, args, .. } => {
-                                if tool == "write_file" || tool == "apply_patch" {
-                                    if let Some(path_str) = args.get("path").and_then(|s| s.as_str()) {
+                                if (tool == "write_file" || tool == "apply_patch")
+                                    && let Some(path_str) = args.get("path").and_then(|s| s.as_str()) {
                                         paths.insert(resolve_path(root, path_str));
                                     }
-                                }
                             }
                             PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                                 for c in nodes {

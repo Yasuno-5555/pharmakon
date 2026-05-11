@@ -29,17 +29,15 @@ enum Widget {
 fn extract_string_param(line: &str, method: &str) -> Option<String> {
     if let Some(pos) = line.find(method) {
         let after = &line[pos + method.len()..];
-        if let Some(start) = after.find('"') {
-            if let Some(end) = after[start+1..].find('"') {
+        if let Some(start) = after.find('"')
+            && let Some(end) = after[start+1..].find('"') {
                 return Some(after[start+1..start+1+end].to_string());
             }
-        }
         // Fallback to single quotes
-        if let Some(start) = after.find('\'') {
-            if let Some(end) = after[start+1..].find('\'') {
+        if let Some(start) = after.find('\'')
+            && let Some(end) = after[start+1..].find('\'') {
                 return Some(after[start+1..start+1+end].to_string());
             }
-        }
     }
     None
 }
@@ -98,13 +96,11 @@ impl Tool for NativeGuiEmulatorTool {
                 
                 for line in content.lines() {
                     let trimmed = line.trim();
-                    if trimmed.contains("egui::Window::new") {
-                        if let Some(start) = trimmed.find('"') {
-                            if let Some(end) = trimmed[start+1..].find('"') {
+                    if trimmed.contains("egui::Window::new")
+                        && let Some(start) = trimmed.find('"')
+                            && let Some(end) = trimmed[start+1..].find('"') {
                                 current_window = trimmed[start+1..start+1+end].to_string();
                             }
-                        }
-                    }
                     
                     if trimmed.contains(".heading(") {
                         if let Some(val) = extract_string_param(trimmed, ".heading(") {

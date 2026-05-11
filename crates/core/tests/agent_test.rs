@@ -1,8 +1,5 @@
-// NOTE: Tests temporarily disabled — Agent API was refactored from flat history
-// to session-based state. Use agent.get_history() instead of agent.history.
 #![allow(unused_imports)]
 
-/*
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{AgentModel, AgentResult, CompletionRequest, CompletionResponse};
 
@@ -30,6 +27,7 @@ impl AgentModel for MockModel {
             content: Some(pharmakon_common::MessageContent::Text(content.to_string())),
             tool_calls: None,
             usage: None,
+            finish_reason: None,
         })
     }
 
@@ -54,22 +52,21 @@ impl AgentModel for MockModel {
 #[tokio::test]
 async fn test_agent_chat_basic() {
     let model = Arc::new(MockModel);
-    let mut agent = Agent::new(model, "test-session".to_string());
+    let agent = Agent::new(model, "test-session".to_string());
 
     let response = agent.chat("hello agent").await.unwrap();
     assert!(response.contains("AI assistant"));
-    assert_eq!(agent.history.lock().await.len(), 2); // User + Assistant
+    assert_eq!(agent.get_history().await.len(), 2); // User + Assistant
 }
 
 #[tokio::test]
 async fn test_agent_reset_history() {
     let model = Arc::new(MockModel);
-    let mut agent = Agent::new(model, "test-session".to_string());
+    let agent = Agent::new(model, "test-session".to_string());
 
     agent.chat("msg 1").await.unwrap();
-    assert_eq!(agent.history.lock().await.len(), 2);
+    assert_eq!(agent.get_history().await.len(), 2);
 
-    agent.reset_history().await;
-    assert_eq!(agent.history.lock().await.len(), 0);
+    agent.reset_history().await.unwrap();
+    assert_eq!(agent.get_history().await.len(), 0);
 }
-*/

@@ -89,9 +89,9 @@ impl InsightSynthesizer {
                 let mut existing = std::fs::read_to_string(&mandate_path).unwrap_or_default();
                 existing.push_str("\n### [Automated Mandate] ");
                 existing.push_str(&chrono::Utc::now().format("%Y-%m-%d").to_string());
-                existing.push_str("\n");
+                existing.push('\n');
                 existing.push_str(&mandate);
-                existing.push_str("\n");
+                existing.push('\n');
                 let _ = std::fs::write(&mandate_path, existing);
                 log::info!("PHARMAKON.md updated with new mandate validated by critic.");
             }

@@ -110,6 +110,12 @@ where
     }
 }
 
+impl Default for ParallelExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ParallelExecutor {
     pub fn new() -> Self {
         Self { tasks: Vec::new() }
@@ -239,13 +245,11 @@ impl ParallelExecutor {
                     })
                 });
 
-                if output.success {
-                    if let Some(ref result) = output.result {
-                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(result) {
+                if output.success
+                    && let Some(ref result) = output.result
+                        && let Ok(value) = serde_json::from_str::<serde_json::Value>(result) {
                             completed.lock().await.insert(name.clone(), value);
                         }
-                    }
-                }
                 outputs.push(output);
             }
         }

@@ -190,11 +190,10 @@ impl PlaybookTool {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_file()
-                        && let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                            if !names.contains(&name.to_string()) {
+                        && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+                            && !names.contains(&name.to_string()) {
                                 names.push(name.to_string());
                             }
-                        }
                 }
             }
         names
@@ -267,8 +266,8 @@ impl Tool for PlaybookTool {
                 }
 
                 // Local recipes
-                if recipes_dir.exists() {
-                    if let Ok(entries) = fs::read_dir(&recipes_dir) {
+                if recipes_dir.exists()
+                    && let Ok(entries) = fs::read_dir(&recipes_dir) {
                         let mut custom = vec![];
                         for e in entries.flatten() {
                             let path = e.path();
@@ -284,7 +283,6 @@ impl Tool for PlaybookTool {
                             }
                         }
                     }
-                }
 
                 if lines.len() <= 1 {
                     Ok("No playbooks found.".into())

@@ -111,6 +111,12 @@ pub struct ToolPolicyEngine {
     last_executed: Mutex<HashMap<String, Instant>>,
 }
 
+impl Default for ToolPolicyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolPolicyEngine {
     pub fn new() -> Self {
         let mut policies = HashMap::new();
@@ -151,15 +157,14 @@ impl ToolPolicyEngine {
         // Cooldown check
         if let Some(policy) = self.policies.get(tool) {
             let mut last_exec = self.last_executed.lock().unwrap();
-            if let Some(last) = last_exec.get(tool) {
-                if now.duration_since(*last) < policy.cooldown {
+            if let Some(last) = last_exec.get(tool)
+                && now.duration_since(*last) < policy.cooldown {
                     let wait_needed = policy.cooldown - now.duration_since(*last);
                     return Err(anyhow!(
                         "Tool '{}' is on cooldown. Please wait {:.1}s or consolidate calls.",
                         tool, wait_needed.as_secs_f32()
                     ));
                 }
-            }
             last_exec.insert(tool.to_string(), now);
 
             // Require reason check
@@ -194,6 +199,12 @@ pub struct AttentionScore {
 pub struct AttentionScheduler {
     pub scores: Mutex<HashMap<PathBuf, AttentionScore>>,
     pub touched_history: Mutex<Vec<PathBuf>>,
+}
+
+impl Default for AttentionScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AttentionScheduler {
@@ -364,11 +375,10 @@ fn walk_dir(dir: &Path) -> Result<Vec<PathBuf>> {
             if name.starts_with('.') || name == "target" || name == "node_modules" {
                 continue;
             }
-            if let Ok(file_type) = entry.file_type() {
-                if file_type.is_symlink() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_symlink() {
                     continue;
                 }
-            }
             if path.is_dir() {
                 paths.extend(walk_dir(&path)?);
             } else if path.is_file() {

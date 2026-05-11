@@ -432,6 +432,12 @@ pub struct CognitiveMacroState {
     pub system_memory_total_mb: u64,
 }
 
+impl Default for CognitiveMacroState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CognitiveMacroState {
     pub fn new() -> Self {
         Self {
@@ -609,6 +615,12 @@ pub struct KnowledgeCapital {
     pub memory_embedding_quality: f64, pub policy_compression_ratio: f64,
     pub depreciation_rate: f64, pub cumulative_investment: f64,
 }
+impl Default for KnowledgeCapital {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KnowledgeCapital {
     pub fn new() -> Self { Self { reusable_trajectories: 0.0, crystallized_skills: 0.0, memory_embedding_quality: 0.5, policy_compression_ratio: 0.3, depreciation_rate: 0.01, cumulative_investment: 0.0 } }
     pub fn total(&self) -> f64 { self.reusable_trajectories + self.crystallized_skills + self.memory_embedding_quality + self.policy_compression_ratio }
@@ -630,6 +642,12 @@ impl NonlinearContextInflation {
 pub struct ProviderPortfolio {
     pub allocations: Vec<(String, f64)>, pub correlation_matrix: std::collections::HashMap<(String,String),f64>,
 }
+impl Default for ProviderPortfolio {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProviderPortfolio {
     pub fn new() -> Self { Self { allocations: Vec::new(), correlation_matrix: std::collections::HashMap::new() } }
     pub fn markowitz_allocation(&self, risk_aversion: f64) -> Vec<(String, f64)> {
@@ -663,6 +681,12 @@ impl CognitiveLoan {
 }
 
 pub struct ExpectationSimulator { pub future_token_prices: Vec<f64>, pub volatility_estimate: f64, pub regime_probabilities: std::collections::HashMap<String,f64>, pub rng: rand::rngs::StdRng }
+impl Default for ExpectationSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExpectationSimulator {
     pub fn new() -> Self { use rand::SeedableRng; Self { future_token_prices: Vec::new(), volatility_estimate: 0.1, regime_probabilities: std::collections::HashMap::new(), rng: rand::rngs::StdRng::seed_from_u64(42) } }
     /// Create with a specific seed for reproducible simulations.
@@ -700,6 +724,12 @@ pub struct RegimeSwitcher {
     pub transition_matrix: [[f64; 4]; 4],
     pub regime_durations: std::collections::HashMap<MacroRegime, u64>,
 }
+impl Default for RegimeSwitcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegimeSwitcher {
     pub fn new() -> Self {
         let mut tm = [[0.0; 4]; 4];
@@ -736,6 +766,12 @@ impl RegimeSwitcher {
 pub struct RegimePolicy { pub max_tokens: u32, pub max_retries: u32, pub prefer_cache: bool }
 
 pub struct EndogenousHallucinationModel { pub base_rate: f64, pub inflation_sensitivity: f64, pub entropy_sensitivity: f64, pub fatigue_factor: f64 }
+impl Default for EndogenousHallucinationModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EndogenousHallucinationModel {
     pub fn new() -> Self { Self { base_rate: 0.05, inflation_sensitivity: 0.15, entropy_sensitivity: 0.10, fatigue_factor: 0.02 } }
     pub fn rate(&self, inflation: f64, entropy: f64, turns: u64) -> f64 { (self.base_rate + self.inflation_sensitivity * inflation.max(0.0) + self.entropy_sensitivity * entropy + self.fatigue_factor * turns as f64).clamp(0.0, 0.95) }

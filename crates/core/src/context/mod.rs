@@ -125,7 +125,7 @@ impl ContextManager {
                 context.push_str(&format!("- {}\n", dir));
             }
         }
-        context.push_str("\n");
+        context.push('\n');
 
         // 2. User Context
         context.push_str("### USER CONTEXT (user.yml)\n");
@@ -147,7 +147,7 @@ impl ContextManager {
                 context.push_str(&format!("  - {}: {}\n", k, v));
             }
         }
-        context.push_str("\n");
+        context.push('\n');
 
         // 3. Tool Context (Dynamic Learned Usage)
         if !self.tools.general_heuristics.is_empty() || !self.tools.tool_notes.is_empty() {
@@ -170,7 +170,7 @@ impl ContextManager {
                     }
                 }
             }
-            context.push_str("\n");
+            context.push('\n');
         }
 
         context

@@ -278,15 +278,14 @@ impl GeminiModel {
                         // Strategy 1: Look up tool_call_id in previous messages' tool_calls
                         if let Some(id) = &m.tool_call_id {
                             // Strategy 2: Parse tool name from the call_id format: call_<tool_name>_<uuid>
-                            if let Some(rest) = id.strip_prefix("call_") {
-                                if let Some(last_underscore) = rest.rfind('_') {
+                            if let Some(rest) = id.strip_prefix("call_")
+                                && let Some(last_underscore) = rest.rfind('_') {
                                     let extracted = rest[..last_underscore].to_string();
                                     if !extracted.is_empty() {
                                         log::info!("Extracted function name '{}' from tool_call_id", extracted);
                                         return Some(extracted);
                                     }
                                 }
-                            }
                             // Strategy 3: Search previous messages' tool_calls
                             all_messages
                                 .iter()

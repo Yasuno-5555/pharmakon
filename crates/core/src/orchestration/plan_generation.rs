@@ -4,6 +4,12 @@ use serde_json::{Value, json};
 
 pub struct PlanGenerationTool;
 
+impl Default for PlanGenerationTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlanGenerationTool {
     pub fn new() -> Self {
         Self

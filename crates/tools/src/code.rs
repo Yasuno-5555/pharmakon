@@ -749,8 +749,8 @@ impl FindDefinitionTool {
                 loop {
                     let child = cursor.node();
                     let child_kind = child.kind();
-                    if matches!(child_kind, "identifier" | "type_identifier") {
-                        if child.utf8_text(content.as_bytes()).ok() == Some(name) {
+                    if matches!(child_kind, "identifier" | "type_identifier")
+                        && child.utf8_text(content.as_bytes()).ok() == Some(name) {
                             // Found it!
                             let start_line = node.start_position().row + 1;
                             let end_line = node.end_position().row + 1;
@@ -766,7 +766,6 @@ impl FindDefinitionTool {
                             ));
                             return;
                         }
-                    }
                     if !cursor.goto_next_sibling() {
                         break;
                     }

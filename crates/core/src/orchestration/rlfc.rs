@@ -144,11 +144,10 @@ impl Tool for RlfcTool {
                 if let Some(fixed_code) = response.content.as_ref().and_then(|c| c.as_text()) {
                     // Extract code block if model wrapped it
                     let mut clean_code = fixed_code.to_string();
-                    if let Some(start) = clean_code.find("```rust") {
-                        if let Some(end) = clean_code[start+7..].find("```") {
+                    if let Some(start) = clean_code.find("```rust")
+                        && let Some(end) = clean_code[start+7..].find("```") {
                             clean_code = clean_code[start+7..start+7+end].trim().to_string();
                         }
-                    }
                     std::fs::write(path, clean_code).map_err(|e| AgentError(e.to_string()))?;
                 }
             }

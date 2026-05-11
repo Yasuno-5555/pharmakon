@@ -60,8 +60,8 @@ impl Policy for ConstitutionalPolicy {
 
     fn evaluate_tool_call(&self, tool_name: &str, args: &Value) -> PolicyAction {
         // Rule 1: No self-modification of the agent's own source
-        if tool_name == "write_file" || tool_name == "apply_patch" || tool_name == "mutate_ast" {
-            if let Some(path) = args["path"].as_str() {
+        if (tool_name == "write_file" || tool_name == "apply_patch" || tool_name == "mutate_ast")
+            && let Some(path) = args["path"].as_str() {
                 let path_lower = path.to_lowercase();
                 if path_lower.contains("crates/core/src/") || path_lower.contains("crates/common/src/")
                     || path_lower.contains("crates/memory/src/") || path_lower.contains("crates/tools/src/")
@@ -77,10 +77,9 @@ impl Policy for ConstitutionalPolicy {
                     );
                 }
             }
-        }
 
         // Rule 3: Shell commands must pass constitutional review
-        if tool_name == "shell" && args["command"].as_str().map_or(false, |c| {
+        if tool_name == "shell" && args["command"].as_str().is_some_and(|c| {
             c.contains("rm -rf /") || c.contains("sudo ") || c.contains("chmod 777")
         }) {
             return PolicyAction::Deny(

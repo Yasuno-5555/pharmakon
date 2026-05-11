@@ -17,6 +17,12 @@ pub struct AotCompiler {
     pub min_success_rate: f64,
 }
 
+impl Default for AotCompiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AotCompiler {
     pub fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_default();
@@ -138,6 +144,12 @@ pub struct AotHotReloader {
     pub cache_dir: PathBuf,
 }
 
+impl Default for AotHotReloader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AotHotReloader {
     pub fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_default();
@@ -155,11 +167,11 @@ impl AotHotReloader {
         if let Ok(entries) = std::fs::read_dir(&self.cache_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "bin") {
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        if let Ok(template) = serde_json::from_slice::<PatternTemplate>(&bytes) {
-                            if let Ok(re) = regex::Regex::new(&template.task_regex) {
-                                if let Some(captures) = re.captures(task) {
+                if path.extension().is_some_and(|ext| ext == "bin")
+                    && let Ok(bytes) = std::fs::read(&path)
+                        && let Ok(template) = serde_json::from_slice::<PatternTemplate>(&bytes)
+                            && let Ok(re) = regex::Regex::new(&template.task_regex)
+                                && let Some(captures) = re.captures(task) {
                                     let mut params = std::collections::HashMap::new();
                                     for key in &template.parameter_keys {
                                         if let Some(m) = captures.name(key) {
@@ -177,10 +189,6 @@ impl AotHotReloader {
                                         root: Some(instantiated_root),
                                     });
                                 }
-                            }
-                        }
-                    }
-                }
             }
         }
 

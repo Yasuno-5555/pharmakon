@@ -48,13 +48,11 @@ pub struct CausalGraph {
 impl CausalGraph {
     pub fn load() -> Self {
         let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/causal_memory.json");
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(graph) = serde_json::from_str(&content) {
+        if path.exists()
+            && let Ok(content) = std::fs::read_to_string(path)
+                && let Ok(graph) = serde_json::from_str(&content) {
                     return graph;
                 }
-            }
-        }
         Self::default()
     }
 
@@ -142,19 +140,13 @@ impl CausalGraph {
         for node in matching_planning_nodes {
             // Find execution edges matching the alternative path action name
             for edge in &self.edges {
-                if edge.source == node.id {
-                    if let Some(target_node) = self.nodes.get(&edge.target) {
-                        match &target_node.node_type {
-                            CausalNodeType::Execution { tool, success } => {
-                                if tool.contains(alternative_path_action) {
-                                    cumulative_prob += if *success { edge.probability } else { 1.0 - edge.probability };
-                                    match_count += 1;
-                                }
+                if edge.source == node.id
+                    && let Some(target_node) = self.nodes.get(&edge.target)
+                        && let CausalNodeType::Execution { tool, success } = &target_node.node_type
+                            && tool.contains(alternative_path_action) {
+                                cumulative_prob += if *success { edge.probability } else { 1.0 - edge.probability };
+                                match_count += 1;
                             }
-                            _ => {}
-                        }
-                    }
-                }
             }
         }
 

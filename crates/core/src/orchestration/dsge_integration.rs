@@ -34,6 +34,12 @@ pub struct ModelStats {
     pub errors: u64,
 }
 
+impl Default for ModelPerformanceTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelPerformanceTracker {
     pub fn new() -> Self { Self { entries: HashMap::new() } }
 
@@ -88,16 +94,15 @@ impl ModelPerformanceTracker {
 
 /// Model selection mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ModelMode {
     /// Economy routes to best model by live ROI.
+    #[default]
     Auto,
     /// User explicitly picked this model.
     Manual(String),
 }
 
-impl Default for ModelMode {
-    fn default() -> Self { ModelMode::Auto }
-}
 
 /// Per-API-call observation for online production function fitting.
 #[derive(Debug, Clone)]
@@ -179,7 +184,7 @@ impl AgentEconomy {
             // Immediately let system health condition dictate macro economy status
             let api_unavailable = self.budget.llm_gated;
             let rate_limit_prob = self.model_perf.rate_limit_prob(
-                &self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
+                self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
             );
             self.macro_state.detect_crisis(rate_limit_prob, api_unavailable);
         }
@@ -327,7 +332,7 @@ let complexity_bonus = |id: &str| -> f64 {
     pub fn recommend_max_tokens(&mut self, model_id: &str) -> u32 { let _ = model_id;
         // Update regime state from current macro conditions
         let rate_limit_prob = self.model_perf.rate_limit_prob(
-            &self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
+            self.market_quotes.first().map(|q| q.model_id.as_str()).unwrap_or("unknown")
         );
         self.regime.update(&self.macro_state, rate_limit_prob, self.budget.llm_gated);
 

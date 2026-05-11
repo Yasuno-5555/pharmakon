@@ -59,19 +59,17 @@ impl CodeActToolbox {
                 let entry = entry.map_err(|e| e.to_string())?;
                 let path = entry.path();
                 if path.is_dir() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with('.') || name == "target" || name == "node_modules" { continue; }
-                    }
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                        && (name.starts_with('.') || name == "target" || name == "node_modules") { continue; }
                     self.grep_recursive(&path, pattern, results)?;
-                } else if path.is_file() {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
+                } else if path.is_file()
+                    && let Ok(content) = std::fs::read_to_string(&path) {
                         for (line_no, line) in content.lines().enumerate() {
                             if re.is_match(line) {
                                 results.push(format!("{}:{}: {}", path.display(), line_no + 1, line.trim()));
                             }
                         }
                     }
-                }
             }
         }
         Ok(())

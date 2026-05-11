@@ -419,11 +419,10 @@ impl SnapshotStore {
             let path = entry.path();
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if let Ok(file_type) = entry.file_type().await {
-                if file_type.is_symlink() {
+            if let Ok(file_type) = entry.file_type().await
+                && file_type.is_symlink() {
                     continue;
                 }
-            }
             if path.is_dir() {
                 if skip_dirs.contains(&name_str.as_ref()) {
                     continue;
@@ -437,11 +436,10 @@ impl SnapshotStore {
                     return Ok(()); // safety valve: stop after 500 files
                 }
                 *file_count += 1;
-                if let Ok(rel) = path.strip_prefix(root) {
-                    if let Ok(id) = self.snapshot_file(&path).await {
+                if let Ok(rel) = path.strip_prefix(root)
+                    && let Ok(id) = self.snapshot_file(&path).await {
                         snapshots.insert(rel.to_path_buf(), id);
                     }
-                }
             }
         }
         Ok(())

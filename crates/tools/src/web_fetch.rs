@@ -46,24 +46,20 @@ fn html_to_text(html: &str, max_length: usize) -> String {
     let mut link_counter = 0;
 
     // Extract title and description
-    if let Ok(sel) = Selector::parse("title") {
-        if let Some(el) = clean_doc.select(&sel).next() {
+    if let Ok(sel) = Selector::parse("title")
+        && let Some(el) = clean_doc.select(&sel).next() {
             let title = el.text().collect::<String>().trim().to_string();
             if !title.is_empty() {
                 output.push_str(&format!("# {}\n\n", title));
             }
         }
-    }
 
-    if let Ok(sel) = Selector::parse("meta[name=description]") {
-        if let Some(el) = clean_doc.select(&sel).next() {
-            if let Some(content) = el.value().attr("content") {
-                if !content.is_empty() {
+    if let Ok(sel) = Selector::parse("meta[name=description]")
+        && let Some(el) = clean_doc.select(&sel).next()
+            && let Some(content) = el.value().attr("content")
+                && !content.is_empty() {
                     output.push_str(&format!("> {}\n\n", content));
                 }
-            }
-        }
-    }
 
     // Extract text content
     if let Some(ref sel) = p_selector {
@@ -113,8 +109,8 @@ fn html_to_text(html: &str, max_length: usize) -> String {
     }
 
     // Extract links with markers
-    if output.len() < max_length / 2 {
-        if let Some(ref sel) = a_selector {
+    if output.len() < max_length / 2
+        && let Some(ref sel) = a_selector {
             for element in clean_doc.select(sel) {
                 if let Some(href) = element.value().attr("href") {
                     let text: String = element.text().collect();
@@ -136,7 +132,6 @@ fn html_to_text(html: &str, max_length: usize) -> String {
                 }
             }
         }
-    }
 
     if !links.is_empty() {
         output.push_str("\n\n---\nLinks:\n");

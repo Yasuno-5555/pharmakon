@@ -72,18 +72,16 @@ impl SkillRegistry {
     pub fn scan(&mut self) -> Result<usize> {
         let mut count = 0;
         for path in &self.search_paths.clone() {
-            if path.exists() {
-                if let Ok(entries) = std::fs::read_dir(path) {
+            if path.exists()
+                && let Ok(entries) = std::fs::read_dir(path) {
                     for entry in entries.flatten() {
-                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                            if let Ok(skill) = self.load_skill_from_dir(&entry.path()) {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                            && let Ok(skill) = self.load_skill_from_dir(&entry.path()) {
                                 self.skills.insert(skill.id.clone(), skill);
                                 count += 1;
                             }
-                        }
                     }
                 }
-            }
         }
         Ok(count)
     }

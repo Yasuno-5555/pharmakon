@@ -97,13 +97,12 @@ pub struct CrystallizationCandidate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum PrimitiveStage {
+    #[default]
     Experimental, Stable, Core, Deprecated, Removed,
 }
 
-impl Default for PrimitiveStage {
-    fn default() -> Self { PrimitiveStage::Experimental }
-}
 
 impl PrimitiveStage {
     pub fn promote(&mut self) {
@@ -153,6 +152,12 @@ pub struct RhaiSkillLibrary {
     pub task_queue: VecDeque<DreamTask>,
     pub max_entries: usize,
     pub max_anti_patterns: usize,
+}
+
+impl Default for RhaiSkillLibrary {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RhaiSkillLibrary {
@@ -342,11 +347,10 @@ impl RhaiSkillLibrary {
 
     fn promote_similar(&mut self, script: &LabeledScript) {
         for entry in &mut self.entries {
-            if entry.label.is_success() && keyword_overlap(&entry.task_description, &script.task_description) > 2 {
-                if entry.function_signature.is_none() && script.function_signature.is_some() {
+            if entry.label.is_success() && keyword_overlap(&entry.task_description, &script.task_description) > 2
+                && entry.function_signature.is_none() && script.function_signature.is_some() {
                     entry.function_signature = script.function_signature.clone();
                 }
-            }
         }
     }
 

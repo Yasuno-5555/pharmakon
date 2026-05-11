@@ -184,7 +184,7 @@ impl Tool for EphemeralRedTeamTool {
                 fs::write(&file_path, test_code).map_err(|e| AgentError(format!("Failed to write test file: {}", e)))?;
 
                 let cmd_output = Command::new("cargo")
-                    .args(&["test", "--test", &test_name])
+                    .args(["test", "--test", &test_name])
                     .output();
 
                 let _ = fs::remove_file(&file_path);
@@ -337,7 +337,7 @@ impl Tool for FractalSwarmTool {
                     if !stderr.is_empty() {
                         results.push_str(&format!("**Stderr**:\n```\n{}\n```\n", stderr));
                     }
-                    results.push_str("\n");
+                    results.push('\n');
                 }
                 Ok((id, _, Err(e))) => {
                     all_success = false;

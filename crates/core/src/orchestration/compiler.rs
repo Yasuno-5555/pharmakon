@@ -3,6 +3,12 @@ use std::collections::HashSet;
 
 pub struct PlanCompiler;
 
+impl Default for PlanCompiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlanCompiler {
     pub fn new() -> Self {
         Self
@@ -13,8 +19,8 @@ impl PlanCompiler {
         let node = self.optimize_dead_steps(node);
         let node = self.fuse_steps(node);
         let node = self.discover_parallelism(node);
-        let node = self.place_verifications(node);
-        node
+        
+        self.place_verifications(node)
     }
 
     /// Pass 1: Dead Step Elimination (Dead Store Elimination)
@@ -119,21 +125,18 @@ impl PlanCompiler {
                 while let Some(current) = iter.next() {
                     let optimized_current = self.fuse_steps(current);
                     
-                    if let Some(next) = iter.peek() {
-                        if let (PlanNode::Step { tool: t1, args: a1, .. }, PlanNode::Step { tool: t2, args: a2, .. }) = (&optimized_current, next) {
+                    if let Some(next) = iter.peek()
+                        && let (PlanNode::Step { tool: t1, args: a1, .. }, PlanNode::Step { tool: t2, args: a2, .. }) = (&optimized_current, next) {
                             // Rule: consecutive read_file and grep on the same file -> fuse to grep directly
-                            if t1 == "read_file" && t2 == "grep" {
-                                if let (Some(p1), Some(p2)) = (a1.get("path"), a2.get("path")) {
-                                    if p1 == p2 {
+                            if t1 == "read_file" && t2 == "grep"
+                                && let (Some(p1), Some(p2)) = (a1.get("path"), a2.get("path"))
+                                    && p1 == p2 {
                                         // Consume peeked
                                         let next_node = iter.next().unwrap();
                                         fused_nodes.push(self.fuse_steps(next_node));
                                         continue;
                                     }
-                                }
-                            }
                         }
-                    }
                     fused_nodes.push(optimized_current);
                 }
 
@@ -277,8 +280,8 @@ impl PlanCompiler {
                     let optimized_child = self.place_verifications(child);
                     optimized_nodes.push(optimized_child.clone());
 
-                    if let PlanNode::Step { ref tool, ref args, .. } = optimized_child {
-                        if tool == "apply_patch" || tool == "write_file" {
+                    if let PlanNode::Step { ref tool, ref args, .. } = optimized_child
+                        && (tool == "apply_patch" || tool == "write_file") {
                             let path = args.get("path").and_then(|p| p.as_str()).unwrap_or_default();
                             // If we update Cargo.toml or critical code files, immediately compile check!
                             if path.contains("Cargo.toml") || path.contains(".rs") {
@@ -292,7 +295,6 @@ impl PlanCompiler {
                                 });
                             }
                         }
-                    }
                 }
 
                 if optimized_nodes.len() == 1 {

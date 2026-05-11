@@ -181,13 +181,11 @@ pub async fn classify_task_complexity(
     let word_count = trimmed.split_whitespace().count();
     let is_ambiguous = word_count < 3 || trimmed.len() < 12;
 
-    if is_ambiguous && heuristic == TaskComplexity::Simple {
-        if let Some(model) = model {
-            if let Some(llm_result) = llm_classify(description, model).await {
+    if is_ambiguous && heuristic == TaskComplexity::Simple
+        && let Some(model) = model
+            && let Some(llm_result) = llm_classify(description, model).await {
                 return llm_result;
             }
-        }
-    }
 
     heuristic
 }
@@ -283,7 +281,7 @@ pub async fn manage_task(
     model: Option<&Arc<dyn AgentModel>>,
 ) -> ManagedTask {
     let complexity = classify_task_complexity(description, model).await;
-    let budget = budget::estimate_budget(complexity.clone());
+    let budget = budget::estimate_budget(complexity);
     ManagedTask::new(description, complexity, budget)
 }
 

@@ -104,11 +104,10 @@ impl EventLog {
     /// Create a new event log with optional JSONL persistence path.
     pub fn new(persist_path: Option<PathBuf>) -> Self {
         // Ensure persistence directory exists
-        if let Some(ref path) = persist_path {
-            if let Some(parent) = path.parent() {
+        if let Some(ref path) = persist_path
+            && let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-        }
 
         Self {
             events: Mutex::new(VecDeque::new()),
@@ -159,7 +158,7 @@ impl EventLog {
                 }
             }
             // Truncate disk log periodically (every 100 events)
-            if id % 100 == 0 {
+            if id.is_multiple_of(100) {
                 let p = path.clone();
                 tokio::task::spawn_blocking(move || {
                     Self::truncate_disk_log(&p, MAX_DISK_EVENTS);

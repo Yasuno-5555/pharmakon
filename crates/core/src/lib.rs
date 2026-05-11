@@ -6,6 +6,7 @@ pub mod mcp;
 pub mod mcp_manager;
 pub mod mcp_tool;
 pub mod model;
+pub mod model_router;
 pub mod persistence;
 pub mod providers;
 pub use pharmakon_memory as memory;

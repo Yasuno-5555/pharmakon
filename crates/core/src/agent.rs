@@ -78,6 +78,7 @@ pub struct Agent {
     pub skill_library: Arc<std::sync::Mutex<crate::orchestration::skill_library::RhaiSkillLibrary>>,
     pub vision_stream: Option<Arc<tokio::sync::Mutex<pharmakon_tools::media::vision_stream::VisionRingBuffer>>>,
     pub tool_scheduler: Arc<crate::orchestration::tool_scheduler::ToolScheduler>,
+    pub model_router: Arc<crate::model_router::ModelRouter>,
 }
 
 impl Clone for Agent {
@@ -118,13 +119,14 @@ impl Clone for Agent {
             last_workspace_snapshot: Arc::new(Mutex::new(None)), // fresh cooldown for clone
             registry: self.registry.clone(),
             governor: self.governor.clone(),
-            dream_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            cron_manager: Arc::new(StdMutex::new(None)),
-            economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
+            dream_started: self.dream_started.clone(),
+            cron_manager: self.cron_manager.clone(),
+            economy: self.economy.clone(),
             bank_of_pharmakon: self.bank_of_pharmakon.clone(),
-            skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
+            skill_library: self.skill_library.clone(),
             vision_stream: self.vision_stream.clone(),
             tool_scheduler: self.tool_scheduler.clone(),
+            model_router: self.model_router.clone(),
         }
     }
 }
@@ -174,6 +176,14 @@ impl Agent {
             }
         )));
 
+        let economy = Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5)));
+        let fallback_models = Arc::new(StdMutex::new(Vec::new()));
+        let token_budget = 250_000;
+
+        // Clone for struct fields before moving originals into ModelRouter
+        let mr_event_tx = event_tx.clone();
+        let mr_total_tokens = total_tokens.clone();
+
         Self {
             model: Arc::new(Mutex::new(model.clone())),
             session_id: Arc::new(Mutex::new(session_id)),
@@ -196,10 +206,10 @@ impl Agent {
             planner_model: None,
             graph_store: None,
             interaction_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            fallback_models: Arc::new(StdMutex::new(Vec::new())),
+            fallback_models: fallback_models.clone(),
             total_tokens,
             total_cost,
-            token_budget: 250_000, // default: 250k tokens per session
+            token_budget: 250_000,
             start_time: std::time::Instant::now(),
             dry_run: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tool_call_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -215,7 +225,6 @@ impl Agent {
                 let ss = Arc::new(crate::snapshot_store::SnapshotStore::new(
                     home.join(".pharmakon").join("snapshots"),
                 ));
-                // Spawn startup pruning in background so it doesn't block init
                 let ss_clone = ss.clone();
                 tokio::spawn(async move {
                     if let Err(e) = ss_clone.prune_on_startup().await {
@@ -229,12 +238,19 @@ impl Agent {
             cron_manager: Arc::new(StdMutex::new(None)),
             registry,
             skill_library: Arc::new(std::sync::Mutex::new(crate::orchestration::skill_library::RhaiSkillLibrary::new())),
-            economy: Arc::new(std::sync::Mutex::new(AgentEconomy::new(0.5))),
+            economy: economy.clone(),
             bank_of_pharmakon: Arc::new(Mutex::new(crate::orchestration::economy_v2::BankOfPharmakon::new(100_000))),
             governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
             vision_stream: None,
             tool_scheduler: Arc::new(crate::orchestration::tool_scheduler::ToolScheduler::new(
                 std::env::current_dir().unwrap_or_default(),
+            )),
+            model_router: Arc::new(crate::model_router::ModelRouter::new(
+                economy,
+                mr_event_tx,
+                mr_total_tokens,
+                token_budget,
+                fallback_models,
             )),
         }
     }
@@ -296,9 +312,8 @@ impl Agent {
 
     pub fn with_store(mut self, store: Arc<crate::persistence::DbSessionStore>) -> Self {
         self.session_store = Some(store.clone());
-        // Update registry deps
-        {
-            let mut reg = self.registry.try_lock().expect("Failed to lock registry during init");
+        // Update registry deps lazily if locked, otherwise immediately
+        if let Ok(mut reg) = self.registry.try_lock() {
             reg.update_deps(|deps| {
                 deps.store = Some(store);
             });
@@ -325,13 +340,26 @@ impl Agent {
         nexus: Arc<pharmakon_memory::weaver::KnowledgeNexus>,
     ) -> Self {
         self.knowledge_nexus = Some(nexus.clone());
-        {
-            let mut reg = self.registry.try_lock().expect("Failed to lock registry during init");
+        if let Ok(mut reg) = self.registry.try_lock() {
             reg.update_deps(|deps| {
                 deps.nexus = Some(nexus);
             });
         }
         self
+    }
+
+    pub async fn sync_registry_deps(&self) {
+        let mut reg = self.registry.lock().await;
+        let store = self.session_store.clone();
+        let nexus = self.knowledge_nexus.clone();
+        reg.update_deps(|deps| {
+            if let Some(s) = store {
+                deps.store = Some(s);
+            }
+            if let Some(n) = nexus {
+                deps.nexus = Some(n);
+            }
+        });
     }
 
     pub async fn add_tool(&self, tool: Arc<dyn pharmakon_common::Tool>) {
@@ -403,10 +431,243 @@ impl Agent {
         Ok(())
     }
 
+    /// Ensure Dream Mode background decay loop is started (once per process).
+    fn ensure_dream_mode(&self) {
+        if self.dream_started.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let skill_lib = self.skill_library.clone();
+        tokio::spawn(async move {
+            log::info!("Dream Mode started");
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                let mut lib = skill_lib.lock().unwrap();
+                lib.decay();
+                log::debug!("Dream Mode: decay cycle complete, {} entries", lib.entries.len());
+            }
+        });
+    }
+
+    /// Gather parallel context from semantic search and Knowledge Nexus.
+    async fn gather_context(&self, user_message: &str) {
+        let semantic_search = self.semantic_search.clone();
+        let knowledge_nexus = self.knowledge_nexus.clone();
+
+        let (semantic_res, nexus_res) = tokio::join!(
+            async {
+                if let Some(search) = semantic_search {
+                    search.search_with_limit(user_message, 3).await.ok()
+                } else {
+                    None
+                }
+            },
+            async {
+                if let Some(nexus) = knowledge_nexus {
+                    nexus.smart_search(user_message, 8).await.ok()
+                } else {
+                    None
+                }
+            }
+        );
+
+        if let Some(memories) = semantic_res
+            && !memories.is_empty() {
+                let memory_context = memories.join("\n---\n");
+                self.add_to_working_memory(
+                    format!("Long-term Memories:\n{}", memory_context),
+                    0.7,
+                    "SemanticSearch".to_string(),
+                ).await;
+            }
+
+        if let Some(memories) = nexus_res
+            && !memories.is_empty() {
+                let memory_context = memories.join("\n---\n");
+                let _ = self.hooks.trigger_context_recovered(&memory_context).await;
+                self.add_to_working_memory(
+                    format!("Knowledge Nexus Insights (Hybrid + Graph):\n{}", memory_context),
+                    0.9,
+                    "KnowledgeNexus".to_string(),
+                ).await;
+            }
+    }
+
+    /// Extract <think>...</think> blocks from content, returning (cleaned_content, thoughts).
+    fn extract_thoughts(content: &str) -> (String, Vec<String>) {
+        let mut cleaned = content.to_string();
+        let mut thoughts = Vec::new();
+        while let Some(start) = cleaned.find("<think>") {
+            if let Some(end) = cleaned[start..].find("</think>") {
+                let absolute_end = start + end + 8;
+                let thought = cleaned[start + 7..start + end].trim().to_string();
+                thoughts.push(thought);
+                cleaned.replace_range(start..absolute_end, "");
+            } else {
+                break;
+            }
+        }
+        (cleaned.trim().to_string(), thoughts)
+    }
+
+    /// Process the final assistant response: save to history, trigger reflection,
+    /// index to nexus, update research notebook.
+    async fn process_final_response(
+        &self,
+        final_content: &str,
+        raw_response: &pharmakon_common::agent_types::CompletionResponse,
+        user_message: &str,
+        session_id: &str,
+        state_arc: &Arc<Mutex<SessionState>>,
+    ) {
+        let final_msg = Message {
+            role: "assistant".to_string(),
+            content: if final_content.is_empty() { None } else { Some(MessageContent::Text(final_content.to_string())) },
+            ..Default::default()
+        };
+        let _ = self.hooks.trigger_message_sent(&final_msg).await;
+
+        {
+            let mut state = state_arc.lock().await;
+            state.history.push(final_msg.clone());
+        }
+
+        if let Some(store) = &self.session_store {
+            if let Err(e) = store.save_message(session_id, &final_msg).await {
+                log::warn!("Failed to save final message: {}", e);
+            }
+        }
+
+        let count = self.interaction_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if count.is_multiple_of(5) {
+            let agent_clone = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) = agent_clone.reflect().await {
+                    log::error!("Error during background reflection: {}", e);
+                }
+            });
+        }
+
+        if let Some(nexus) = &self.knowledge_nexus {
+            let nexus = nexus.clone();
+            let content = final_content.to_string();
+            tokio::spawn(async move {
+                let id = uuid::Uuid::new_v4().to_string();
+                if let Err(e) = nexus.remember_batch(vec![(id, content)]).await {
+                    log::warn!("Failed to index to KnowledgeNexus: {}", e);
+                }
+            });
+        }
+
+        {
+            let mut notebook = self.research_notebook.lock().await;
+            if notebook.current_goal.is_empty() || notebook.current_goal == "Uninitialized" {
+                *notebook = pharmakon_common::ResearchNotebook::new(
+                    &user_message.chars().take(80).collect::<String>()
+                );
+            }
+            if notebook.should_stop() && notebook.verified_facts.len() > 50 {
+                notebook.verified_facts.remove(0);
+            }
+            notebook.step_count += 1;
+            notebook.verified_facts.push(pharmakon_common::Fact {
+                content: format!("Task: {} → {}",
+                    user_message.chars().take(60).collect::<String>(),
+                    final_content.chars().take(100).collect::<String>()),
+                source_url: session_id.to_string(),
+                confidence: 0.7,
+                timestamp: chrono::Utc::now(),
+            });
+        }
+
+        let _ = self.event_tx.send(Event::AgentResponse {
+            content: raw_response.content.clone().unwrap_or(MessageContent::Text(String::new())),
+        });
+    }
+
+    /// Detect time/date/weather queries and fetch real-time context automatically.
+    /// Returns Some(fact_string) if a real-time query is detected.
+    fn detect_real_time_query(message: &str) -> Option<String> {
+        let lower = message.to_lowercase();
+        let is_time_query = lower.contains("時刻") || lower.contains("時間") || lower.contains("今")
+            || lower.contains("日付") || lower.contains("今日") || lower.contains("何日")
+            || lower.contains("date") || lower.contains("time") || lower.contains("what time")
+            || lower.contains("current time") || lower.contains("today")
+            || lower.contains("weather") || lower.contains("天気")
+            || lower.contains("曜日") || lower.contains("day of week");
+        if !is_time_query {
+            return None;
+        }
+        let date_output = std::process::Command::new("date").output().ok()?;
+        let date_str = String::from_utf8_lossy(&date_output.stdout).to_string().trim().to_string();
+        if date_str.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "[Real-time context automatically fetched for this query]\n\
+             Current system time: {}\n\
+             (Use this information to answer the user's question about the current time/date.)",
+            date_str
+        ))
+    }
+
+    /// Build tool definitions: core + BM25 search results + serendipity injection.
+    async fn build_tool_definitions(&self, user_message: &str) -> Option<Vec<ToolDefinition>> {
+        let mut reg = self.registry.lock().await;
+        let active_cats = self.active_categories.lock().await;
+
+        let mut tools_to_inject = reg.all_metadata()
+            .iter()
+            .filter(|m| m.category == ToolCategory::Core)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let search_results = reg.search(user_message, 15);
+        for meta in search_results {
+            if !tools_to_inject.iter().any(|t| t.name == meta.name) {
+                tools_to_inject.push(meta);
+            }
+        }
+
+        let non_core: Vec<_> = reg.all_metadata().iter()
+            .filter(|m| m.category != ToolCategory::Core)
+            .cloned()
+            .collect();
+        if !non_core.is_empty() {
+            let n_sample = 3.min(non_core.len());
+            let sampled: Vec<_> = non_core.iter()
+                .filter(|m| !tools_to_inject.iter().any(|t| t.name == m.name))
+                .collect();
+            let seed = self.interaction_count.load(std::sync::atomic::Ordering::SeqCst) as usize;
+            let start = seed % sampled.len().max(1);
+            for i in 0..n_sample {
+                let idx = (start + i * 7 + i * i) % sampled.len().max(1);
+                tools_to_inject.push(sampled[idx].clone());
+            }
+        }
+
+        let active_tools: Vec<_> = tools_to_inject
+            .into_iter()
+            .filter(|m| m.category == ToolCategory::Core || active_cats.contains(&m.category))
+            .filter_map(|m| {
+                reg.hydrate(&m.name).map(|t| ToolDefinition {
+                    r#type: "function".to_string(),
+                    function: crate::model::FunctionDefinition {
+                        name: t.name().to_string(),
+                        description: t.description().to_string(),
+                        parameters: t.parameters(),
+                    },
+                })
+            })
+            .collect();
+
+        if active_tools.is_empty() { None } else { Some(active_tools) }
+    }
+
     pub async fn chat_on_session(&self, user_message: &str, session_id: &str) -> Result<String> {
+        self.sync_registry_deps().await;
+        self.ensure_dream_mode();
         CURRENT_SESSION_ID.scope(session_id.to_string(), async {
             if user_message.starts_with("/model") {
-                if !self.dream_started.swap(true, std::sync::atomic::Ordering::SeqCst) { let skill_lib = self.skill_library.clone(); tokio::spawn(async move { log::info!("Dream Mode started"); loop { tokio::time::sleep(std::time::Duration::from_secs(300)).await; let mut lib = skill_lib.lock().unwrap(); lib.decay(); log::debug!("Dream Mode: decay cycle complete, {} entries", lib.entries.len()); } }); }
                 return self.handle_model_command(user_message).await;
             }
             if user_message.starts_with("/plan") {
@@ -434,7 +695,9 @@ impl Agent {
                 let mut history = state.history.clone();
                 {
                     let context_engine = state.context_engine.lock().await;
-                    let _ = context_engine.prune_history(&mut history).await;
+                    if let Err(e) = context_engine.prune_history(&mut history).await {
+                        log::warn!("Failed to prune history: {}", e);
+                    }
                 }
                 state.history = history;
 
@@ -451,59 +714,18 @@ impl Agent {
         });
 
         // Parallel context gathering
-        let semantic_search = self.semantic_search.clone();
-        let knowledge_nexus = self.knowledge_nexus.clone();
-        let user_msg_text = user_message.to_string();
+        self.gather_context(user_message).await;
 
-        // Parallel context gathering for performance
-        let (semantic_res, nexus_res) = tokio::join!(
-            async {
-                if let Some(search) = semantic_search {
-                    search.search_with_limit(&user_msg_text, 3).await.ok()
-                } else {
-                    None
-                }
-            },
-            async {
-                if let Some(nexus) = knowledge_nexus {
-                    nexus.smart_search(&user_msg_text, 8).await.ok()
-                } else {
-                    None
-                }
-            }
-        );
-
-        if let Some(memories) = semantic_res
-            && !memories.is_empty() {
-                let memory_context = memories.join("
----
-");
-                self.add_to_working_memory(
-                    format!("Long-term Memories:
-{}", memory_context),
-                    0.7,
-                    "SemanticSearch".to_string(),
-                )
-                .await;
-            }
-
-        if let Some(memories) = nexus_res
-            && !memories.is_empty() {
-                let memory_context = memories.join("
----
-");
-                let _ = self.hooks.trigger_context_recovered(&memory_context).await;
-                self.add_to_working_memory(
-                    format!(
-                        "Knowledge Nexus Insights (Hybrid + Graph):
-{}",
-                        memory_context
-                    ),
-                    0.9,
-                    "KnowledgeNexus".to_string(),
-                )
-                .await;
-            }
+        // P1: Auto-detect time/date/weather queries and inject real-time context
+        if let Some(rt_context) = Self::detect_real_time_query(user_message) {
+            self.add_to_working_memory(rt_context.clone(), 1.0, "RealTimeContext".to_string()).await;
+            let mut state = state_arc.lock().await;
+            state.history.push(Message {
+                role: "system".to_string(),
+                content: Some(MessageContent::Text(rt_context)),
+                ..Default::default()
+            });
+        }
 
 
 
@@ -586,28 +808,36 @@ impl Agent {
                 return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
             }
 
-            if let TerminationPolicy::FixedIterations(max_iters) = budget.policy {
-                if current_iteration > max_iters {
+            if let TerminationPolicy::FixedIterations(max_iters) = budget.policy
+                && current_iteration > max_iters {
                     log::info!(
                         "Fixed iteration limit reached ({}). Task finished.",
                         max_iters
                     );
-                    let final_response = state_arc
-                        .lock()
-                        .await
-                        .history
-                        .last()
-                        .and_then(|msg| {
-                            if msg.role == "assistant" {
-                                msg.content.as_ref().map(|c| c.to_string())
-                            } else {
-                                None
+                    let final_response = {
+                        let state = state_arc.lock().await;
+                        // Search backward for last assistant message; fall back to last tool result
+                        let last_assistant = state.history.iter().rev()
+                            .find(|m| m.role == "assistant")
+                            .and_then(|m| m.content.as_ref().map(|c| c.to_string()));
+                        match last_assistant {
+                            Some(content) if !content.trim().is_empty() => content,
+                            _ => {
+                                // Fallback: use last tool result
+                                state.history.iter().rev()
+                                    .find(|m| m.role == "tool")
+                                    .and_then(|m| m.content.as_ref().map(|c| {
+                                        let text = c.to_string();
+                                        if text.len() > 200 {
+                                            format!("{}...", text.chars().take(200).collect::<String>())
+                                        } else { text }
+                                    }))
+                                    .unwrap_or_else(|| "Task completed (iteration limit reached).".to_string())
                             }
-                        })
-                        .unwrap_or_default();
+                        }
+                    };
                     break Ok(final_response);
                 }
-            }
             
             let mut snapshot = IterationSnapshot::new();
             // --- End of Loop: Budget and Progress Checks ---
@@ -695,72 +925,12 @@ impl Agent {
                     actionable: String::new(),
                 };
                 messages_to_send = layers.assemble();
-            { let shadow = self.economy.lock().unwrap().shadow_directive(); if !shadow.is_empty() && !messages_to_send.is_empty() { if let Some(ref mut c) = messages_to_send[0].content { let text = c.as_text().unwrap_or(""); *c = pharmakon_common::agent_types::MessageContent::Text(format!("{}\n{}", text, shadow)); } } }
+            { let shadow = self.economy.lock().unwrap().shadow_directive(); if !shadow.is_empty() && !messages_to_send.is_empty() && let Some(ref mut c) = messages_to_send[0].content { let text = c.as_text().unwrap_or(""); *c = pharmakon_common::agent_types::MessageContent::Text(format!("{}\n{}", text, shadow)); } }
             }
 
-            let tool_definitions = {
-                let mut reg = self.registry.lock().await;
-                let active_cats = self.active_categories.lock().await;
+            let tool_definitions = self.build_tool_definitions(user_message).await;
 
-                // 1. Start with core tools and any already loaded tools
-                let mut tools_to_inject = reg.all_metadata()
-                    .iter()
-                    .filter(|m| m.category == ToolCategory::Core)
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                // 2. Search for relevant tools based on the current task/query
-                let search_results = reg.search(user_message, 15);
-                for meta in search_results {
-                    if !tools_to_inject.iter().any(|t| t.name == meta.name) {
-                        tools_to_inject.push(meta);
-                    }
-                }
-
-                // 3. Serendipity injection: randomly sample 3 non-core tools
-                // to increase codex tool discovery (66 tools otherwise invisible to BM25)
-                let non_core: Vec<_> = reg.all_metadata().iter()
-                    .filter(|m| m.category != ToolCategory::Core)
-                    .cloned()
-                    .collect();
-                if !non_core.is_empty() {
-                    let n_sample = 3.min(non_core.len());
-                    let sampled: Vec<_> = non_core.iter()
-                        .filter(|m| !tools_to_inject.iter().any(|t| t.name == m.name))
-                        .collect();
-                    // Rotating sample: use interaction count as seed for variety
-                    let seed = self.interaction_count.load(std::sync::atomic::Ordering::SeqCst) as usize;
-                    let start = seed % sampled.len().max(1);
-                    for i in 0..n_sample {
-                        let idx = (start + i * 7 + i * i) % sampled.len().max(1);
-                        tools_to_inject.push(sampled[idx].clone());
-                    }
-                }
-
-                let active_tools: Vec<_> = tools_to_inject
-                    .into_iter()
-                    .filter(|m| m.category == ToolCategory::Core || active_cats.contains(&m.category))
-                    .filter_map(|m| {
-                        // On-demand hydration to get parameters
-                        reg.hydrate(&m.name).map(|t| ToolDefinition {
-                            r#type: "function".to_string(),
-                            function: crate::model::FunctionDefinition {
-                                name: t.name().to_string(),
-                                description: t.description().to_string(),
-                                parameters: t.parameters(),
-                            },
-                        })
-                    })
-                    .collect();
-
-                if active_tools.is_empty() {
-                    None
-                } else {
-                    Some(active_tools)
-                }
-            };
-
-            let mut target_model = {
+            let target_model = {
                 let m = self.model.lock().await;
                 let default_model = (*m).clone();
                 if default_model.name() == "mock-model" || default_model.name() == "test" {
@@ -770,195 +940,20 @@ impl Agent {
                 }
             };
 
-            log::info!("[SESSION: {}] Sending completion request to model...", session_id);
-
-            let mut request = CompletionRequest {
-                messages: messages_to_send,
-                temperature: Some(0.2),
-                max_tokens: Some(self.economy.lock().unwrap().recommend_max_tokens(target_model.name())),
-                tools: tool_definitions,
-                complexity: Some(match complexity {
-                    budget::TaskComplexity::Simple => 0.2,
-                    budget::TaskComplexity::Standard => 0.5,
-                    budget::TaskComplexity::Deep => 0.8,
-                }),
+            let complexity_value = match complexity {
+                budget::TaskComplexity::Simple => 0.2,
+                budget::TaskComplexity::Standard => 0.5,
+                budget::TaskComplexity::Deep => 0.8,
             };
 
-             let mut response_result = None;
-             let mut current_fallback_index = 0;
-             let mut consecutive_empty_responses = 0;
-             let fallback_models = self.fallback_models.clone();
-
-             while response_result.is_none() {
-                 let model_lock = target_model.clone();
-                 let completion_task = async {
-                     model_lock.complete(request.clone()).await
-                 };
-
-                 response_result = Some(completion_task.await);
-
-                 match response_result {
-                     Some(Ok(ref res)) => {
-                         let is_max_tokens = res.finish_reason.as_ref().map(|fr| fr.to_uppercase() == "MAX_TOKENS").unwrap_or(false)
-                             || res.content.as_ref().map(|c| c.to_string().contains("[Model stopped: Max tokens reached]")).unwrap_or(false);
-
-                         if is_max_tokens {
-                             let fallback_list = fallback_models.lock().unwrap();
-                             if current_fallback_index < fallback_list.len() {
-                                 let fallback_id = &fallback_list[current_fallback_index];
-                                 log::warn!(
-                                     "Output token limit reached (MAX_TOKENS) for {}. Escalating to fallback model: {}",
-                                     target_model.name(),
-                                     fallback_id
-                                 );
-                                 let _ = self.event_tx.send(Event::Error {
-                                     message: format!(
-                                         "Output token limit reached (MAX_TOKENS) for {}. Escalating to fallback model: {}",
-                                         target_model.name(),
-                                         fallback_id
-                                     ),
-                                 });
-
-                                 if let Some(new_model) =
-                                     crate::providers::registry::ModelRegistry::get_model(fallback_id)
-                                 {
-                                     target_model = new_model;
-                                     current_fallback_index += 1;
-                                     consecutive_empty_responses = 0;
-                                     request.max_tokens = Some(self.economy.lock().unwrap().recommend_max_tokens(target_model.name()));
-                                     response_result = None;
-                                     continue;
-                                 }
-                             }
-                         }
-                         let is_empty = res.content.as_ref().map(|c| c.to_string().trim().is_empty()).unwrap_or(true)
-                             && res.tool_calls.is_none();
-                         if is_empty {
-                             consecutive_empty_responses += 1;
-                             log::warn!(
-                                 "Empty response from model {} (consecutive empty count: {})",
-                                 target_model.name(),
-                                 consecutive_empty_responses
-                             );
-                             if consecutive_empty_responses >= 2 {
-                                 let fallback_list = fallback_models.lock().unwrap();
-                                 if current_fallback_index < fallback_list.len() {
-                                     let fallback_id = &fallback_list[current_fallback_index];
-                                     log::warn!(
-                                         "Two consecutive empty responses from {}. Switching to fallback: {}",
-                                         target_model.name(),
-                                         fallback_id
-                                     );
-                                     let _ = self.event_tx.send(Event::Error {
-                                         message: format!(
-                                             "Two consecutive empty responses from {}. Switching to fallback: {}",
-                                             target_model.name(),
-                                             fallback_id
-                                         ),
-                                     });
-
-                                     if let Some(new_model) =
-                                         crate::providers::registry::ModelRegistry::get_model(fallback_id)
-                                     {
-                                         target_model = new_model;
-                                         current_fallback_index += 1;
-                                         consecutive_empty_responses = 0;
-                                         response_result = None;
-                                         continue;
-                                     }
-                                 }
-                             } else {
-                                 // Skip retry if budget is already >80% used
-                                 let used = self.total_tokens.load(std::sync::atomic::Ordering::SeqCst);
-                                 if used > self.token_budget * 8 / 10 {
-                                     log::warn!("Skipping empty-response retry: budget at {:.0}%", (used as f64 / self.token_budget as f64) * 100.0);
-                                     break;
-                                 }
-                                 log::info!("Retrying same model once for empty response...");
-                                 response_result = None;
-                                 continue;
-                             }
-                         } else {
-                             consecutive_empty_responses = 0;
-                         }
-                     }
-                    Some(Err(ref e)) => {
-                        let is_rate_limit = e.to_string().to_lowercase().contains("429")
-                            || e.to_string().to_lowercase().contains("too many requests")
-                            || e.to_string().to_lowercase().contains("quota");
-
-                        let fallback_list = fallback_models.lock().unwrap();
-                        if is_rate_limit && current_fallback_index < fallback_list.len() {
-                            let fallback_id = &fallback_list[current_fallback_index];
-                            log::warn!(
-                                "Rate limit encountered for {}. Falling back to: {}",
-                                target_model.name(),
-                                fallback_id
-                            );
-                            let _ = self.event_tx.send(Event::Error {
-                                message: format!(
-                                    "API Rate limit reached for {}. Switching to fallback: {}",
-                                    target_model.name(),
-                                    fallback_id
-                                ),
-                            });
-
-                            if let Some(new_model) =
-                                crate::providers::registry::ModelRegistry::get_model(fallback_id)
-                            {
-                                target_model = new_model;
-                                current_fallback_index += 1;
-                                response_result = None;
-                                continue;
-                            } else {
-                                log::error!(
-                                    "Fallback model {} not found or configured.",
-                                    fallback_id
-                                );
-                                current_fallback_index += 1;
-                                response_result = None;
-                                continue;
-                            }
-                        }
-
-                        { let mn = target_model.name().to_string(); self.economy.lock().unwrap().record_model_result(&mn, 0, false, is_rate_limit); }
-                        let _ = self.event_tx.send(Event::Error {
-                            message: format!("Model error: {}", e),
-                        });
-                        return Err(anyhow::anyhow!("All fallback models exhausted. Final error: {}", e));
-                    }
-                    None => {
-                        return Err(anyhow::anyhow!(
-                            "[InternalError] Model response loop terminated without setting a result. This should not happen."
-                        ));
-                    }
-                }
-            }
-
-            let response_result_val = response_result
-                .ok_or_else(|| anyhow::anyhow!("[InternalError] Missing model response"))?;
-            let response: pharmakon_common::agent_types::CompletionResponse = response_result_val?;
-            // Feed actual API token consumption into the DSGE economy layer
-            if let Some(ref usage) = response.usage {
-                let mut economy = self.economy.lock().unwrap();
-                economy.record_token_usage(usage.prompt_tokens as u64, usage.completion_tokens as u64);
-                self.total_tokens.fetch_add(usage.total_tokens as u64, std::sync::atomic::Ordering::SeqCst);
-                // Record per-call observation for online production function fitting
-                let quality_proxy = if response.content.is_some() { 0.8 } else { 0.3 };
-                economy.record_observation(crate::orchestration::dsge_integration::CallObservation {
-                    tokens_spent: usage.total_tokens as u64,
-                    latency_ms: start_time.elapsed().as_millis() as u64,
-                    success: response.content.is_some() || response.tool_calls.is_some(),
-                    model_id: target_model.name().to_string(),
-                    quality_proxy,
-                });
-                // Periodic online fit: every 8 observations
-                if economy.observations.len() % 8 == 0 {
-                    economy.update_production_from_observations();
-                }
-            }
-            { let mn = target_model.name().to_string(); let lat = start_time.elapsed().as_millis() as u64; self.economy.lock().unwrap().record_model_result(&mn, lat, true, false); }
-            self.economy.lock().unwrap().observe_latency(start_time.elapsed().as_millis() as u64);
+            let (response, _target_model) = self.model_router.execute_with_fallback(
+                messages_to_send,
+                tool_definitions,
+                target_model,
+                session_id,
+                start_time,
+                complexity_value,
+            ).await?;
 
             // ── Hard token budget enforcement ──
             let used = self.total_tokens.load(std::sync::atomic::Ordering::SeqCst);
@@ -1109,11 +1104,10 @@ impl Agent {
                         }
 
                         // Global dry-run injection
-                        if dry_run {
-                            if let Some(obj) = args.as_object_mut() {
+                        if dry_run
+                            && let Some(obj) = args.as_object_mut() {
                                 obj.insert("dry_run".to_string(), serde_json::json!(true));
                             }
-                        }
 
                         let _ = event_tx.send(Event::ToolCall {
                             name: tool.name().to_string(),
@@ -1217,7 +1211,7 @@ impl Agent {
                                 let mut last = lws.lock().await;
                                 let cooldown = chrono::Duration::seconds(60);
                                 let now = chrono::Utc::now();
-                                if last.map_or(true, |t| now - t > cooldown) {
+                                if last.is_none_or(|t| now - t > cooldown) {
                                     *last = Some(now);
                                     true
                                 } else {
@@ -1228,13 +1222,11 @@ impl Agent {
                                     false
                                 }
                             };
-                            if should_snapshot {
-                                if let Ok(dir) = std::env::current_dir() {
-                                    if let Ok(snap) = ss.snapshot_dir(&dir).await {
+                            if should_snapshot
+                                && let Ok(dir) = std::env::current_dir()
+                                    && let Ok(snap) = ss.snapshot_dir(&dir).await {
                                         workspace_snapshot = Some((dir, snap));
                                     }
-                                }
-                            }
                         }
 
                         // --- Snapshot Before Mutation ---
@@ -1242,8 +1234,8 @@ impl Agent {
                         let is_file_mutation = (tool.name() == "write_file" || tool.name() == "apply_patch" || tool.name() == "mutate_ast") 
                             && args["path"].is_string();
                         
-                        if is_file_mutation {
-                            if let Some(path_str) = args["path"].as_str() {
+                        if is_file_mutation
+                            && let Some(path_str) = args["path"].as_str() {
                                 let path = std::path::Path::new(path_str);
                                 if path.exists() {
                                     if let Ok(id) = ss.snapshot_file(path).await {
@@ -1253,23 +1245,21 @@ impl Agent {
                                     snapshot_before_id = Some("none".to_string());
                                 }
                             }
-                        }
 
                         let result = tool.call(args.clone()).await;
                         let latency_ms = start.elapsed().as_millis() as u64;
 
                         // --- Rollback Workspace on High-Risk Tool Failure ---
-                        if result.is_err() {
-                            if let Some((ref dir, ref snap)) = workspace_snapshot {
+                        if result.is_err()
+                            && let Some((ref dir, ref snap)) = workspace_snapshot {
                                 log::warn!("High-risk tool '{}' execution failed. Rolling back workspace...", tool.name());
                                 let _ = ss.restore_dir(dir, snap).await;
                             }
-                        }
 
                         // --- Snapshot After Mutation ---
-                        if let Some(before_id) = snapshot_before_id {
-                            if result.is_ok() {
-                                if let Some(path_str) = args["path"].as_str() {
+                        if let Some(before_id) = snapshot_before_id
+                            && result.is_ok()
+                                && let Some(path_str) = args["path"].as_str() {
                                     let path = std::path::Path::new(path_str);
                                     if let Ok(after_id) = ss.snapshot_file(path).await {
                                         el.append(&el_session, crate::event_log::EventKind::FileMutated {
@@ -1279,8 +1269,6 @@ impl Agent {
                                         }).await;
                                     }
                                 }
-                            }
-                        }
 
                         let mut result_str = match &result {
                             Ok(s) => s.clone(),
@@ -1339,9 +1327,9 @@ impl Agent {
                         let error = result_res.as_ref().err().map(|e: &anyhow::Error| e.to_string());
 
                         // Record codeact scripts to skill library (before error is moved)
-                        if tool_name == "codeact" {
-                            if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&tool_args) {
-                                if let Some(script) = args_val.get("script").and_then(|s| s.as_str()) {
+                        if tool_name == "codeact"
+                            && let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&tool_args)
+                                && let Some(script) = args_val.get("script").and_then(|s| s.as_str()) {
                                     let mut lib = self.skill_library.lock().unwrap();
                                     if success {
                                         lib.add(crate::orchestration::skill_library::LabeledScript {
@@ -1375,11 +1363,11 @@ impl Agent {
                                         });
                                     }
                                 }
-                            }
-                        }
 
                         if let Some(store) = &self.session_store {
-                            let _ = store.save_tool_metric(&tool_name, success, latency_ms, error).await;
+                            if let Err(e) = store.save_tool_metric(&tool_name, success, latency_ms, error).await {
+                            log::warn!("Failed to save tool metric: {}", e);
+                        }
                         }
 
                         let result = match result_res {
@@ -1394,12 +1382,13 @@ impl Agent {
                         
                         // ... (rest of tool result handling is the same)
 
-                        if result.contains("### INJECTED PLAYBOOK") {
-                            if let Some(line) = result.lines().next() {
+                        if result.contains("### INJECTED PLAYBOOK")
+                            && let Some(line) = result.lines().next() {
                                 let name = line.replace("### INJECTED PLAYBOOK: ", "").trim().to_string();
-                                let _ = self.register_playbook(session_id, name, result.clone()).await;
+                                if let Err(e) = self.register_playbook(session_id, name, result.clone()).await {
+                                    log::warn!("Failed to register playbook: {}", e);
+                                }
                             }
-                        }
                         let _ = self.event_tx.send(Event::ToolResult {
                             result: result.clone(),
                         });
@@ -1424,7 +1413,9 @@ impl Agent {
 
                         if let Some(store) = &self.session_store
                             && !is_volatile {
-                                let _ = store.save_message(session_id, &tool_result_msg).await;
+                                if let Err(e) = store.save_message(session_id, &tool_result_msg).await {
+                                    log::warn!("Failed to save tool result message: {}", e);
+                                }
                             }
                         let mut state = state_arc.lock().await;
                         state.history.push(tool_result_msg);
@@ -1439,8 +1430,8 @@ impl Agent {
                     let mut not_found_tools: Vec<String> = Vec::new();
 
                     for err in &tool_errors {
-                        if let Some(did_you_mean) = err.split("Did you mean one of:").nth(1) {
-                            if let Some(tools_part) = did_you_mean.split('?').next() {
+                        if let Some(did_you_mean) = err.split("Did you mean one of:").nth(1)
+                            && let Some(tools_part) = did_you_mean.split('?').next() {
                                 for t in tools_part.split(',') {
                                     let clean = t.trim().trim_matches('`');
                                     if !clean.is_empty() && !alternatives.contains(&clean.to_string()) {
@@ -1448,16 +1439,14 @@ impl Agent {
                                     }
                                 }
                             }
-                        }
                         if err.contains("API_KEY not found") || err.contains("API key") {
                             api_key_missing = true;
                         }
                         // Extract the hallucinated tool name
-                        if let Some(tool_name) = err.split('\'').nth(1) {
-                            if !not_found_tools.contains(&tool_name.to_string()) {
+                        if let Some(tool_name) = err.split('\'').nth(1)
+                            && !not_found_tools.contains(&tool_name.to_string()) {
                                 not_found_tools.push(tool_name.to_string());
                             }
-                        }
                     }
 
                     let recovery_msg = if !alternatives.is_empty() {
@@ -1543,115 +1532,35 @@ impl Agent {
             }
             
             log::info!("[SESSION: {}] Processing final content response...", session_id);
-            let mut final_content = raw_content.clone();
-            let mut thoughts = Vec::new();
 
-            while let Some(start) = final_content.find("<think>") {
-                if let Some(end) = final_content[start..].find("</think>") {
-                    let absolute_end = start + end + 8; // 8 is length of </think>
-                    let thought_content = final_content[start + 7..start + end].trim().to_string();
-                    thoughts.push(thought_content.clone());
+            let (final_content, thoughts) = Self::extract_thoughts(&raw_content);
 
-                    let _ = self.record_step(crate::trajectory::TrajectoryStep::Thought {
-                        content: thought_content.clone(),
-                        timestamp: chrono::Utc::now(),
-                    }).await;
-
-                    // Send thought event
-                    let _ = self.event_tx.send(Event::AgentThought {
-                        content: MessageContent::Text(thought_content.clone()),
-                    });
-
-                    self.event_log.append(session_id, crate::event_log::EventKind::ThoughtEmitted {
-                        content_hash: crate::event_log::short_hash(&thought_content),
-                    }).await;
-
-                    final_content.replace_range(start..absolute_end, "");
-                } else {
-                    break;
-                }
+            for thought in &thoughts {
+                let _ = self.record_step(crate::trajectory::TrajectoryStep::Thought {
+                    content: thought.clone(),
+                    timestamp: chrono::Utc::now(),
+                }).await;
+                let _ = self.event_tx.send(Event::AgentThought {
+                    content: MessageContent::Text(thought.clone()),
+                });
+                self.event_log.append(session_id, crate::event_log::EventKind::ThoughtEmitted {
+                    content_hash: crate::event_log::short_hash(thought),
+                }).await;
             }
-            let final_content = final_content.trim().to_string();
 
             let _ = self.record_step(crate::trajectory::TrajectoryStep::Response {
                 content: final_content.clone(),
                 timestamp: chrono::Utc::now(),
             }).await;
 
-            let final_msg = Message {
-                role: "assistant".to_string(),
-                content: if final_content.is_empty() {
-                    None
-                } else {
-                    Some(MessageContent::Text(final_content.clone()))
-                },
-                ..Default::default()
-            };
-            let _ = self.hooks.trigger_message_sent(&final_msg).await;
+            self.process_final_response(
+                &final_content,
+                &response,
+                user_message,
+                session_id,
+                &state_arc,
+            ).await;
 
-            {
-                let mut state = state_arc.lock().await;
-                state.history.push(final_msg.clone());
-            }
-
-            if let Some(store) = &self.session_store {
-                let _ = store.save_message(session_id, &final_msg).await;
-            }
-
-            let current_interaction_count = self
-                .interaction_count
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1;
-            if current_interaction_count.is_multiple_of(5) {
-                let agent_clone = self.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = agent_clone.reflect().await {
-                        log::error!("Error during background reflection: {}", e);
-                    }
-                });
-            }
-
-            if let Some(nexus) = &self.knowledge_nexus {
-                let nexus = nexus.clone();
-                let content_to_index = final_content.clone();
-                tokio::spawn(async move {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let _ = nexus
-                        .remember_batch(vec![(id, content_to_index)])
-                        .await;
-                });
-            }
-
-            // Record task outcome to research notebook for context reuse
-            {
-                let mut notebook = self.research_notebook.lock().await;
-                if notebook.current_goal.is_empty() || notebook.current_goal == "Uninitialized" {
-                    *notebook = pharmakon_common::ResearchNotebook::new(
-                        &user_message.chars().take(80).collect::<String>()
-                    );
-                }
-                if notebook.should_stop() {
-                    // Cap facts to prevent unbounded growth — evict oldest fact
-                    if notebook.verified_facts.len() > 50 {
-                        notebook.verified_facts.remove(0);
-                    }
-                }
-                notebook.step_count += 1;
-                notebook.verified_facts.push(pharmakon_common::Fact {
-                    content: format!("Task: {} → {}", 
-                        user_message.chars().take(60).collect::<String>(),
-                        final_content.chars().take(100).collect::<String>()),
-                    source_url: session_id.to_string(),
-                    confidence: 0.7,
-                    timestamp: chrono::Utc::now(),
-                });
-            }
-
-            let _ = self.event_tx.send(Event::AgentResponse {
-                content: response
-                    .content
-                    .unwrap_or(MessageContent::Text("".to_string())),
-            });
             return Ok(final_content);
         }
     }).await
@@ -1783,7 +1692,9 @@ impl Agent {
 
                     // Also index into semantic search for recovery across sessions
                     if let Some(search) = &self.semantic_search {
-                        let _ = search.remember(insight).await;
+                        if let Err(e) = search.remember(insight).await {
+                            log::warn!("Failed to save reflection insight to search: {}", e);
+                        }
                     }
                 }
         Ok(())
@@ -1954,11 +1865,10 @@ impl Agent {
             log::warn!("Agent maintenance: snapshot store cleanup failed: {}", e);
         }
         // SQLite persistence cleanup (old messages, stale telemetry records)
-        if let Some(ref store) = self.session_store {
-            if let Err(e) = store.maintenance().await {
+        if let Some(ref store) = self.session_store
+            && let Err(e) = store.maintenance().await {
                 log::warn!("Agent maintenance: DB cleanup failed: {}", e);
             }
-        }
         Ok(())
     }
 

@@ -401,16 +401,14 @@ impl Tool for ApplyPatchTool {
         // 1. AST Validation
         if verify_ast && is_rust_file {
             let mut parser = tree_sitter::Parser::new();
-            if parser.set_language(&tree_sitter_rust::language()).is_ok() {
-                if let Some(tree) = parser.parse(&patched, None) {
-                    if has_error_nodes(tree.root_node()) {
+            if parser.set_language(&tree_sitter_rust::language()).is_ok()
+                && let Some(tree) = parser.parse(&patched, None)
+                    && has_error_nodes(tree.root_node()) {
                         return Err(AgentError(format!(
                             "AST Validation Failed: Patched code for {} has syntax errors.",
                             path_str
                         )));
                     }
-                }
-            }
         }
 
         let mut check_success = true;
@@ -496,7 +494,7 @@ impl Tool for ApplyPatchTool {
             .open(&journal_path)
         {
             use std::io::Write;
-            let _ = writeln!(file, "{}", log_entry.to_string());
+            let _ = writeln!(file, "{}", log_entry);
         }
 
         Ok(format!(

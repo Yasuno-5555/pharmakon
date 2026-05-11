@@ -28,15 +28,14 @@ impl OllamaDistiller {
         let tags_url = format!("{}/api/tags", self.host);
         match self.client.get(&tags_url).send().await {
             Ok(resp) => {
-                if let Ok(json) = resp.json::<Value>().await {
-                    if let Some(models) = json["models"].as_array() {
+                if let Ok(json) = resp.json::<Value>().await
+                    && let Some(models) = json["models"].as_array() {
                         // Check if the requested default base is available
                         for m in models {
-                            if let Some(name) = m["name"].as_str() {
-                                if name.contains(default_base) {
+                            if let Some(name) = m["name"].as_str()
+                                && name.contains(default_base) {
                                     return default_base.to_string();
                                 }
-                            }
                         }
                         // Fall back to the first available model if default is not found
                         if let Some(first_model) = models.first().and_then(|m| m["name"].as_str()) {
@@ -44,7 +43,6 @@ impl OllamaDistiller {
                             return first_model.to_string();
                         }
                     }
-                }
             }
             Err(e) => {
                 log::warn!("Could not connect to Ollama to resolve base models: {}. Defaulting to '{}'", e, default_base);
@@ -66,26 +64,24 @@ impl OllamaDistiller {
 
         // 2a. Append PHARMAKON.md Mandates
         let mandates_path = PathBuf::from("PHARMAKON.md");
-        if mandates_path.exists() {
-            if let Ok(mandates) = fs::read_to_string(&mandates_path) {
+        if mandates_path.exists()
+            && let Ok(mandates) = fs::read_to_string(&mandates_path) {
                 system_prompt.push_str("\n\n--- ARCHITECTURAL & ENGINEERING MANDATES ---\n");
                 // Take relevant snippet or first 2000 chars to avoid prompt pollution
                 system_prompt.push_str(&mandates.chars().take(2000).collect::<String>());
             }
-        }
 
         // 2b. Append Lessons Learned
         let lessons_path = PathBuf::from(".pharmakon/knowledge/lessons_learned.md");
-        if lessons_path.exists() {
-            if let Ok(lessons) = fs::read_to_string(&lessons_path) {
+        if lessons_path.exists()
+            && let Ok(lessons) = fs::read_to_string(&lessons_path) {
                 system_prompt.push_str("\n\n--- LESSONS LEARNED & EXPERIENCES ---\n");
                 system_prompt.push_str(&lessons.chars().take(2000).collect::<String>());
             }
-        }
 
         // 2c. Append top workspace facts
-        if let Ok(facts) = self.store.search_facts("").await {
-            if !facts.is_empty() {
+        if let Ok(facts) = self.store.search_facts("").await
+            && !facts.is_empty() {
                 system_prompt.push_str("\n\n--- SPECIFIC WORKSPACE FACTS ---\n");
                 for f in facts.iter().take(10) {
                     if let Some(content) = f["content"].as_str() {
@@ -93,7 +89,6 @@ impl OllamaDistiller {
                     }
                 }
             }
-        }
 
         // 3. Generate the Modelfile headers
         let mut modelfile = format!("FROM {}\n\n", base_model);

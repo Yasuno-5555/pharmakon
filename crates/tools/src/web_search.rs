@@ -200,6 +200,12 @@ pub struct DuckDuckGoSearchTool {
     client: reqwest::Client,
 }
 
+impl Default for DuckDuckGoSearchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DuckDuckGoSearchTool {
     pub fn new() -> Self {
         Self {
@@ -293,14 +299,12 @@ fn decode_html_entities(s: &str) -> String {
                 "#39" => "'",
                 _ => {
                     // Try numeric
-                    if let Some(num) = entity.strip_prefix('#') {
-                        if let Ok(n) = num.parse::<u32>() {
-                            if let Some(ch) = char::from_u32(n) {
+                    if let Some(num) = entity.strip_prefix('#')
+                        && let Ok(n) = num.parse::<u32>()
+                            && let Some(ch) = char::from_u32(n) {
                                 out.push(ch);
                                 continue;
                             }
-                        }
-                    }
                     // Fallback: keep entity as-is
                     out.push('&');
                     out.push_str(&entity);
@@ -387,6 +391,12 @@ impl Tool for DuckDuckGoSearchTool {
 
 pub struct SearchDispatcherTool {
     duckduckgo: DuckDuckGoSearchTool,
+}
+
+impl Default for SearchDispatcherTool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SearchDispatcherTool {

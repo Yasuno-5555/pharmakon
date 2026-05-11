@@ -180,8 +180,8 @@ impl eframe::App for PharmakonIde {
             ui.heading("📁 Workspace Files");
             ui.horizontal(|ui| {
                 let resp = ui.add_sized([ui.available_width() - 50.0, 20.0], egui::TextEdit::singleline(&mut self.folder_input).hint_text("/path/to/project..."));
-                if ui.button("📂").clicked() || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
-                    if !self.folder_input.is_empty() {
+                if (ui.button("📂").clicked() || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+                    && !self.folder_input.is_empty() {
                         let p = std::path::PathBuf::from(&self.folder_input);
                         if p.is_dir() {
                             self.data.workspace_root = p.to_string_lossy().to_string();
@@ -189,22 +189,19 @@ impl eframe::App for PharmakonIde {
                             self.folder_input.clear();
                         }
                     }
-                }
             });
             ui.horizontal(|ui| {
-                if ui.button("📂 Pick Folder").clicked() {
-                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                if ui.button("📂 Pick Folder").clicked()
+                    && let Some(folder) = rfd::FileDialog::new().pick_folder() {
                         self.data.workspace_root = folder.to_string_lossy().to_string();
                         self.data.refresh_file_tree();
                         self.folder_input.clear();
                     }
-                }
-                if ui.button("📄 Pick File").clicked() {
-                    if let Some(file) = rfd::FileDialog::new().pick_file() {
+                if ui.button("📄 Pick File").clicked()
+                    && let Some(file) = rfd::FileDialog::new().pick_file() {
                         let full = file.to_string_lossy().to_string();
                         self.data.open_file(&full);
                     }
-                }
             });
             ui.colored_label(egui::Color32::GRAY, self.data.workspace_root.clone());
             if ui.button("↻ Refresh workspace").clicked() {

@@ -248,6 +248,7 @@ impl Tool for ShellTool {
     async fn call(&self, args: Value) -> AgentResult<String> {
         let command = args["command"]
             .as_str()
+            .or_else(|| args["cmd"].as_str())
             .ok_or_else(|| AgentError("Missing command".to_string()))?;
         let timeout_secs = args["timeout"].as_u64().unwrap_or(60).max(1).min(300);
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
@@ -417,6 +418,12 @@ impl Tool for BackgroundRunTool {
 
 pub struct ProcessStatusTool;
 
+impl Default for ProcessStatusTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProcessStatusTool {
     pub fn new() -> Self { Self }
 }
@@ -492,6 +499,12 @@ impl Tool for ProcessStatusTool {
 }
 
 pub struct SendCommandInputTool;
+
+impl Default for SendCommandInputTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SendCommandInputTool {
     pub fn new() -> Self { Self }

@@ -38,6 +38,12 @@ pub struct IterationSnapshot {
     // pub new_facts_learned: usize,
 }
 
+impl Default for IterationSnapshot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IterationSnapshot {
     pub fn new() -> Self {
         Self {
@@ -138,11 +144,11 @@ impl ProgressTracker {
             return 1.0;
         };
 
-        let tool_success_delta = (current.successful_tool_calls > prev.successful_tool_calls) as i32 as f32;
+        
 
         // More metrics can be added here and weighted.
         // For now, any successful tool call is progress.
-        tool_success_delta
+        (current.successful_tool_calls > prev.successful_tool_calls) as i32 as f32
     }
 }
 

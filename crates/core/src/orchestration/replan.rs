@@ -7,6 +7,12 @@ use crate::orchestration::world::PlanNode;
 
 pub struct IncrementalPlanner;
 
+impl Default for IncrementalPlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncrementalPlanner {
     pub fn new() -> Self {
         Self

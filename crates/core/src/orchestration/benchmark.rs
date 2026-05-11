@@ -87,13 +87,11 @@ pub struct BenchmarkHarness {
 impl BenchmarkHarness {
     pub fn load() -> Self {
         let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/benchmarks.json");
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(harness) = serde_json::from_str(&content) {
+        if path.exists()
+            && let Ok(content) = std::fs::read_to_string(path)
+                && let Ok(harness) = serde_json::from_str(&content) {
                     return harness;
                 }
-            }
-        }
         Self::default()
     }
 
@@ -109,7 +107,7 @@ impl BenchmarkHarness {
 
     /// Periodically executes standardized task suite.
     pub fn execute_suite(&mut self, tasks: &[BenchmarkTask]) -> BenchmarkRun {
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().to_string()[..8].to_string());
+        let run_id = format!("run-{}", &uuid::Uuid::new_v4().to_string()[..8]);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

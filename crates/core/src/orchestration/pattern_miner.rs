@@ -31,13 +31,11 @@ pub struct PatternLibrary {
 impl PatternLibrary {
     pub fn load() -> Self {
         let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/pattern_library.json");
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(lib) = serde_json::from_str(&content) {
+        if path.exists()
+            && let Ok(content) = std::fs::read_to_string(path)
+                && let Ok(lib) = serde_json::from_str(&content) {
                     return lib;
                 }
-            }
-        }
         Self::default()
     }
 
@@ -54,8 +52,8 @@ impl PatternLibrary {
     /// Attempts to match a task description against our compiled regex templates and instantiate an AST.
     pub fn instantiate_match(&self, task: &str) -> Option<CandidatePlan> {
         for template in &self.templates {
-            if let Ok(re) = Regex::new(&template.task_regex) {
-                if let Some(captures) = re.captures(task) {
+            if let Ok(re) = Regex::new(&template.task_regex)
+                && let Some(captures) = re.captures(task) {
                     let mut params = HashMap::new();
                     for key in &template.parameter_keys {
                         if let Some(m) = captures.name(key) {
@@ -74,7 +72,6 @@ impl PatternLibrary {
                         root: Some(instantiated_root),
                     });
                 }
-            }
         }
         None
     }
@@ -157,6 +154,12 @@ fn substitute_json_value(val: &serde_json::Value, params: &HashMap<String, Strin
 }
 
 pub struct PatternMiner;
+
+impl Default for PatternMiner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PatternMiner {
     pub fn new() -> Self {
