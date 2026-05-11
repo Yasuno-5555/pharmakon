@@ -16,7 +16,11 @@ impl OllamaModel {
         Self {
             host: host.unwrap_or_else(|| "http://localhost:11434".to_string()),
             model_name,
-            client: Client::new(),
+            client: Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .expect("Failed to build HTTP client"),
         }
     }
 }

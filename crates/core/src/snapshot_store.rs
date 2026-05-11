@@ -124,35 +124,44 @@ impl SnapshotStore {
     /// Evict oldest snapshots until the store is under the quota.
     /// Returns the number of snapshots removed.
     pub async fn enforce_quota(&self) -> Result<usize> {
-        let mut removed = 0usize;
-        loop {
-            let current = self.total_size();
-            if current <= self.quota_bytes {
-                break;
-            }
-            // Find the oldest snapshot
-            let oldest_id = {
-                let index = self.index.lock().await;
-                index
-                    .values()
-                    .min_by_key(|s| s.timestamp)
-                    .map(|s| s.id.clone())
-            };
-            match oldest_id {
-                Some(id) => {
-                    let blob_path = self.store_dir.join(&id);
-                    let _ = std::fs::remove_file(&blob_path);
-                    self.index.lock().await.remove(&id);
-                    removed += 1;
-                }
-                None => break, // nothing left to evict
-            }
+        let current = self.total_size();
+        if current <= self.quota_bytes {
+            return Ok(0);
         }
+
+        // Batch-evict: collect oldest snapshots to remove in one pass
+        let excess = current.saturating_sub(self.quota_bytes);
+        let mut removed = 0usize;
+        let mut freed = 0u64;
+
+        let to_remove: Vec<String> = {
+            let index = self.index.lock().await;
+            let mut entries: Vec<_> = index.values().collect();
+            entries.sort_by_key(|s| s.timestamp);
+            let mut ids = Vec::new();
+            for entry in &entries {
+                if freed >= excess {
+                    break;
+                }
+                freed += entry.compressed_len;
+                ids.push(entry.id.clone());
+            }
+            ids
+        };
+
+        for id in &to_remove {
+            let blob_path = self.store_dir.join(id);
+            let _ = std::fs::remove_file(&blob_path);
+            self.index.lock().await.remove(id);
+            removed += 1;
+        }
+
         if removed > 0 {
             log::info!(
-                "SnapshotStore: evicted {} snapshots to enforce quota ({} MB)",
+                "SnapshotStore: evicted {} snapshots to enforce quota ({} MB), freed ~{:.1} MB",
                 removed,
-                self.quota_bytes / (1024 * 1024)
+                self.quota_bytes / (1024 * 1024),
+                freed as f64 / (1024.0 * 1024.0)
             );
         }
         Ok(removed)
@@ -363,7 +372,8 @@ impl SnapshotStore {
     /// Skips files larger than MAX_FILE_SIZE and known large directories.
     pub async fn snapshot_dir(&self, dir_path: &Path) -> Result<HashMap<PathBuf, String>> {
         let mut snapshots = HashMap::new();
-        self.snapshot_dir_recursive(dir_path, dir_path, &mut snapshots)
+        let mut file_count = 0usize;
+        self.snapshot_dir_recursive(dir_path, dir_path, &mut snapshots, &mut file_count)
             .await?;
         Ok(snapshots)
     }
@@ -373,7 +383,9 @@ impl SnapshotStore {
         root: &Path,
         current: &Path,
         snapshots: &mut HashMap<PathBuf, String>,
+        file_count: &mut usize,
     ) -> Result<()> {
+        const MAX_FILES: usize = 500;
         let skip_dirs = [
             "target",
             ".git",
@@ -381,6 +393,26 @@ impl SnapshotStore {
             "node_modules",
             ".fastembed_cache",
             "__pycache__",
+            "Library",
+            "Music",
+            "Pictures",
+            "Movies",
+            "Downloads",
+            "Desktop",
+            "Documents",
+            "Applications",
+            ".cargo",
+            ".rustup",
+            ".cache",
+            ".local",
+            ".npm",
+            ".Trash",
+            "OrbStack",
+            ".deepseek",
+            "Obsidian-Hub",
+            "go",
+            "openclaw",
+            "zotero_webdav",
         ];
         let mut entries = tokio::fs::read_dir(current).await?;
         while let Some(entry) = entries.next_entry().await? {
@@ -399,8 +431,12 @@ impl SnapshotStore {
                 if name_str.starts_with('.') {
                     continue;
                 }
-                Box::pin(self.snapshot_dir_recursive(root, &path, snapshots)).await?;
+                Box::pin(self.snapshot_dir_recursive(root, &path, snapshots, file_count)).await?;
             } else if path.is_file() {
+                if *file_count >= MAX_FILES {
+                    return Ok(()); // safety valve: stop after 500 files
+                }
+                *file_count += 1;
                 if let Ok(rel) = path.strip_prefix(root) {
                     if let Ok(id) = self.snapshot_file(&path).await {
                         snapshots.insert(rel.to_path_buf(), id);

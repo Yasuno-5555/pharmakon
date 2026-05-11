@@ -110,7 +110,11 @@ struct OpenAIUsage {
 impl OpenAIModel {
     pub fn new(api_key: String, model_id: String) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .expect("Failed to build HTTP client"),
             api_key,
             model_id,
         }

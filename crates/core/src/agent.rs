@@ -925,14 +925,19 @@ impl Agent {
                         let _ = self.event_tx.send(Event::Error {
                             message: format!("Model error: {}", e),
                         });
-                        return Err(response_result.unwrap().err().unwrap().into());
+                        return Err(anyhow::anyhow!("All fallback models exhausted. Final error: {}", e));
                     }
-                    None => unreachable!(),
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "[InternalError] Model response loop terminated without setting a result. This should not happen."
+                        ));
+                    }
                 }
             }
 
-            let response: pharmakon_common::agent_types::CompletionResponse =
-                response_result.unwrap().unwrap();
+            let response_result_val = response_result
+                .ok_or_else(|| anyhow::anyhow!("[InternalError] Missing model response"))?;
+            let response: pharmakon_common::agent_types::CompletionResponse = response_result_val?;
             // Feed actual API token consumption into the DSGE economy layer
             if let Some(ref usage) = response.usage {
                 let mut economy = self.economy.lock().unwrap();

@@ -6,10 +6,10 @@ use tokio::sync::Mutex;
 /// Shared between CLI and Gateway so both have access to the full tool suite.
 pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     use pharmakon_tools::terminal::{ShellTool, TerminalTool, BackgroundRunTool, ProcessStatusTool};
-    use pharmakon_tools::files::{FileReadTool, FileWriteTool};
-    use pharmakon_tools::code::{ViewFileTool, ListDirTool, StrictReplaceContentTool, GrepSearchTool, FindDefinitionTool, PythonInterpreterTool, ApplyPatchTool};
+    use pharmakon_tools::code::{ViewFileTool, ListDirTool, StrictReplaceContentTool, GrepSearchTool, FindDefinitionTool, PythonInterpreterTool};
+    use pharmakon_tools::files::{ApplyPatchTool, FileReadTool, FileWriteTool};
     use pharmakon_tools::repomap::RepoMapTool;
-    use pharmakon_tools::git::{GitStatusTool, GitDiffTool, GitCommitTool};
+    use pharmakon_tools::git::{GitAddTool, GitBranchTool, GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool};
     use pharmakon_tools::browser::BrowserTool;
     use pharmakon_tools::web_fetch::WebFetchTool;
     use pharmakon_tools::web_search::{DuckDuckGoSearchTool, GoogleSearchTool, BraveSearchTool as WebSearchBraveSearchTool, SearchDispatcherTool};
@@ -61,7 +61,10 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     agent.add_tool(Arc::new(RepoMapTool::new())).await;
     agent.add_tool(Arc::new(GitStatusTool)).await;
     agent.add_tool(Arc::new(GitDiffTool)).await;
+    agent.add_tool(Arc::new(GitAddTool)).await;
     agent.add_tool(Arc::new(GitCommitTool)).await;
+    agent.add_tool(Arc::new(GitLogTool)).await;
+    agent.add_tool(Arc::new(GitBranchTool)).await;
 
     // --- Browser & Web ---
     agent.add_tool(Arc::new(BrowserTool::new(None))).await;

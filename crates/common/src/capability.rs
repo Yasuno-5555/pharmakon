@@ -109,15 +109,18 @@ impl Capability {
 
             // Modify
             "write_file" | "apply_patch" | "mutate_ast" | "semantic_conflict_resolution"
-            | "spec_first_test" => Some(Self::Modify),
+            | "spec_first_test" | "replace_content" | "git_add" | "git_commit"
+            | "git_branch" | "python_interpreter" => Some(Self::Modify),
 
             // Execute
-            "shell" | "terminal" | "node_repl" | "rlfc" => Some(Self::Execute),
+            "shell" | "terminal" | "run_background" | "get_process_status"
+            | "send_command_input" | "node_repl" | "rlfc" => Some(Self::Execute),
 
             // Investigate
             "lsp" | "ast_lsp_bridge" | "repomap" | "workspace_perception"
             | "workspace_snapshot" | "soft_dependency_graph" | "nexus_visualizer"
-            | "execution_trace" | "deterministic_replay" => Some(Self::Investigate),
+            | "execution_trace" | "deterministic_replay" | "view_file" | "list_dir"
+            | "find_definition" | "git_status" | "git_diff" | "git_log" => Some(Self::Investigate),
 
             // Orchestrate
             "fractal_swarm" | "subagent" | "mcts_simulator" | "route_tools"

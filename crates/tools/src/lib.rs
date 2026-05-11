@@ -54,14 +54,14 @@ pub use crate::canvas::CanvasTool;
 pub use crate::gui::NativeGuiEmulatorTool;
 pub use crate::checkpoint::CheckpointTool;
 pub use crate::code::{
-    ApplyPatchTool, FindDefinitionTool, GrepSearchTool, ListDirTool,
+    FindDefinitionTool, GrepSearchTool, ListDirTool,
     PythonInterpreterTool, StrictReplaceContentTool, ViewFileTool,
 };
 pub use crate::commitment_tool::CommitmentTool;
 pub use crate::connectors::ContextConnectorTool;
 pub use crate::diagnostic::DiagnosticTool;
-pub use crate::files::{FileReadTool, FileWriteTool};
-pub use crate::git::{GitCommitTool, GitDiffTool, GitStatusTool};
+pub use crate::files::{ApplyPatchTool, FileReadTool, FileWriteTool};
+pub use crate::git::{GitAddTool, GitBranchTool, GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool};
 pub use crate::host_script::HostScriptTool;
 pub use crate::link_understanding::LinkUnderstandingTool;
 pub use crate::lsp::LspTool;

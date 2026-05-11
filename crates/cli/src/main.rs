@@ -273,7 +273,7 @@ async fn main() -> Result<()> {
             Ok(response) => println!("{}", response),
             Err(e) => log::error!("Agent error: {}", e),
         }
-        return Ok(());
+        std::process::exit(0);
     }
 
     match cli.command {
@@ -319,6 +319,7 @@ async fn main() -> Result<()> {
                     Ok(response) => println!("{}", response),
                     Err(e) => log::error!("Agent error: {}", e),
                 }
+                std::process::exit(0);
             } else {
                 // Interactive REPL mode
                 tui::run_repl(agent_arc).await?;

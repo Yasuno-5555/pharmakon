@@ -16,7 +16,11 @@ impl PerplexityModel {
         Self {
             api_key,
             model_name,
-            client: Client::new(),
+            client: Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .expect("Failed to build HTTP client"),
         }
     }
 }

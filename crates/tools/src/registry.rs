@@ -94,13 +94,19 @@ impl ToolMetaRegistry {
                 let api_key = std::env::var("BRAVE_API_KEY").ok()?;
                 Some(Arc::new(crate::web_search::BraveSearchTool::new(api_key)))
             }
-            "google_search" => Some(Arc::new(crate::web_search::GoogleSearchTool)),
+            "grep_files" | "grep_search" => Some(Arc::new(crate::code::GrepSearchTool)),
+            "git_status" => Some(Arc::new(crate::git::GitStatusTool)),
+            "git_diff" => Some(Arc::new(crate::git::GitDiffTool)),
+            "git_add" => Some(Arc::new(crate::git::GitAddTool)),
+            "git_commit" => Some(Arc::new(crate::git::GitCommitTool)),
+            "git_log" => Some(Arc::new(crate::git::GitLogTool)),
+            "git_branch" => Some(Arc::new(crate::git::GitBranchTool)),
             "gemini_search" => Some(Arc::new(crate::web_search::GoogleSearchTool)),
             "lsp" => Some(Arc::new(crate::lsp::LspTool::new())),
             "shell" => Some(Arc::new(crate::terminal::ShellTool)),
             "read_file" => Some(Arc::new(crate::files::FileReadTool)),
             "write_file" => Some(Arc::new(crate::files::FileWriteTool)),
-            "replace_file_content" => Some(Arc::new(crate::code::StrictReplaceContentTool)),
+            "replace_content" | "replace_file_content" => Some(Arc::new(crate::code::StrictReplaceContentTool)),
             "view_file" => Some(Arc::new(crate::code::ViewFileTool)),
             "list_dir" => Some(Arc::new(crate::code::ListDirTool)),
             "apply_patch" => Some(Arc::new(crate::files::ApplyPatchTool)),
