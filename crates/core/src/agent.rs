@@ -12,10 +12,14 @@ use anyhow::{Result, anyhow};
 use pharmakon_common::Event;
 use pharmakon_memory::BeliefSystem;
 /// Wrapper for broadcast::Sender::send that logs warnings on overflow.
+/// Closed errors are expected in one-shot mode (no receiver subscribed) — suppressed.
 macro_rules! try_send_event {
     ($tx:expr, $event:expr) => {
         if let Err(e) = $tx.send($event) {
-            log::warn!("Event bus error (capacity full or receiver lagged): {}", e);
+            let err_str = e.to_string();
+            if !err_str.contains("closed") {
+                log::warn!("Event bus error: {}", err_str);
+            }
         }
     };
 }

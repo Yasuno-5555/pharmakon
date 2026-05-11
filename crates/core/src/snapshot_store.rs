@@ -159,19 +159,43 @@ impl SnapshotStore {
         let mut removed = 0usize;
         let mut freed = 0u64;
 
+        // Use in-memory index if available; fall back to filesystem mtime for fresh processes
         let to_remove: Vec<String> = {
-            let index = self.index.lock().await;
-            let mut entries: Vec<_> = index.values().collect();
-            entries.sort_by_key(|s| s.timestamp);
-            let mut ids = Vec::new();
-            for entry in &entries {
-                if freed >= excess {
-                    break;
+            let index_empty = self.index.lock().await.is_empty();
+            if !index_empty {
+                let index = self.index.lock().await;
+                let mut entries: Vec<_> = index.values().collect();
+                entries.sort_by_key(|s| s.timestamp);
+                let mut ids = Vec::new();
+                for entry in &entries {
+                    if freed >= excess { break; }
+                    freed += entry.compressed_len;
+                    ids.push(entry.id.clone());
                 }
-                freed += entry.compressed_len;
-                ids.push(entry.id.clone());
+                ids
+            } else {
+                // Index empty (fresh process, old snapshots on disk) — sort by mtime
+                let mut dir_entries: Vec<_> = std::fs::read_dir(&self.store_dir)
+                    .ok().into_iter().flatten()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_file())
+                    .map(|e| {
+                        let mtime = e.metadata().ok().and_then(|m| m.modified().ok());
+                        let len = e.metadata().ok().map(|m| m.len()).unwrap_or(0);
+                        (e.path(), mtime, len)
+                    })
+                    .collect();
+                dir_entries.sort_by_key(|(_, mtime, _)| *mtime);
+                let mut ids = Vec::new();
+                for (path, _, len) in &dir_entries {
+                    if freed >= excess { break; }
+                    freed += len;
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        ids.push(name.to_string());
+                    }
+                }
+                ids
             }
-            ids
         };
 
         for id in &to_remove {

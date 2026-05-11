@@ -199,12 +199,12 @@ impl HealthMonitor {
         sys.refresh_all();
         let pid = sysinfo::Pid::from(std::process::id() as usize);
 
-        let rss_kb = if let Some(proc) = sys.process(pid) {
+        let rss_bytes = if let Some(proc) = sys.process(pid) {
             proc.memory()
         } else {
             0
         };
-        let rss_mb = rss_kb as f64 / 1024.0;
+        let rss_mb = rss_bytes as f64 / (1024.0 * 1024.0);
 
         let (ok, severity, msg) = if rss_mb > 500.0 {
             (false, Severity::Critical, format!("Memory pressure critical: {:.1} MB RSS", rss_mb))
