@@ -7,6 +7,7 @@ use fastembed::{InitOptions, TextEmbedding};
 use futures::StreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 use lancedb::{Connection, connect};
+use lancedb::table::OptimizeAction;
 use pharmakon_common::{AgentError, AgentResult, EmbeddingModel};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -351,6 +352,50 @@ impl KnowledgeNexus {
     }
 
     pub async fn smart_search(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
+        if self.is_isolated {
+            let mut documents = Vec::new();
+            let query_lower = query.to_lowercase();
+            let query_tokens: std::collections::HashSet<_> = query_lower.split_whitespace().collect();
+            
+            let nodes = self.local_nodes.lock().await.clone();
+            let mut ranked = Vec::new();
+            
+            // Try to generate a query embedding for cosine approximation if needed
+            let query_vector = self.embedding_model.generate_embedding(query).await.ok();
+            
+            for node in nodes {
+                let text_lower = node.content.to_lowercase();
+                
+                // Keyword match score (weight 0.3)
+                let match_count = query_tokens.iter().filter(|&&t| text_lower.contains(t)).count();
+                let keyword_score = match_count as f32 / query_tokens.len().max(1) as f32;
+                
+                // Cosine similarity approximation (weight 0.7)
+                let mut similarity = 0.0f32;
+                if let Some(ref q_vec) = query_vector {
+                    if let Ok(node_vec) = self.embedding_model.generate_embedding(&node.content).await {
+                        let dot: f32 = q_vec.iter().zip(node_vec.iter()).map(|(a, b)| a * b).sum();
+                        similarity = dot;
+                    }
+                }
+                
+                let score = (similarity * 0.7) + (keyword_score * 0.3);
+                let relevance_threshold = std::env::var("PHARMAKON_RELEVANCE_THRESHOLD")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.20);
+                if score >= relevance_threshold {
+                    ranked.push((node, score));
+                }
+            }
+            
+            ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            for (node, _) in ranked.into_iter().take(limit) {
+                documents.push(node.content);
+            }
+            return Ok(documents);
+        }
+
         let vector = self
             .embedding_model
             .generate_embedding(query)
@@ -430,7 +475,13 @@ impl KnowledgeNexus {
 
                 let final_score = relevance * freshness * structural_boost;
 
-                ranked_results.push((node, final_score));
+                let relevance_threshold = std::env::var("PHARMAKON_RELEVANCE_THRESHOLD")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.20);
+                if relevance >= relevance_threshold {
+                    ranked_results.push((node, final_score));
+                }
             }
         }
 
@@ -495,6 +546,109 @@ impl KnowledgeNexus {
                     .await?;
             }
         }
+
+        Ok(())
+    }
+
+    pub async fn delete_by_session(&self, session_id: &str) -> anyhow::Result<()> {
+        // 1. Clear isolated delta buffers if active
+        {
+            let mut nodes = self.local_nodes.lock().await;
+            let mut edges = self.local_edges.lock().await;
+            
+            let pattern = format!("\"session_id\":\"{}\"", session_id);
+            nodes.retain(|n| {
+                let props_str = serde_json::to_string(&n.properties).unwrap_or_default();
+                !props_str.contains(&pattern)
+            });
+            let remaining_ids: std::collections::HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
+            edges.retain(|e| remaining_ids.contains(&e.from_id) && remaining_ids.contains(&e.to_id));
+        }
+
+        // 2. Identify the node IDs to delete from LanceDB BEFORE we delete them from SQLite
+        let node_ids_to_delete = self.graph.get_session_node_ids(session_id).await?;
+
+        // 3. Delete from LanceDB & Compact table
+        if !node_ids_to_delete.is_empty() {
+            let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
+            for id in node_ids_to_delete {
+                if let Err(e) = table.delete(&format!("id = '{}'", id)).await {
+                    log::warn!("Failed to delete node '{}' from LanceDB: {}", id, e);
+                }
+            }
+            // Trigger explicit compaction/optimization to reclaim disk space
+            if let Err(e) = table.optimize(OptimizeAction::All).await {
+                log::warn!("LanceDB: Failed to optimize table after deletions: {}", e);
+            }
+        }
+
+        // 4. Delete from SQLite GraphStore
+        self.graph.delete_by_session(session_id).await?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::Node;
+
+    #[tokio::test]
+    async fn test_weaver_isolated_and_delete() -> anyhow::Result<()> {
+        let r_id = uuid::Uuid::new_v4().to_string();
+        let db_path = format!("target/test_lancedb_{}", r_id);
+        let graph_db_path = format!("target/test_graph_{}.db", r_id);
+
+        let nexus = KnowledgeNexus::new(
+            &db_path,
+            &graph_db_path,
+        ).await?;
+
+        // Test delete_by_session with isolated/delta nodes
+        let isolated = nexus.isolated();
+        
+        let props = serde_json::json!({
+            "session_id": "test-session-123"
+        });
+
+        let node = Node {
+            id: "node-1".to_string(),
+            label: "test-node".to_string(),
+            node_type: "generic".to_string(),
+            content: "Rust is a systems programming language".to_string(),
+            summary: None,
+            embedding_id: None,
+            embedding_status: "PENDING".to_string(),
+            access_count: 0,
+            last_access_time: 0,
+            decay_score: 1.0,
+            properties: props,
+        };
+
+        {
+            let mut nodes: tokio::sync::MutexGuard<'_, Vec<Node>> = isolated.local_nodes.lock().await;
+            nodes.push(node);
+        }
+
+        // Verify it was added to local nodes
+        {
+            let nodes: tokio::sync::MutexGuard<'_, Vec<Node>> = isolated.local_nodes.lock().await;
+            assert_eq!(nodes.len(), 1);
+        }
+
+        // Delete by session
+        isolated.delete_by_session("test-session-123").await?;
+
+        // Verify local nodes is empty
+        {
+            let nodes: tokio::sync::MutexGuard<'_, Vec<Node>> = isolated.local_nodes.lock().await;
+            assert_eq!(nodes.len(), 0);
+        }
+
+        // Clean up temp files
+        let _ = std::fs::remove_dir_all(&db_path);
+        let _ = std::fs::remove_file(&graph_db_path);
 
         Ok(())
     }

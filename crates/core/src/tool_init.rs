@@ -72,7 +72,11 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     agent.add_tool(Arc::new(BrowserTool::new(None))).await;
     agent.add_tool(Arc::new(NativeGuiEmulatorTool::new())).await;
     agent.add_tool(Arc::new(WebFetchTool::new())).await;
-    agent.add_tool(Arc::new(WebSearchBraveSearchTool::new("".to_string()))).await;
+    if let Ok(key) = std::env::var("BRAVE_API_KEY") {
+        if !key.trim().is_empty() {
+            agent.add_tool(Arc::new(WebSearchBraveSearchTool::new(key))).await;
+        }
+    }
     agent.add_tool(Arc::new(GoogleSearchTool)).await;
     agent.add_tool(Arc::new(DuckDuckGoSearchTool::new())).await;
     agent.add_tool(Arc::new(SearchDispatcherTool::new())).await;

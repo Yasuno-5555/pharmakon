@@ -513,7 +513,7 @@ async fn main() -> Result<()> {
             }
 
             // Heartbeat
-            let heartbeat = pharmakon_core::automation::heartbeat::HeartbeatManager::new(agent_arc.clone(), 3600);
+            let heartbeat = pharmakon_core::automation::heartbeat::HeartbeatManager::new(agent_arc.clone(), 360);
             heartbeat.start().await;
 
             gateway.run().await?;

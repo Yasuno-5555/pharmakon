@@ -22,10 +22,19 @@ impl Policy for DefaultSecurityPolicy {
     fn evaluate_tool_call(&self, tool_name: &str, args: &Value) -> PolicyAction {
         match tool_name {
             "shell" => {
-                if let Some(cmd) = args["command"].as_str()
-                    && let Err(e) = SecurityAuditor::audit_shell_command(cmd) {
+                if let Some(cmd) = args["command"].as_str() {
+                    if let Err(e) = SecurityAuditor::audit_shell_command(cmd) {
                         return PolicyAction::Deny(e.to_string());
                     }
+
+                    // If it is in the command blocklist, require manual approval
+                    if SecurityAuditor::is_blocked_command(cmd) {
+                        return PolicyAction::RequireApproval(format!(
+                            "Command '{}' is potentially dangerous. Manual confirmation is required.",
+                            cmd
+                        ));
+                    }
+                }
 
                 // Prioritize explicit agent request for approval
                 if args["requires_manual_approval"].as_bool().unwrap_or(false) {

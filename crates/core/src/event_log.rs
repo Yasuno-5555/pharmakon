@@ -85,6 +85,20 @@ pub enum EventKind {
     },
 }
 
+impl EventKind {
+    pub fn redact(&mut self) {
+        match self {
+            EventKind::SessionEvent { detail, .. } => {
+                *detail = crate::security::redaction::redact_text(detail);
+            }
+            EventKind::SubAgentSpawned { task, .. } => {
+                *task = crate::security::redaction::redact_text(task);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Default max in-memory events before oldest are evicted.
 /// At ~200 bytes/event, 10k events ≈ 2 MB — safe even for long sessions.
 const MAX_IN_MEMORY_EVENTS: usize = 10_000;
@@ -99,6 +113,7 @@ pub struct EventLog {
     events: Mutex<VecDeque<AgentEvent>>,
     next_id: AtomicU64,
     persist_path: Option<PathBuf>,
+    file_cache: Mutex<Option<std::fs::File>>,
 }
 
 impl EventLog {
@@ -114,6 +129,7 @@ impl EventLog {
             events: Mutex::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
             persist_path,
+            file_cache: Mutex::new(None),
         }
     }
 
@@ -137,8 +153,9 @@ impl EventLog {
     }
 
     /// Append an event and return its monotonic ID.
-    pub async fn append(&self, session_id: &str, kind: EventKind) -> u64 {
+    pub async fn append(&self, session_id: &str, mut kind: EventKind) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        kind.redact();
         let event = AgentEvent {
             id,
             timestamp: Utc::now(),
@@ -150,16 +167,40 @@ impl EventLog {
         if let Some(ref path) = self.persist_path {
             if let Ok(line) = serde_json::to_string(&event) {
                 use std::io::Write;
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                {
-                    let _ = writeln!(file, "{}", line);
+                let mut cache = self.file_cache.lock().await;
+                if cache.is_none() {
+                    if let Ok(file) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        *cache = Some(file);
+                    }
+                }
+                if let Some(ref mut file) = *cache {
+                    if let Err(_) = writeln!(file, "{}", line) {
+                        // If write failed, clear cache and retry once by re-opening
+                        if let Ok(retry_file) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                        {
+                            let mut retry_file = retry_file;
+                            let _ = writeln!(retry_file, "{}", line);
+                            *cache = Some(retry_file);
+                        } else {
+                            *cache = None;
+                        }
+                    }
                 }
             }
             // Truncate disk log periodically (every 100 events)
             if id.is_multiple_of(100) {
+                // Clear file cache before truncation to prevent stale descriptors or conflicts
+                {
+                    let mut cache = self.file_cache.lock().await;
+                    *cache = None;
+                }
                 let p = path.clone();
                 tokio::task::spawn_blocking(move || {
                     Self::truncate_disk_log(&p, DEFAULT_MAX_DISK_EVENTS);

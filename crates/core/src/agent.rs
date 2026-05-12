@@ -46,6 +46,7 @@ pub struct SessionState {
     pub working_memory: Vec<WorkingMemoryUnit>,
     pub active_playbooks: Vec<(String, String)>, // (name, content)
     pub context_engine: Arc<Mutex<crate::memory::context_engine::ContextEngine>>,
+    pub last_accessed: std::time::Instant,
 }
 
 pub struct Agent {
@@ -140,14 +141,14 @@ impl Clone for Agent {
             session_store: self.session_store.clone(),
             planner_model: self.planner_model.clone(),
             graph_store: self.graph_store.clone(),
-            interaction_count: self.interaction_count.clone(),
+            interaction_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             fallback_models: self.fallback_models.clone(),
-            total_tokens: self.total_tokens.clone(),
-            total_cost: self.total_cost.clone(),
+            total_tokens: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            total_cost: Arc::new(Mutex::new(0.0)),
             token_budget: self.token_budget,
             start_time: self.start_time,
             dry_run: self.dry_run.clone(),
-            tool_call_counts: self.tool_call_counts.clone(),
+            tool_call_counts: Arc::new(Mutex::new(std::collections::HashMap::new())),
             territory_manager: self.territory_manager.clone(),
             research_notebook: self.research_notebook.clone(),
             usage_history: self.usage_history.clone(),
@@ -171,8 +172,8 @@ impl Clone for Agent {
 
 impl Agent {
     pub fn new(model: Arc<dyn AgentModel>, session_id: String) -> Self {
-        let (event_tx, _) = broadcast::channel(100);
-        let (approval_tx, _) = broadcast::channel(100);
+        let (event_tx, _) = broadcast::channel(1024);
+        let (approval_tx, _) = broadcast::channel(1024);
         let trajectory = Arc::new(Mutex::new(crate::trajectory::Trajectory::new(
             session_id.clone(),
             model.name().to_string(),
@@ -341,10 +342,16 @@ impl Agent {
 
     pub async fn get_session_state(&self, session_id: &str) -> Arc<Mutex<SessionState>> {
         let mut states = self.session_states.lock().await;
+        
+        // 1. If session exists, update last_accessed and return
         if let Some(state) = states.get(session_id) {
+            if let Ok(mut s) = state.try_lock() {
+                s.last_accessed = std::time::Instant::now();
+            }
             return state.clone();
         }
 
+        // 2. Load from store / Create new
         let mut history = Vec::new();
         if let Some(store) = &self.session_store
             && let Ok(h) = store.load_history(session_id).await {
@@ -358,7 +365,34 @@ impl Agent {
             context_engine: Arc::new(Mutex::new(
                 crate::memory::context_engine::ContextEngine::new(8192),
             )),
+            last_accessed: std::time::Instant::now(),
         }));
+
+        // 3. Perform LRU eviction if cached sessions exceed limit
+        let limit = std::env::var("PHARMAKON_MAX_CACHED_SESSIONS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(100);
+
+        if states.len() >= limit {
+            let mut oldest_id: Option<String> = None;
+            let mut oldest_time = std::time::Instant::now();
+
+            for (id, st) in states.iter() {
+                if let Ok(s) = st.try_lock() {
+                    if s.last_accessed < oldest_time {
+                        oldest_time = s.last_accessed;
+                        oldest_id = Some(id.clone());
+                    }
+                }
+            }
+
+            if let Some(id_to_evict) = oldest_id {
+                log::info!("Evicting cold session state: {} to prevent memory leak", id_to_evict);
+                states.remove(&id_to_evict);
+            }
+        }
+
         states.insert(session_id.to_string(), state.clone());
         state
     }
@@ -508,18 +542,41 @@ impl Agent {
     async fn gather_context(&self, user_message: &str) {
         let semantic_search = self.semantic_search.clone();
         let knowledge_nexus = self.knowledge_nexus.clone();
+        let current_sess = self.session_id.lock().await.clone();
 
         let (semantic_res, nexus_res) = tokio::join!(
             async {
                 if let Some(search) = semantic_search {
-                    search.search_with_limit(user_message, 3).await.ok()
+                    if let Ok(mems) = search.search_with_limit(user_message, 3).await {
+                        let filtered: Vec<String> = mems.into_iter().filter(|m| {
+                            if m.starts_with("[Session: ") {
+                                m.starts_with(&format!("[Session: {}]", current_sess))
+                            } else {
+                                true
+                            }
+                        }).collect();
+                        Some(filtered)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             },
             async {
                 if let Some(nexus) = knowledge_nexus {
-                    nexus.smart_search(user_message, 8).await.ok()
+                    if let Ok(mems) = nexus.smart_search(user_message, 8).await {
+                        let filtered: Vec<String> = mems.into_iter().filter(|m| {
+                            if m.starts_with("[Session: ") {
+                                m.starts_with(&format!("[Session: {}]", current_sess))
+                            } else {
+                                true
+                            }
+                        }).collect();
+                        Some(filtered)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -594,7 +651,11 @@ impl Agent {
         }
 
         let count = self.interaction_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        if count.is_multiple_of(5) {
+        let reflection_interval = std::env::var("PHARMAKON_REFLECTION_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(5);
+        if count.is_multiple_of(reflection_interval) {
             let agent_clone = self.clone();
             tokio::spawn(async move {
                 if let Err(e) = agent_clone.reflect().await {
@@ -758,11 +819,33 @@ impl Agent {
                 return self.handle_plan_command(user_message).await;
             }
 
+            // Reset step count on new user message and dynamically shift goal if needed
+            {
+                let mut notebook = self.research_notebook.lock().await;
+                notebook.step_count = 0; // reset sequential steps to allow 10 more autonomous steps
+                
+                let new_goal = user_message.chars().take(80).collect::<String>();
+                if notebook.current_goal.is_empty() || notebook.current_goal == "Uninitialized" {
+                    *notebook = pharmakon_common::ResearchNotebook::new(&new_goal);
+                } else {
+                    let prev_lower = notebook.current_goal.to_lowercase();
+                    let new_lower = new_goal.to_lowercase();
+                    let prev_goal_words: std::collections::HashSet<_> = prev_lower.split_whitespace().collect();
+                    let new_goal_words: std::collections::HashSet<_> = new_lower.split_whitespace().collect();
+                    let intersection = prev_goal_words.intersection(&new_goal_words).count();
+                    if intersection == 0 {
+                        log::info!("ResearchNotebook: Goal changed. Resetting notebook.");
+                        *notebook = pharmakon_common::ResearchNotebook::new(&new_goal);
+                    }
+                }
+            }
+
             let state_arc = self.get_session_state(session_id).await;
 
+            let redacted_user_message = crate::security::redaction::redact_text(user_message);
             let user_msg = Message {
                 role: "user".to_string(),
-                content: Some(MessageContent::Text(user_message.to_string())),
+                content: Some(MessageContent::Text(redacted_user_message.clone())),
                 ..Default::default()
             };
 
@@ -785,7 +868,11 @@ impl Agent {
                 }
                 state.history = history;
 
-                if state.history.len() > 20 {
+                let prune_threshold = std::env::var("PHARMAKON_PRUNE_THRESHOLD")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(20);
+                if state.history.len() > prune_threshold {
                     let compactor = self.compactor.lock().await;
                     if let Ok(compacted) = compactor.compact(state.history.clone()).await {
                         // Prune "I can't" patterns from compacted context to prevent
@@ -814,10 +901,10 @@ impl Agent {
         });
 
         // Parallel context gathering
-        self.gather_context(user_message).await;
+        self.gather_context(&redacted_user_message).await;
 
         // P1: Auto-detect time/date/weather queries and inject real-time context
-        if let Some(rt_context) = Self::detect_real_time_query(user_message) {
+        if let Some(rt_context) = Self::detect_real_time_query(&redacted_user_message) {
             self.add_to_working_memory(rt_context.clone(), 1.0, "RealTimeContext".to_string()).await;
             let mut state = state_arc.lock().await;
             state.history.push(Message {
@@ -884,7 +971,11 @@ impl Agent {
                 
                 // Hard termination if entropy exceeds critical threshold
                 // (integrated via ProgressTracker for unified signal handling)
-                let entropy_signal = progress_tracker.check_entropy(entropy, 0.95);
+                let max_entropy = std::env::var("PHARMAKON_MAX_ENTROPY")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.95);
+                let entropy_signal = progress_tracker.check_entropy(entropy, max_entropy);
                 if entropy_signal != TerminationSignal::Continue {
                     let reason = format!(
                         "Entropy overflow detected ({:.2}). Agent is in a pathological loop with no progress. Task aborted.",
@@ -1346,7 +1437,18 @@ impl Agent {
                                 }
                             }
 
-                        let result = tool.call(args.clone()).await;
+                        let timeout_secs = std::env::var("PHARMAKON_TOOL_TIMEOUT_SECS")
+                            .ok()
+                            .and_then(|v| v.parse::<u64>().ok())
+                            .unwrap_or(30);
+
+                        let result = match tokio::time::timeout(
+                            std::time::Duration::from_secs(timeout_secs),
+                            tool.call(args.clone())
+                        ).await {
+                            Ok(res) => res,
+                            Err(_) => Err(pharmakon_common::AgentError(format!("Tool execution timed out after {} seconds.", timeout_secs))),
+                        };
                         let latency_ms = start.elapsed().as_millis() as u64;
 
                         // --- Rollback Workspace on High-Risk Tool Failure ---
@@ -1489,18 +1591,19 @@ impl Agent {
                                     log::warn!("Failed to register playbook: {}", e);
                                 }
                             }
+                        let redacted_result = crate::security::redaction::redact_text(&result);
                         try_send_event!(self.event_tx, Event::ToolResult {
-                            result: result.clone(),
+                            result: redacted_result.clone(),
                         });
                         let _ = self.record_step(crate::trajectory::TrajectoryStep::Observation {
-                            result: result.clone(),
+                            result: redacted_result.clone(),
                             action_id: None,
                             timestamp: chrono::Utc::now(),
                         }).await;
                         let tool_result_msg = Message {
                             role: "tool".to_string(),
                             name: Some(tool_name),
-                            content: Some(MessageContent::Text(result.clone())),
+                            content: Some(MessageContent::Text(redacted_result)),
                             tool_call_id: Some(tool_call_id),
                             ..Default::default()
                         };
@@ -1780,14 +1883,16 @@ impl Agent {
                     log::info!("Agent Reflection Insight: {}", insight);
 
                     // Save to fact memory for long-term recall
+                    let sess_id = self.session_id.lock().await.clone();
+                    let tagged_insight = format!("[Session: {}] {}", sess_id, insight);
                     if let Some(fact_mem) = &self.fact_memory {
                         let mut fm = fact_mem.lock().await;
-                        fm.add_belief(insight, 0.9, "learned_context")?;
+                        fm.add_belief(&tagged_insight, 0.9, "learned_context")?;
                     }
 
                     // Also index into semantic search for recovery across sessions
                     if let Some(search) = &self.semantic_search {
-                        if let Err(e) = search.remember(insight).await {
+                        if let Err(e) = search.remember(&tagged_insight).await {
                             log::warn!("Failed to save reflection insight to search: {}", e);
                         }
                     }
@@ -1798,7 +1903,9 @@ impl Agent {
     pub async fn add_fact(&self, fact: &str) -> Result<()> {
         if let Some(fact_memory) = &self.fact_memory {
             let mut fm = fact_memory.lock().await;
-            fm.add_belief(fact, 0.8, "learned_fact")?;
+            let sess_id = self.session_id.lock().await.clone();
+            let tagged_fact = format!("[Session: {}] {}", sess_id, fact);
+            fm.add_belief(&tagged_fact, 0.8, "learned_fact")?;
         }
         Ok(())
     }
@@ -1863,8 +1970,19 @@ impl Agent {
         pm.add_contribution(contribution);
     }
 
-    pub fn with_isolated_knowledge(self) -> Self {
-        // In a real impl, this would isolate the fact memory/nexus
+    pub fn with_isolated_knowledge(mut self) -> Self {
+        if let Some(ref nexus) = self.knowledge_nexus {
+            self.knowledge_nexus = Some(Arc::new(nexus.isolated()));
+        }
+        if let Some(ref search) = self.semantic_search {
+            self.semantic_search = Some(Arc::new(search.isolated()));
+        }
+        if self.fact_memory.is_some() {
+            if let Ok(mut bs) = crate::memory::BeliefSystem::new() {
+                bs.set_path(std::env::temp_dir().join(format!("beliefs_isolated_{}.json", uuid::Uuid::new_v4())));
+                self.fact_memory = Some(Arc::new(Mutex::new(bs)));
+            }
+        }
         self
     }
 
@@ -1930,6 +2048,19 @@ impl Agent {
     pub async fn reset_session_history(&self, session_id: &str) -> Result<()> {
         let mut states = self.session_states.lock().await;
         states.remove(session_id);
+
+        if let Some(nexus) = &self.knowledge_nexus {
+            if let Err(e) = nexus.delete_by_session(session_id).await {
+                log::warn!("reset_session_history: Failed to clean KnowledgeNexus for session {}: {}", session_id, e);
+            }
+        }
+
+        if let Some(semantic) = &self.semantic_search {
+            if let Err(e) = semantic.delete_by_session(session_id).await {
+                log::warn!("reset_session_history: Failed to clean SemanticSearch for session {}: {}", session_id, e);
+            }
+        }
+
         Ok(())
     }
 

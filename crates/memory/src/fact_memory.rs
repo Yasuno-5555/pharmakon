@@ -34,6 +34,10 @@ impl BeliefSystem {
         Ok(Self { path, beliefs })
     }
 
+    pub fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
     pub fn add_belief(&mut self, claim: &str, confidence: f32, source: &str) -> Result<()> {
         let id = uuid::Uuid::new_v4().to_string();
         let belief = Belief {

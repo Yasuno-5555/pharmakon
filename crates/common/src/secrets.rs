@@ -40,7 +40,16 @@ impl SecretStore {
         };
         secrets.insert(name.to_string(), value.to_string());
         let content = serde_json::to_string_pretty(&secrets)?;
-        fs::write(path, content)?;
+        fs::write(&path, content)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o600);
+                let _ = fs::set_permissions(&path, perms);
+            }
+        }
         Ok(())
     }
 
@@ -99,7 +108,16 @@ impl SecretStore {
                 serde_json::from_str(&content).unwrap_or_default();
             secrets.remove(name);
             let content = serde_json::to_string_pretty(&secrets)?;
-            fs::write(path, content)?;
+            fs::write(&path, content)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = fs::metadata(&path) {
+                    let mut perms = metadata.permissions();
+                    perms.set_mode(0o600);
+                    let _ = fs::set_permissions(&path, perms);
+                }
+            }
         }
         Ok(())
     }

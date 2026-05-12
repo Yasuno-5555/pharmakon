@@ -1,21 +1,30 @@
-use crate::vector_store::VectorStore;
+use crate::vector_store::{VectorStore, InMemoryVectorStore};
 use anyhow::Result;
 use pharmakon_common::EmbeddingModel;
+use std::sync::Arc;
 
 /// SemanticSearch provides long-term memory via embedding-based vector search.
 pub struct SemanticSearch {
-    vector_store: Box<dyn VectorStore>,
-    embedding_model: Box<dyn EmbeddingModel>,
+    vector_store: Arc<dyn VectorStore>,
+    embedding_model: Arc<dyn EmbeddingModel>,
 }
 
 impl SemanticSearch {
     pub fn new(
-        vector_store: Box<dyn VectorStore>,
-        embedding_model: Box<dyn EmbeddingModel>,
+        vector_store: Arc<dyn VectorStore>,
+        embedding_model: Arc<dyn EmbeddingModel>,
     ) -> Self {
         Self {
             vector_store,
             embedding_model,
+        }
+    }
+
+    /// Create an isolated copy of SemanticSearch using an in-memory vector store.
+    pub fn isolated(&self) -> Self {
+        Self {
+            vector_store: Arc::new(InMemoryVectorStore::new()),
+            embedding_model: self.embedding_model.clone(),
         }
     }
 
@@ -49,5 +58,15 @@ impl SemanticSearch {
     pub async fn store_interaction(&self, user_msg: &str, assistant_msg: &str) -> Result<()> {
         let combined = format!("User: {}\nAssistant: {}", user_msg, assistant_msg);
         self.remember(&combined).await
+    }
+
+    /// Clear all semantic memories.
+    pub async fn clear(&self) -> Result<()> {
+        self.vector_store.clear_memories().await
+    }
+
+    /// Delete semantic memories for a specific session.
+    pub async fn delete_by_session(&self, session_id: &str) -> Result<()> {
+        self.vector_store.delete_by_session(session_id).await
     }
 }

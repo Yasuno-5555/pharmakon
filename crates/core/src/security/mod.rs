@@ -26,11 +26,28 @@ impl SecurityAuditor {
         Ok(())
     }
 
-    pub fn is_allowed_command(command: &str) -> bool {
-        let allowlist = ["ls", "pwd", "whoami", "date", "cat ", "grep "];
+    pub fn is_blocked_command(command: &str) -> bool {
+        let trimmed = command.trim_start();
+        let blocklist = [
+            "rm ",     // file deletion (single files, recursive)
+            "curl ",   // arbitrary network requests
+            "wget ",   // arbitrary network requests
+            "sudo ",   // privilege escalation
+            "chmod ",  // permission changes
+            "chown ",  // ownership changes
+            "dd ",     // low-level disk I/O
+            "kill ",   // process termination
+            "pkill ",  // process termination by name
+            "reboot",  // system restart
+            "shutdown",// system shutdown
+            "halt",    // system halt
+            "poweroff",// system power off
+            "systemctl",// service management
+            "launchctl",// macOS service management
+        ];
 
-        for pattern in allowlist {
-            if command.starts_with(pattern) {
+        for pattern in blocklist {
+            if trimmed.starts_with(pattern) {
                 return true;
             }
         }
@@ -53,8 +70,10 @@ impl SecurityAuditor {
         }
 
         // Prevent path traversal
-        if path_str.contains("..") {
-            return Err(anyhow!("Path traversal pattern detected"));
+        for component in path.components() {
+            if component == std::path::Component::ParentDir {
+                return Err(anyhow!("Path traversal pattern detected"));
+            }
         }
 
         Ok(())

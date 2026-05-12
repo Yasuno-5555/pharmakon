@@ -7,6 +7,8 @@ use std::collections::HashMap;
 pub trait VectorStore: Send + Sync {
     async fn add_memory(&self, id: u64, vector: Vec<f32>, text: &str) -> Result<()>;
     async fn search_memory(&self, vector: Vec<f32>, limit: u64) -> Result<Vec<String>>;
+    async fn clear_memories(&self) -> Result<()>;
+    async fn delete_by_session(&self, session_id: &str) -> Result<()>;
 }
 
 pub struct InMemoryVectorStore {
@@ -63,5 +65,18 @@ impl VectorStore for InMemoryVectorStore {
             .collect();
 
         Ok(results)
+    }
+
+    async fn clear_memories(&self) -> Result<()> {
+        let mut mems = self.memories.lock().unwrap();
+        mems.clear();
+        Ok(())
+    }
+
+    async fn delete_by_session(&self, session_id: &str) -> Result<()> {
+        let mut mems = self.memories.lock().unwrap();
+        let tag = format!("[Session: {}]", session_id);
+        mems.retain(|_, (_, text)| !text.contains(&tag));
+        Ok(())
     }
 }
