@@ -1094,8 +1094,8 @@ async fn run_agent_with_streaming(agent: Arc<Agent>, msg: &str, yes_mode: bool) 
     display_task.abort();
     
     match chat_result {
-        Ok(_) => {
-            println!("\n");
+        Ok(response) => {
+            println!("\n{}", response);
         }
         Err(e) => {
             log::error!("Agent error: {}", e);
