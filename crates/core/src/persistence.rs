@@ -198,14 +198,14 @@ impl DbSessionStore {
     }
 
     pub async fn save_message(&self, session_id: &str, msg: &Message) -> Result<()> {
-        let content_json = msg
-            .content
-            .as_ref()
-            .map(|c| serde_json::to_string(c).unwrap());
-        let tool_calls_json = msg
-            .tool_calls
-            .as_ref()
-            .map(|tc| serde_json::to_string(tc).unwrap());
+        let content_json = match &msg.content {
+            Some(c) => Some(serde_json::to_string(c)?),
+            None => None,
+        };
+        let tool_calls_json = match &msg.tool_calls {
+            Some(tc) => Some(serde_json::to_string(tc)?),
+            None => None,
+        };
 
         sqlx::query(
             "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, name)
@@ -446,8 +446,19 @@ impl DbSessionStore {
     ) -> Result<()> {
         // Truncate bodies to prevent unbounded DB growth.
         // Full request/response bodies would otherwise accumulate GBs.
-        let req_body = if req.len() <= 256 { req } else { &req[..256] };
-        let res_body = if res.len() <= 256 { res } else { &res[..256] };
+        // Use floor_char_boundary logic to avoid panicking on multi-byte UTF-8
+        let req_body = if req.len() <= 256 {
+            req
+        } else {
+            let end = req.char_indices().take_while(|(i, _)| *i <= 256).last().map(|(i, _)| i).unwrap_or(0);
+            &req[..end]
+        };
+        let res_body = if res.len() <= 256 {
+            res
+        } else {
+            let end = res.char_indices().take_while(|(i, _)| *i <= 256).last().map(|(i, _)| i).unwrap_or(0);
+            &res[..end]
+        };
         sqlx::query(
             "INSERT INTO traffic_capture (session_id, url, method, status, request_body, response_body) VALUES (?, ?, ?, ?, ?, ?)"
         )

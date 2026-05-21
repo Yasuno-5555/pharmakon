@@ -36,6 +36,8 @@ impl AgentSpawner for DefaultAgentSpawner {
             agent = agent.with_store(store.clone());
         }
 
+        // Initialize all agent tools for the sub-agent so they can perform tasks
+        crate::tool_init::init_all_agent_tools(&agent).await?;
 
         log::info!(
             "Sub-agent starting task (depth: {}) in session: {}",

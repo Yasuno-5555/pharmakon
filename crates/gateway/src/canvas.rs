@@ -24,11 +24,11 @@ impl CanvasHost {
     pub fn handle_event(&self, event: &Event) {
         match event {
             Event::CanvasUpdate { primitive } => {
-                let mut state = self.state.lock().unwrap();
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 state.elements.push(primitive.clone());
             }
             Event::CanvasClear => {
-                let mut state = self.state.lock().unwrap();
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 state.elements.clear();
             }
             _ => {}
@@ -36,6 +36,6 @@ impl CanvasHost {
     }
 
     pub fn get_state(&self) -> CanvasState {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }

@@ -225,12 +225,12 @@ impl Tool for BrowserTool {
         }
 
         if tab_lock.is_none() {
-            let browser = browser_lock.as_ref().unwrap();
+            let browser = browser_lock.as_ref().ok_or_else(|| AgentError("Browser not initialized".to_string()))?;
             let tab = browser.new_tab().map_err(|e| AgentError(e.to_string()))?;
             *tab_lock = Some(tab);
         }
 
-        let tab = tab_lock.as_ref().unwrap();
+        let tab = tab_lock.as_ref().ok_or_else(|| AgentError("Tab session not initialized".to_string()))?;
 
         match action.as_str() {
             "navigate" => {

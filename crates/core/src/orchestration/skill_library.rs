@@ -466,7 +466,17 @@ fn keyword_overlap(a: &str, b: &str) -> usize {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() } else { format!("{}...", &s[..max]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        // Find the last char boundary at or before `max` to avoid panicking on multi-byte UTF-8
+        let end = s.char_indices()
+            .take_while(|(i, _)| *i <= max)
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        format!("{}...", &s[..end])
+    }
 }
 
 #[cfg(test)]

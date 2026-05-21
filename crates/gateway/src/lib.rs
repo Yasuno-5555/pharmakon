@@ -210,9 +210,9 @@ async fn handle_socket(
     // Send initial canvas state
     let initial_state = canvas_host.get_state();
     for primitive in initial_state.elements {
-        let msg =
-            serde_json::to_string(&pharmakon_common::Event::CanvasUpdate { primitive }).unwrap();
-        let _ = sender.send(WsMessage::Text(msg.into())).await;
+        if let Ok(msg) = serde_json::to_string(&pharmakon_common::Event::CanvasUpdate { primitive }) {
+            let _ = sender.send(WsMessage::Text(msg.into())).await;
+        }
     }
 
     // Task to send events to client
@@ -224,11 +224,17 @@ async fn handle_socket(
                     // Update canvas host state if it's a canvas event
                     canvas_host_clone.handle_event(&event);
 
-                    let msg = serde_json::to_string(&event).unwrap();
-                    tracing::info!(target: "gateway", "Sending event: {}", msg);
-                    if let Err(e) = sender.send(WsMessage::Text(msg.into())).await {
-                        tracing::error!("WebSocket send error: {}", e);
-                        break;
+                    match serde_json::to_string(&event) {
+                        Ok(msg) => {
+                            tracing::info!(target: "gateway", "Sending event: {}", msg);
+                            if let Err(e) = sender.send(WsMessage::Text(msg.into())).await {
+                                tracing::error!("WebSocket send error: {}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to serialize event: {}", e);
+                        }
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {

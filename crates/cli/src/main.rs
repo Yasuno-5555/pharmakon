@@ -315,7 +315,10 @@ async fn build_agent(
         format!("{}/{}", actual_provider, actual_model)
     };
     let model_obj = ModelRegistry::get_model(&model_id)
-        .unwrap_or_else(|| panic!("Model not available: {}. Check your API keys.", model_id));
+        .unwrap_or_else(|| {
+            eprintln!("Model not available: {}. Check your API keys.", model_id);
+            std::process::exit(1);
+        });
 
     // Knowledge Nexus
     let pharmakon_dir = home.join(".pharmakon");

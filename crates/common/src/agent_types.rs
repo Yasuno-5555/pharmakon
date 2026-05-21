@@ -244,6 +244,12 @@ pub trait AgentModel: Send + Sync {
     fn name(&self) -> &str;
     fn context_window(&self) -> usize;
     fn max_output_tokens(&self) -> usize;
+
+    /// Whether this is a mock/test model (no real API calls).
+    /// Default: false. Override in mock implementations.
+    fn is_mock(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]

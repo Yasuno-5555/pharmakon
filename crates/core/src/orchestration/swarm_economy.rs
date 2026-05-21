@@ -186,8 +186,8 @@ impl SwarmEconomy {
             match result {
                 Ok(output) => {
                     success_count += 1;
-                    let truncated = if output.len() > 200 {
-                        format!("{}...", &output[..197])
+                    let truncated = if output.chars().count() > 200 {
+                        format!("{}...", output.chars().take(197).collect::<String>())
                     } else {
                         output.clone()
                     };

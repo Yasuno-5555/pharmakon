@@ -42,6 +42,16 @@ pub struct EmbeddingJob {
     pub text: String,
 }
 
+/// A topic cluster — group of semantically related knowledge nodes.
+#[derive(Debug, Clone)]
+pub struct TopicCluster {
+    pub id: usize,
+    pub centroid: Vec<f32>,
+    pub member_ids: Vec<String>,
+    pub access_count: u64,
+    pub last_accessed: i64,
+}
+
 pub struct KnowledgeNexus {
     embedding_model: Arc<LocalEmbeddingModel>,
     conn: Arc<Mutex<Connection>>,
@@ -55,6 +65,10 @@ pub struct KnowledgeNexus {
     // Base state for 3-way merge
     base_node_ids: Arc<Vec<String>>,
     is_isolated: bool,
+    /// Topic clusters for cross-session knowledge sharing (from objeta L3 cache pattern).
+    topic_clusters: Arc<Mutex<Vec<TopicCluster>>>,
+    /// Node ID → cluster index mapping.
+    cluster_map: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 impl KnowledgeNexus {
@@ -215,6 +229,8 @@ impl KnowledgeNexus {
             local_edges: Arc::new(Mutex::new(Vec::new())),
             base_node_ids: Arc::new(Vec::new()),
             is_isolated: false,
+            topic_clusters: Arc::new(Mutex::new(Vec::new())),
+            cluster_map: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -228,8 +244,10 @@ impl KnowledgeNexus {
             tx: self.tx.clone(),
             local_nodes: Arc::new(Mutex::new(Vec::new())),
             local_edges: Arc::new(Mutex::new(Vec::new())),
-            base_node_ids: self.base_node_ids.clone(), // Simplified base state
+            base_node_ids: self.base_node_ids.clone(),
             is_isolated: true,
+            topic_clusters: self.topic_clusters.clone(),
+            cluster_map: self.cluster_map.clone(),
         }
     }
 
@@ -519,6 +537,194 @@ impl KnowledgeNexus {
         }
 
         Ok(documents)
+    }
+
+    /// Search with topic cluster boost for cross-session knowledge sharing.
+    ///
+    /// After the standard smart_search scoring, applies a cluster affinity boost:
+    /// nodes in the same topic cluster as the top result get a +15% score boost.
+    /// This enables cross-session knowledge discovery (from objeta L3 cache pattern).
+    pub async fn search_with_topic_boost(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
+        let results = self.smart_search(query, limit * 2).await?;
+        if results.len() <= 1 {
+            return Ok(results.into_iter().take(limit).collect());
+        }
+
+        // Check if topic clusters are available
+        let clusters = self.topic_clusters.lock().await;
+        if clusters.is_empty() {
+            return Ok(results.into_iter().take(limit).collect());
+        }
+
+        // Try to find which cluster the top result belongs to
+        let top_result = &results[0];
+        let mut boost_cluster_id: Option<usize> = None;
+
+        for cluster in clusters.iter() {
+            for member_id in &cluster.member_ids {
+                if let Ok(Some(node)) = self.graph.get_node(member_id).await {
+                    if top_result.contains(&node.content)
+                        || node.content.contains(top_result.as_str())
+                    {
+                        boost_cluster_id = Some(cluster.id);
+                        break;
+                    }
+                }
+            }
+            if boost_cluster_id.is_some() {
+                break;
+            }
+        }
+
+        // If a cluster was found, boost other results from the same cluster
+        if let Some(cluster_id) = boost_cluster_id {
+            let mut boosted: Vec<(String, f32)> = Vec::with_capacity(results.len());
+            // Re-acquire lock for scoring pass
+            let clusters = self.topic_clusters.lock().await;
+
+            for (i, text) in results.into_iter().enumerate() {
+                let score = if i == 0 {
+                    2.0
+                } else {
+                    let in_cluster = clusters.iter()
+                        .filter(|c| c.id == cluster_id)
+                        .any(|c| {
+                            c.member_ids.iter().any(|mid| {
+                                text.contains(mid) // simple id-based match; content overlap is heavier but async
+                            })
+                        });
+                    if in_cluster { 1.15 } else { 1.0 }
+                };
+                boosted.push((text, score));
+            }
+
+            boosted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            return Ok(boosted.into_iter().take(limit).map(|(t, _)| t).collect());
+        }
+
+        Ok(results.into_iter().take(limit).collect())
+    }
+
+    /// Build topic clusters from stored embeddings using simplified centroid-based clustering.
+    ///
+    /// Reads all nodes with completed embeddings from the graph store,
+    /// fetches their vectors from LanceDB, and groups them into k clusters.
+    /// Clusters are used by `search_with_topic_boost` for cross-session knowledge sharing.
+    pub async fn build_topic_clusters(&self, k: usize) -> anyhow::Result<()> {
+        if self.is_isolated {
+            return Ok(());
+        }
+
+        let all_ids = self.graph.get_all_node_ids().await?;
+        if all_ids.len() < k {
+            return Ok(());
+        }
+
+        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
+        let mut node_vectors: Vec<(String, Vec<f32>)> = Vec::new();
+
+        // Fetch all vectors from LanceDB via full table scan
+        if let Ok(mut stream) = table.query().execute().await {
+            while let Some(Ok(batch)) = stream.next().await {
+                let id_col = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+                let vector_col = batch.column_by_name("vector");
+                if let Some(arr) = vector_col {
+                    if let Some(list_arr) = arr.as_any().downcast_ref::<FixedSizeListArray>() {
+                        for row in 0..list_arr.len() {
+                            let id = id_col.value(row).to_string();
+                            if let Ok(Some(node)) = self.graph.get_node(&id).await {
+                                if node.embedding_status == "COMPLETED" {
+                                    if let Some(float_arr) = list_arr.value(row).as_any().downcast_ref::<Float32Array>() {
+                                        let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
+                                        node_vectors.push((id, vec));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if node_vectors.len() < k {
+            return Ok(());
+        }
+
+        // Simple centroid initialization: spread k centroids across the dataset
+        let mut clusters: Vec<TopicCluster> = Vec::new();
+        let n = node_vectors.len();
+        let actual_k = k.min(n);
+
+        for i in 0..actual_k {
+            let idx = (i * n / actual_k) % n; // deterministic spread
+            clusters.push(TopicCluster {
+                id: i,
+                centroid: node_vectors[idx].1.clone(),
+                member_ids: Vec::new(),
+                access_count: 0,
+                last_accessed: 0,
+            });
+        }
+
+        // Single-pass assignment: assign each node to nearest centroid
+        for (node_id, vector) in &node_vectors {
+            let mut best_cluster = 0;
+            let mut best_sim = f32::NEG_INFINITY;
+
+            for (ci, cluster) in clusters.iter().enumerate() {
+                let dot: f32 = vector.iter().zip(cluster.centroid.iter()).map(|(a, b)| a * b).sum();
+                if dot > best_sim {
+                    best_sim = dot;
+                    best_cluster = ci;
+                }
+            }
+
+            clusters[best_cluster].member_ids.push(node_id.clone());
+        }
+
+        // Update centroids as mean of members
+        for cluster in &mut clusters {
+            if cluster.member_ids.is_empty() {
+                continue;
+            }
+            let dim = cluster.centroid.len();
+            let mut new_centroid = vec![0.0f32; dim];
+            let mut count = 0;
+
+            for member_id in &cluster.member_ids {
+                if let Some((_, vec)) = node_vectors.iter().find(|(id, _)| id == member_id) {
+                    for (i, v) in vec.iter().enumerate() {
+                        new_centroid[i] += v;
+                    }
+                    count += 1;
+                }
+            }
+
+            if count > 0 {
+                for v in new_centroid.iter_mut() {
+                    *v /= count as f32;
+                }
+                cluster.centroid = new_centroid;
+            }
+        }
+
+        // Update cluster map
+        let mut cmap = HashMap::new();
+        for cluster in &clusters {
+            for mid in &cluster.member_ids {
+                cmap.insert(mid.clone(), cluster.id);
+            }
+        }
+
+        *self.topic_clusters.lock().await = clusters;
+        *self.cluster_map.lock().await = cmap;
+
+        log::info!(
+            "KnowledgeNexus: Built {} topic clusters covering {} nodes.",
+            actual_k,
+            node_vectors.len()
+        );
+        Ok(())
     }
 
     pub async fn decay_memories(&self, factor: f32) -> anyhow::Result<()> {

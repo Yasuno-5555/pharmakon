@@ -7,14 +7,19 @@ pub struct TrayHandler {
     _tray_icon: TrayIcon,
 }
 
-impl Default for TrayHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl TrayHandler {
-    pub fn new() -> Self {
+    pub fn new() -> Option<Self> {
+        match Self::try_new() {
+            Ok(h) => Some(h),
+            Err(e) => {
+                log::error!("Failed to initialize system tray: {}", e);
+                None
+            }
+        }
+    }
+
+    pub fn try_new() -> Result<Self, String> {
         let menu = Menu::new();
         let show_item = MenuItem::new("Show Dashboard", true, None);
         let reset_item = MenuItem::new("Reset Session", true, None);
@@ -28,23 +33,23 @@ impl TrayHandler {
             &status_item,
             &quit_item,
         ])
-        .unwrap();
+        .map_err(|e| format!("Failed to build menu: {:?}", e))?;
 
-        let icon = Self::create_icon();
+        let icon = Self::create_icon()?;
 
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
             .with_tooltip("Pharmakon Assistant")
             .with_icon(icon)
             .build()
-            .unwrap();
+            .map_err(|e| format!("Failed to build tray icon: {:?}", e))?;
 
-        Self {
+        Ok(Self {
             _tray_icon: tray_icon,
-        }
+        })
     }
 
-    fn create_icon() -> tray_icon::Icon {
+    fn create_icon() -> Result<tray_icon::Icon, String> {
         let (width, height) = (32, 32);
         // Purple square as placeholder
         let rgba = vec![128, 0, 128, 255]
@@ -52,7 +57,8 @@ impl TrayHandler {
             .cycle()
             .take(width * height * 4)
             .collect();
-        tray_icon::Icon::from_rgba(rgba, width as u32, height as u32).unwrap()
+        tray_icon::Icon::from_rgba(rgba, width as u32, height as u32)
+            .map_err(|e| format!("Failed to create icon: {:?}", e))
     }
 
     pub fn handle_events(&self) -> Option<TrayAction> {

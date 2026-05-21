@@ -43,6 +43,10 @@ impl AgentModel for MockModel {
         4096
     }
 
+    fn is_mock(&self) -> bool {
+        true
+    }
+
     async fn stream_complete(
         &self,
         _request: CompletionRequest,

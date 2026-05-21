@@ -550,4 +550,21 @@ impl ToolScheduler {
         budget.enforce_limit()?;
         Ok(())
     }
+
+    /// Apply DynamicLambda budget scaling from the IntegratedGovernor.
+    ///
+    /// Higher entropy + stalling → budget expands (more exploration).
+    /// Normal conditions → budget stays at default.
+    /// Uses the objeta DynamicLambda pattern: λ = base × entropy_factor × stall_factor.
+    pub fn apply_governor_budget_scale(
+        &self,
+        governor: &crate::orchestration::governor::IntegratedGovernor,
+        entropy: f32,
+        stall_count: usize,
+    ) {
+        let scale = governor.dynamic_budget_scale(entropy, stall_count);
+        let mut budget = self.budget.lock().unwrap();
+        budget.max_files = (ExplorationBudget::default().max_files as f32 * scale) as usize;
+        budget.max_tokens = (ExplorationBudget::default().max_tokens as f32 * scale) as usize;
+    }
 }

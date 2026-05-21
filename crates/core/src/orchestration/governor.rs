@@ -203,6 +203,7 @@ impl std::fmt::Debug for ToolGovernor {
 // --- Tool-Specific Safety Limits ---
 
 /// Safety limits applied before tool execution.
+#[derive(Clone)]
 pub struct ToolSafetyLimits {
     /// Maximum file size for read_file (bytes). Default: 1MB.
     pub max_read_size: usize,
@@ -307,6 +308,162 @@ impl ToolSafetyLimits {
     }
 }
 
+// --- Integrated Governor (competing control loops from objeta pattern) ---
+
+/// Three-loop competing control governor with priority arbitration.
+///
+/// Architecture (from objeta OS Runtime):
+/// - SafetyGuard (priority 1): blocks dangerous operations unconditionally.
+/// - QualityGuard (priority 2): forces tool diversity, model switches on entropy.
+/// - ResourceGuard (priority 3): constrains budget when resources are tight.
+///
+/// Arbitration: Safety > Quality > Resource.
+/// Collapse (intelligence protection) always wins over thrash (I/O protection).
+pub struct IntegratedGovernor {
+    /// Safety limits (shell blocking, file size caps, etc.)
+    pub safety_limits: ToolSafetyLimits,
+    /// Entropy tier thresholds for quality escalation.
+    pub entropy_tier1: f32,
+    pub entropy_tier2: f32,
+    pub entropy_tier3: f32,
+    pub entropy_overflow: f32,
+    /// Budget pressure threshold (fraction of token budget consumed).
+    pub budget_pressure_threshold: f32,
+    /// Whether quality protection is active (edge-triggered by entropy tiers).
+    quality_escalated: Arc<std::sync::Mutex<bool>>,
+    /// Whether budget pressure is active.
+    budget_pressured: Arc<std::sync::Mutex<bool>>,
+}
+
+impl Clone for IntegratedGovernor {
+    fn clone(&self) -> Self {
+        Self {
+            safety_limits: self.safety_limits.clone(),
+            entropy_tier1: self.entropy_tier1,
+            entropy_tier2: self.entropy_tier2,
+            entropy_tier3: self.entropy_tier3,
+            entropy_overflow: self.entropy_overflow,
+            budget_pressure_threshold: self.budget_pressure_threshold,
+            quality_escalated: self.quality_escalated.clone(),
+            budget_pressured: self.budget_pressured.clone(),
+        }
+    }
+}
+
+impl Default for IntegratedGovernor {
+    fn default() -> Self {
+        Self {
+            safety_limits: ToolSafetyLimits::default(),
+            entropy_tier1: 0.50,
+            entropy_tier2: 0.70,
+            entropy_tier3: 0.85,
+            entropy_overflow: 0.95,
+            budget_pressure_threshold: 0.80,
+            quality_escalated: Arc::new(std::sync::Mutex::new(false)),
+            budget_pressured: Arc::new(std::sync::Mutex::new(false)),
+        }
+    }
+}
+
+/// Result of a governor evaluation — what action to take.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GovernorAction {
+    /// No action needed.
+    Continue,
+    /// Block tool execution (SafetyGuard).
+    Block { reason: String },
+    /// Increase tool diversity via serendipity injection (QualityGuard).
+    IncreaseDiversity { extra_tools: usize },
+    /// Inject a reconsideration prompt (QualityGuard).
+    InjectStrategyPrompt { message: String },
+    /// Switch to a fallback model (QualityGuard).
+    SwitchModel { model_id: String },
+    /// Compress context or reduce tool scope (ResourceGuard).
+    ReduceScope,
+}
+
+impl IntegratedGovernor {
+    /// Evaluate the current execution context and return the highest-priority action.
+    ///
+    /// Combines three competing control loops with priority arbitration:
+    /// 1. SafetyGuard — blocks dangerous operations (unconditional)
+    /// 2. QualityGuard — escalates on entropy/stagnation (wins over ResourceGuard)
+    /// 3. ResourceGuard — constrains on budget pressure (lowest priority)
+    pub fn evaluate(
+        &self,
+        entropy: f32,
+        entropy_tier: u8,
+        entropy_escalated: bool,
+        budget_used_pct: f32,
+    ) -> GovernorAction {
+        // 1. SafetyGuard: unconditional block on overt danger
+        // (checked separately via ToolSafetyLimits; here we check budget overflow)
+        if entropy > self.entropy_overflow {
+            return GovernorAction::Block {
+                reason: format!(
+                    "Entropy overflow ({:.2} > {:.2}). Agent loop protection triggered.",
+                    entropy, self.entropy_overflow
+                ),
+            };
+        }
+
+        // 2. QualityGuard: escalate on entropy tier transitions
+        if entropy_escalated {
+            *self.quality_escalated.lock().unwrap() = true;
+            match entropy_tier {
+                3 => {
+                    // Critical — model switch
+                    return GovernorAction::SwitchModel {
+                        model_id: String::new(), // caller fills in
+                    };
+                }
+                2 => {
+                    // High — strategy reconsideration
+                    return GovernorAction::InjectStrategyPrompt {
+                        message: format!(
+                            "WARNING: High tool call repetition detected ({:.2}). \
+                             Reconsider your strategy; try a fundamentally different approach.",
+                            entropy
+                        ),
+                    };
+                }
+                1 => {
+                    // Elevated — increase diversity silently
+                    return GovernorAction::IncreaseDiversity { extra_tools: 3 };
+                }
+                _ => {}
+            }
+        }
+
+        // Downgrade: clear quality escalation when entropy drops to Normal
+        if entropy_tier == 0 {
+            *self.quality_escalated.lock().unwrap() = false;
+        }
+
+        // 3. ResourceGuard: budget pressure
+        if budget_used_pct > self.budget_pressure_threshold {
+            *self.budget_pressured.lock().unwrap() = true;
+            return GovernorAction::ReduceScope;
+        } else {
+            *self.budget_pressured.lock().unwrap() = false;
+        }
+
+        GovernorAction::Continue
+    }
+
+    /// DynamicLambda: compute a budget scaling factor based on entropy and stall state.
+    ///
+    /// Higher entropy + more stalling → larger budget (more exploration needed).
+    /// Lower entropy + progress → smaller budget (cost saving).
+    /// From objeta's DynamicLambda pattern: λ = base × entropy_factor × stall_factor.
+    pub fn dynamic_budget_scale(&self, entropy: f32, stall_count: usize) -> f32 {
+        let base = 1.0;
+        let entropy_factor = if entropy > 0.70 { 1.5 } else if entropy > 0.50 { 1.25 } else { 1.0 };
+        let stall_factor = 1.0 + (stall_count as f32 * 0.2).min(1.0);
+        (base * entropy_factor * stall_factor).clamp(0.5, 3.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,5 +527,38 @@ mod tests {
         let limits = ToolSafetyLimits::default();
         assert!(limits.check_read_size(500_000).is_ok());
         assert!(limits.check_read_size(2_000_000).is_err());
+    }
+
+    #[test]
+    fn test_integrated_governor_arbitration() {
+        let gov = IntegratedGovernor::default();
+        // Safety > Quality: overflow blocks even if quality escalated
+        let action = gov.evaluate(0.96, 4, true, 0.5);
+        assert!(matches!(action, GovernorAction::Block { .. }));
+
+        // Quality > Resource: entropy escalation wins over budget pressure
+        let action = gov.evaluate(0.72, 2, true, 0.90);
+        assert!(matches!(action, GovernorAction::InjectStrategyPrompt { .. }));
+
+        // ResourceGuard when no quality escalation
+        let action = gov.evaluate(0.3, 0, false, 0.85);
+        assert_eq!(action, GovernorAction::ReduceScope);
+
+        // Continue when all clear
+        let action = gov.evaluate(0.3, 0, false, 0.5);
+        assert_eq!(action, GovernorAction::Continue);
+    }
+
+    #[test]
+    fn test_dynamic_budget_scale() {
+        let gov = IntegratedGovernor::default();
+        // Normal: scale ~1.0
+        assert!((gov.dynamic_budget_scale(0.3, 0) - 1.0).abs() < 0.01);
+        // High entropy: scale > 1.25
+        assert!(gov.dynamic_budget_scale(0.75, 0) > 1.25);
+        // Stalled: scale increases
+        assert!(gov.dynamic_budget_scale(0.3, 3) > 1.0);
+        // Clamped to max 3.0
+        assert!(gov.dynamic_budget_scale(0.9, 10) <= 3.0);
     }
 }

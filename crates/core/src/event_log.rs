@@ -62,6 +62,8 @@ pub enum EventKind {
     /// Entropy exceeded the alert threshold.
     EntropyAlert {
         score: f32,
+        /// Entropy tier (0=Normal, 1=Elevated, 2=High, 3=Critical, 4=Overflow).
+        tier: u8,
         pattern: String,
     },
     /// An iteration of the decision loop completed.
@@ -136,19 +138,35 @@ impl EventLog {
     /// Truncate the disk JSONL to the most recent N lines.
     /// Called periodically to prevent unbounded file growth.
     fn truncate_disk_log(path: &Path, max_lines: usize) {
-        let Ok(content) = std::fs::read_to_string(path) else {
-            return;
+        use std::fs::File;
+        use std::io::{BufRead, BufReader, Write};
+
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(_) => return,
         };
-        let lines: Vec<&str> = content.lines().collect();
+
+        let reader = BufReader::new(file);
+        let mut lines = Vec::new();
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                lines.push(l);
+            }
+        }
+
         if lines.len() <= max_lines {
             return;
         }
-        let keep = &lines[lines.len() - max_lines..];
-        if let Ok(mut file) = std::fs::File::create(path) {
-            use std::io::Write;
+
+        let temp_path = path.with_extension("tmp");
+        if let Ok(mut temp_file) = File::create(&temp_path) {
+            let keep = &lines[lines.len() - max_lines..];
             for line in keep {
-                let _ = writeln!(file, "{}", line);
+                let _ = writeln!(temp_file, "{}", line);
             }
+            let _ = temp_file.flush();
+            drop(temp_file);
+            let _ = std::fs::rename(&temp_path, path);
         }
     }
 
@@ -195,7 +213,7 @@ impl EventLog {
                 }
             }
             // Truncate disk log periodically (every 100 events)
-            if id.is_multiple_of(100) {
+            if id % 100 == 0 {
                 // Clear file cache before truncation to prevent stale descriptors or conflicts
                 {
                     let mut cache = self.file_cache.lock().await;

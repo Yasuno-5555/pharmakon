@@ -8086,6 +8086,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "env_logger",
+ "futures",
  "futures-util",
  "log",
  "open",

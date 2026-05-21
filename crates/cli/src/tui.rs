@@ -90,103 +90,34 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
         }));
     }
 
-    loop {
-        // Check if background task finished
-        if let Some(ref handle) = active_chat_task
-            && handle.is_finished() {
-                active_chat_task = None;
-            }
-
-        // Drain events from agent — batch for efficiency
-        event_buf.clear();
-        while let Ok(event) = event_rx.try_recv() {
-            event_buf.push(event);
-        }
-
-        for event in &event_buf {
-            match event {
-                Event::AgentResponse { content } => {
-                    messages.push(("assistant".to_string(), content.to_string()));
-                    chat_scroll = None; // auto-scroll on new response
-                    status = "Ready.".to_string();
-                }
-                Event::AgentResponseChunk { chunk, .. } => {
-                    if let Some(last) = messages.last_mut() {
-                        if last.0 == "assistant" {
-                            last.1.push_str(chunk);
-                        } else {
-                            messages.push(("assistant".to_string(), chunk.clone()));
-                            chat_scroll = None;
+    // Spawn crossterm event reader task
+    let (crossterm_tx, mut crossterm_rx) = tokio::sync::mpsc::channel::<CEvent>(128);
+    tokio::spawn(async move {
+        loop {
+            match event::poll(Duration::from_millis(100)) {
+                Ok(true) => {
+                    if let Ok(ev) = event::read() {
+                        if crossterm_tx.send(ev).await.is_err() {
+                            break;
                         }
-                    } else {
-                        messages.push(("assistant".to_string(), chunk.clone()));
-                        chat_scroll = None;
                     }
                 }
-                Event::AgentThought { content } => {
-                    // Show thoughts as italic dimmed text inline
-                    let thought = content.to_string();
-                    messages.push(("thought".to_string(), thought));
+                Ok(false) => {}
+                Err(_) => {
+                    break;
                 }
-                Event::ToolCall { name, args } => {
-                    let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
-                    status = format!("Running {}...", name);
-                    let line = format_tool_call(name, &args_str);
-                    messages.push(("tool".to_string(), line));
-
-                    detailed_tool_logs.push(DetailedToolLog {
-                        name: name.clone(),
-                        args: args_str,
-                        status: "RUNNING",
-                        result: String::new(),
-                        latency_ms: None,
-                        timestamp: chrono::Local::now(),
-                        start_time: Instant::now(),
-                    });
-                }
-                Event::ToolResult { result } => {
-                    status = "Ready.".to_string();
-                    let mut tool_name = "tool".to_string();
-                    if let Some(entry) = detailed_tool_logs.iter_mut().rev().find(|e| e.status == "RUNNING") {
-                        entry.status = "DONE";
-                        entry.result = result.clone();
-                        entry.latency_ms = Some(entry.start_time.elapsed().as_millis() as u64);
-                        tool_name = entry.name.clone();
-                    }
-                    // Compact result preview
-                    let preview = if result.trim().is_empty() {
-                        "ok".to_string()
-                    } else {
-                        let trimmed = result.trim();
-                        // Show first line only
-                        let first_line = trimmed.lines().next().unwrap_or("");
-                        truncate(first_line, 100)
-                    };
-                    messages.push(("result".to_string(), format!("  \u{2714} {} \u{2192} {}", tool_name, preview)));
-                }
-                Event::ApprovalRequest { id, tool, args } => {
-                    let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
-                    status = "Awaiting authorization...".to_string();
-                    pending_approvals.push(LocalApproval {
-                        id: id.clone(),
-                        tool: tool.clone(),
-                        args: args_str,
-                    });
-                }
-                Event::Error { message } => {
-                    status = format!("Error: {}", message);
-                    messages.push(("error".to_string(), format!("\u{2716} {}", message)));
-                }
-                Event::ModelSwitched { model_id } => {
-                    active_model = model_id.clone();
-                    messages.push(("system".to_string(), format!("Switched to: {}", model_id)));
-                    status = format!("Model: {}", model_id);
-                }
-                _ => {}
             }
         }
+    });
 
-        // Draw frame
+    // Helper macro / lambda to draw the UI state
+    let mut draw_ui = |terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+                       active_model: &str,
+                       status: &str,
+                       active_chat_task: &Option<tokio::task::JoinHandle<()>>,
+                       messages: &[(String, String)],
+                       chat_scroll: Option<usize>,
+                       input_buffer: &str| -> Result<()> {
         terminal.draw(|f| {
             let area = f.area();
             if area.height < 5 || area.width < 20 {
@@ -204,9 +135,9 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
 
             // ── Header bar ──
             let header_text = format!(
-                " \u{1F48A} Pharmakon  |  {}  |  {}",
+                " 💊 Pharmakon  |  {}  |  {}",
                 active_model,
-                if active_chat_task.is_some() { "\u{2699} working..." } else { status.as_str() }
+                if active_chat_task.is_some() { "⚙ working..." } else { status }
             );
             let header = Paragraph::new(header_text)
                 .style(Style::default().fg(Color::Rgb(140, 140, 160)));
@@ -214,7 +145,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
 
             // ── Chat area ──
             let mut display_lines: Vec<(Color, String)> = Vec::new();
-            for (role, content) in &messages {
+            for (role, content) in messages.iter() {
                 match role.as_str() {
                     "user" => {
                         display_lines.push((Color::Green, format!("> {}", content)));
@@ -235,7 +166,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                         display_lines.push((Color::DarkGray, String::new()));
                     }
                     "thought" => {
-                        display_lines.push((Color::Rgb(120, 120, 140), format!("  \u{1F4AD} {}", content)));
+                        display_lines.push((Color::Rgb(120, 120, 140), format!("  💭 {}", content)));
                     }
                     "tool" => {
                         display_lines.push((Color::Magenta, format!(" {}", content)));
@@ -248,7 +179,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                         display_lines.push((Color::Red, content.clone()));
                     }
                     "system" => {
-                        display_lines.push((Color::Yellow, format!(" \u{2699} {}", content)));
+                        display_lines.push((Color::Yellow, format!(" ⚙ {}", content)));
                         display_lines.push((Color::DarkGray, String::new()));
                     }
                     _ => {
@@ -265,7 +196,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                     .as_millis()
                     / 500
                     % 4) as usize;
-                let indicator = format!(" {} {}", "\u{1F9D0}", ".".repeat(dots));
+                let indicator = format!(" 🧐 {}", ".".repeat(dots));
                 display_lines.push((Color::Rgb(100, 100, 120), indicator));
             }
 
@@ -294,7 +225,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
             let input_text = format!("{}{}", input_prefix, input_buffer);
 
             let (border_color, input_title) = if active_chat_task.is_some() {
-                (Color::Yellow, " \u{23F3} processing... (ESC to cancel) ")
+                (Color::Yellow, " ⏳ processing... (ESC to cancel) ")
             } else if input_buffer.starts_with('/') {
                 (Color::Magenta, " cmd ")
             } else {
@@ -311,162 +242,311 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                 .style(Style::default().fg(Color::White));
             f.render_widget(input_para, vert[2]);
         })?;
+        Ok(())
+    };
 
-        // ── Keyboard input ──
-        if event::poll(Duration::from_millis(80))?
-            && let CEvent::Key(key) = event::read()? {
-                // Global: Ctrl+C / Ctrl+D → quit
-                if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
-                    agent.shutdown();
-                    break;
-                }
-                if key.code == KeyCode::Char('d') && key.modifiers == KeyModifiers::CONTROL {
-                    agent.shutdown();
-                    break;
-                }
+    // Perform initial draw
+    draw_ui(&mut terminal, &active_model, &status, &active_chat_task, &messages, chat_scroll, &input_buffer)?;
 
-                // Approvals
-                if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('a') {
-                    if !pending_approvals.is_empty() {
-                        let a = pending_approvals.remove(0);
-                        agent.approve(a.id, true);
-                        status = format!("Approved: {}", a.tool);
-                    }
-                    continue;
-                }
-                if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('x') {
-                    if !pending_approvals.is_empty() {
-                        let a = pending_approvals.remove(0);
-                        agent.approve(a.id, false);
-                        status = format!("Rejected: {}", a.tool);
-                    }
-                    continue;
-                }
+    loop {
+        let mut need_redraw = false;
+        let is_busy = active_chat_task.is_some();
 
-                match key.code {
-                    KeyCode::PageUp => {
-                        chat_scroll = Some(chat_scroll.unwrap_or(0).saturating_add(5));
-                    }
-                    KeyCode::PageDown => {
-                        if let Some(s) = chat_scroll.as_mut() {
-                            *s = s.saturating_sub(5);
-                            if *s == 0 { chat_scroll = None; }
+        tokio::select! {
+            // 1. Drain events from agent
+            event_res = event_rx.recv() => {
+                match event_res {
+                    Ok(event) => {
+                        event_buf.clear();
+                        event_buf.push(event);
+                        while let Ok(ev) = event_rx.try_recv() {
+                            event_buf.push(ev);
                         }
-                    }
-                    KeyCode::Esc => {
-                        if let Some(ref handle) = active_chat_task {
-                            handle.abort();
-                            active_chat_task = None;
-                            status = "Cancelled.".to_string();
-                            messages.push(("system".to_string(), "Cancelled.".to_string()));
-                        } else {
-                            input_buffer.clear();
-                        }
-                    }
-                    KeyCode::Enter => {
-                        if active_chat_task.is_some() {
-                            continue; // ignore input while processing
-                        }
-                        let msg = input_buffer.trim().to_string();
-                        if msg.is_empty() { continue; }
-                        input_buffer.clear();
 
-                        if msg == "/reset" || msg == "/new" {
-                            let _ = agent.reset_history().await;
-                            messages.clear();
-                            detailed_tool_logs.clear();
-                            messages.push(("system".to_string(), "Session reset.".to_string()));
-                            status = "Ready.".to_string();
-                            continue;
-                        }
-                        if msg == "/revert" || msg == "/undo" {
-                            let session_id = {
-                                let sid = agent.session_id.lock().await;
-                                sid.clone()
-                            };
-                            match agent.revert_last_mutation(&session_id).await {
-                                Ok(feedback) => {
-                                    messages.push(("system".to_string(), feedback.clone()));
-                                    status = feedback;
+                        for event in &event_buf {
+                            match event {
+                                Event::AgentResponse { content } => {
+                                    messages.push(("assistant".to_string(), content.to_string()));
+                                    chat_scroll = None; // auto-scroll on new response
+                                    status = "Ready.".to_string();
                                 }
-                                Err(e) => {
-                                    messages.push(("error".to_string(), format!("Revert failed: {}", e)));
-                                    status = format!("Revert failed: {}", e);
-                                }
-                            }
-                            continue;
-                        }
-                        if msg.starts_with("/model") {
-                            let parts: Vec<&str> = msg["/model".len()..].trim().split_whitespace().collect();
-                            if !parts.is_empty() {
-                                let mut save = false;
-                                let mut model_id = parts[0];
-                                if parts[0] == "--save" && parts.len() > 1 {
-                                    save = true;
-                                    model_id = parts[1];
-                                } else if parts.len() > 1 && parts[1] == "--save" {
-                                    save = true;
-                                }
-                                if let Some(new_m) = ModelRegistry::get_model(model_id) {
-                                    let mut current = agent.model.lock().await;
-                                    *current = new_m;
-                                    messages.push(("system".to_string(), format!("Switched model to {}", model_id)));
-                                    status = format!("Model: {}", model_id);
-
-                                    // Context re-processing cost calculation
-                                    let session_id = { agent.session_id.lock().await.clone() };
-                                    let states = agent.session_states.lock().await;
-                                    let est_tokens = if let Some(state) = states.get(&session_id) {
-                                        let s = state.lock().await;
-                                        s.history.iter().map(|m| m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0)).sum::<usize>() / 4
+                                Event::AgentResponseChunk { chunk, .. } => {
+                                    if let Some(last) = messages.last_mut() {
+                                        if last.0 == "assistant" {
+                                            last.1.push_str(chunk);
+                                        } else {
+                                            messages.push(("assistant".to_string(), chunk.clone()));
+                                            chat_scroll = None;
+                                        }
                                     } else {
-                                        0
-                                    };
-                                    let est_cost = (est_tokens as f64) * 0.000001;
-                                    messages.push(("system".to_string(), format!("⚠ Context re-processing cost: ~{} tokens (${:.4})", est_tokens, est_cost)));
+                                        messages.push(("assistant".to_string(), chunk.clone()));
+                                        chat_scroll = None;
+                                    }
+                                }
+                                Event::AgentThought { content } => {
+                                    let thought = content.to_string();
+                                    messages.push(("thought".to_string(), thought));
+                                }
+                                Event::ToolCall { name, args } => {
+                                    let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
+                                    status = format!("Running {}...", name);
+                                    let line = format_tool_call(name, &args_str);
+                                    messages.push(("tool".to_string(), line));
 
-                                    if save {
-                                        if let Ok(mut cfg) = Config::load() {
-                                            if let Some(idx) = model_id.find('/') {
-                                                cfg.default_agent.provider = model_id[..idx].to_string();
-                                                cfg.default_agent.model = model_id[idx+1..].to_string();
-                                            } else {
-                                                cfg.default_agent.model = model_id.to_string();
-                                            }
-                                            if cfg.save().is_ok() {
-                                                messages.push(("system".to_string(), "Configuration saved permanently.".to_string()));
-                                            }
+                                    detailed_tool_logs.push(DetailedToolLog {
+                                        name: name.clone(),
+                                        args: args_str,
+                                        status: "RUNNING",
+                                        result: String::new(),
+                                        latency_ms: None,
+                                        timestamp: chrono::Local::now(),
+                                        start_time: Instant::now(),
+                                    });
+                                }
+                                Event::ToolResult { result } => {
+                                    status = "Ready.".to_string();
+                                    let mut tool_name = "tool".to_string();
+                                    if let Some(entry) = detailed_tool_logs.iter_mut().rev().find(|e| e.status == "RUNNING") {
+                                        entry.status = "DONE";
+                                        entry.result = result.clone();
+                                        entry.latency_ms = Some(entry.start_time.elapsed().as_millis() as u64);
+                                        tool_name = entry.name.clone();
+                                    }
+                                    let preview = if result.trim().is_empty() {
+                                        "ok".to_string()
+                                    } else {
+                                        let trimmed = result.trim();
+                                        let first_line = trimmed.lines().next().unwrap_or("");
+                                        truncate(first_line, 100)
+                                    };
+                                    messages.push(("result".to_string(), format!("  ✔ {} ➔ {}", tool_name, preview)));
+                                }
+                                Event::ApprovalRequest { id, tool, args } => {
+                                    let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
+                                    status = "Awaiting authorization...".to_string();
+                                    pending_approvals.push(LocalApproval {
+                                        id: id.clone(),
+                                        tool: tool.clone(),
+                                        args: args_str,
+                                    });
+                                }
+                                Event::Error { message } => {
+                                    status = format!("Error: {}", message);
+                                    messages.push(("error".to_string(), format!("✖ {}", message)));
+                                }
+                                Event::ModelSwitched { model_id } => {
+                                    active_model = model_id.clone();
+                                    messages.push(("system".to_string(), format!("Switched to: {}", model_id)));
+                                    status = format!("Model: {}", model_id);
+                                }
+                                _ => {}
+                            }
+                        }
+                        need_redraw = true;
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+            // 2. Keyboard / Crossterm input
+            crossterm_res = crossterm_rx.recv() => {
+                match crossterm_res {
+                    Some(CEvent::Key(key)) => {
+                        // Global: Ctrl+C / Ctrl+D → quit
+                        if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+                            agent.shutdown();
+                            break;
+                        }
+                        if key.code == KeyCode::Char('d') && key.modifiers == KeyModifiers::CONTROL {
+                            agent.shutdown();
+                            break;
+                        }
+
+                        // Approvals
+                        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('a') {
+                            if !pending_approvals.is_empty() {
+                                let a = pending_approvals.remove(0);
+                                agent.approve(a.id, true);
+                                status = format!("Approved: {}", a.tool);
+                            }
+                            need_redraw = true;
+                            continue;
+                        }
+                        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('x') {
+                            if !pending_approvals.is_empty() {
+                                let a = pending_approvals.remove(0);
+                                agent.approve(a.id, false);
+                                status = format!("Rejected: {}", a.tool);
+                            }
+                            need_redraw = true;
+                            continue;
+                        }
+
+                        match key.code {
+                            KeyCode::PageUp => {
+                                chat_scroll = Some(chat_scroll.unwrap_or(0).saturating_add(5));
+                                need_redraw = true;
+                            }
+                            KeyCode::PageDown => {
+                                if let Some(s) = chat_scroll.as_mut() {
+                                    *s = s.saturating_sub(5);
+                                    if *s == 0 { chat_scroll = None; }
+                                }
+                                need_redraw = true;
+                            }
+                            KeyCode::Esc => {
+                                if let Some(ref handle) = active_chat_task {
+                                    handle.abort();
+                                    active_chat_task = None;
+                                    status = "Cancelled.".to_string();
+                                    messages.push(("system".to_string(), "Cancelled.".to_string()));
+                                } else {
+                                    input_buffer.clear();
+                                }
+                                need_redraw = true;
+                            }
+                            KeyCode::Enter => {
+                                if is_busy {
+                                    continue;
+                                }
+                                let msg = input_buffer.trim().to_string();
+                                if msg.is_empty() { continue; }
+                                input_buffer.clear();
+
+                                if msg == "/reset" || msg == "/new" {
+                                    let _ = agent.reset_history().await;
+                                    messages.clear();
+                                    detailed_tool_logs.clear();
+                                    messages.push(("system".to_string(), "Session reset.".to_string()));
+                                    status = "Ready.".to_string();
+                                    need_redraw = true;
+                                    continue;
+                                }
+                                if msg == "/revert" || msg == "/undo" {
+                                    let session_id = {
+                                        let sid = agent.session_id.lock().await;
+                                        sid.clone()
+                                    };
+                                    match agent.revert_last_mutation(&session_id).await {
+                                        Ok(feedback) => {
+                                            messages.push(("system".to_string(), feedback.clone()));
+                                            status = feedback;
+                                        }
+                                        Err(e) => {
+                                            messages.push(("error".to_string(), format!("Revert failed: {}", e)));
+                                            status = format!("Revert failed: {}", e);
                                         }
                                     }
-                                } else {
-                                    messages.push(("error".to_string(), format!("Model not found or invalid API key: {}", model_id)));
+                                    need_redraw = true;
+                                    continue;
                                 }
-                            } else {
-                                messages.push(("system".to_string(), "Usage: /model [--save] <model_id>".to_string()));
+                                if msg.starts_with("/model") {
+                                    let parts: Vec<&str> = msg["/model".len()..].trim().split_whitespace().collect();
+                                    if !parts.is_empty() {
+                                        let mut save = false;
+                                        let mut model_id = parts[0];
+                                        if parts[0] == "--save" && parts.len() > 1 {
+                                            save = true;
+                                            model_id = parts[1];
+                                        } else if parts.len() > 1 && parts[1] == "--save" {
+                                            save = true;
+                                        }
+                                        if let Some(new_m) = ModelRegistry::get_model(model_id) {
+                                            let mut current = agent.model.lock().await;
+                                            *current = new_m;
+                                            messages.push(("system".to_string(), format!("Switched model to {}", model_id)));
+                                            status = format!("Model: {}", model_id);
+
+                                            let session_id = { agent.session_id.lock().await.clone() };
+                                            let states = agent.session_states.lock().await;
+                                            let est_tokens = if let Some(state) = states.get(&session_id) {
+                                                let s = state.lock().await;
+                                                s.history.iter().map(|m| m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0)).sum::<usize>() / 4
+                                            } else {
+                                                0
+                                            };
+                                            let est_cost = (est_tokens as f64) * 0.000001;
+                                            messages.push(("system".to_string(), format!("⚠ Context re-processing cost: ~{} tokens (${:.4})", est_tokens, est_cost)));
+
+                                            if save {
+                                                if let Ok(mut cfg) = Config::load() {
+                                                    if let Some(idx) = model_id.find('/') {
+                                                        cfg.default_agent.provider = model_id[..idx].to_string();
+                                                        cfg.default_agent.model = model_id[idx+1..].to_string();
+                                                    } else {
+                                                        cfg.default_agent.model = model_id.to_string();
+                                                    }
+                                                    if cfg.save().is_ok() {
+                                                        messages.push(("system".to_string(), "Configuration saved permanently.".to_string()));
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            messages.push(("error".to_string(), format!("Model not found or invalid API key: {}", model_id)));
+                                        }
+                                    } else {
+                                        messages.push(("system".to_string(), "Usage: /model [--save] <model_id>".to_string()));
+                                    }
+                                    need_redraw = true;
+                                    continue;
+                                }
+                                if msg == "/exit" || msg == "/quit" { break; }
+
+                                messages.push(("user".to_string(), msg.clone()));
+                                status = "Thinking...".to_string();
+
+                                let agent_clone = agent.clone();
+                                active_chat_task = Some(tokio::spawn(async move {
+                                    if let Err(e) = agent_clone.chat(&msg).await {
+                                        log::error!("Agent error: {}", e);
+                                    }
+                                }));
+                                need_redraw = true;
                             }
-                            continue;
+                            KeyCode::Char(c) => {
+                                input_buffer.push(c);
+                                need_redraw = true;
+                            }
+                            KeyCode::Backspace => {
+                                input_buffer.pop();
+                                need_redraw = true;
+                            }
+                            _ => {}
                         }
-                        if msg == "/exit" || msg == "/quit" { break; }
-
-                        messages.push(("user".to_string(), msg.clone()));
-                        status = "Thinking...".to_string();
-
-                        let agent_clone = agent.clone();
-                        active_chat_task = Some(tokio::spawn(async move {
-                            if let Err(e) = agent_clone.chat(&msg).await {
-                                log::error!("Agent error: {}", e);
-                            }
-                        }));
                     }
-                    KeyCode::Char(c) => {
-                        input_buffer.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        input_buffer.pop();
+                    Some(CEvent::Resize(_, _)) => {
+                        need_redraw = true;
                     }
                     _ => {}
                 }
             }
+            // 3. Task completion
+            res = async {
+                if let Some(ref mut handle) = active_chat_task {
+                    let _ = handle.await;
+                } else {
+                    futures::future::pending::<()>().await;
+                }
+            } => {
+                active_chat_task = None;
+                need_redraw = true;
+            }
+            // 4. Animation timer (only active while thinking)
+            _ = async {
+                if is_busy {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                } else {
+                    futures::future::pending::<()>().await;
+                }
+            } => {
+                need_redraw = true;
+            }
+        }
+
+        if need_redraw {
+            draw_ui(&mut terminal, &active_model, &status, &active_chat_task, &messages, chat_scroll, &input_buffer)?;
+        }
     }
 
     disable_raw_mode()?;

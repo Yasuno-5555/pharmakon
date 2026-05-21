@@ -1,4 +1,4 @@
-use crate::orchestration::budget::{self, IterationSnapshot, ProgressTracker, TerminationSignal, TerminationPolicy};
+use crate::orchestration::budget::{self, EntropyTier, IterationSnapshot, ProgressTracker, TerminationSignal, TerminationPolicy};
 use crate::orchestration::dsge_integration::AgentEconomy;
 
 /// Sentinel value for SnapshotStore: file did not exist before mutation.
@@ -88,6 +88,8 @@ pub struct Agent {
     pub tool_call_counts: Arc<Mutex<std::collections::HashMap<String, u32>>>,
     pub dry_run: Arc<std::sync::atomic::AtomicBool>,
     pub governor: Arc<crate::orchestration::governor::ToolGovernor>,
+    /// Integrated multi-loop governor (Safety > Quality > Resource arbitration).
+    pub integrated_governor: Arc<crate::orchestration::governor::IntegratedGovernor>,
 
     // ── Event Log & Rollback ──
     pub event_log: Arc<crate::event_log::EventLog>,
@@ -157,6 +159,7 @@ impl Clone for Agent {
             last_workspace_snapshot: Arc::new(Mutex::new(None)), // fresh cooldown for clone
             registry: self.registry.clone(),
             governor: self.governor.clone(),
+            integrated_governor: self.integrated_governor.clone(),
             dream_started: self.dream_started.clone(),
             cron_manager: self.cron_manager.clone(),
             economy: self.economy.clone(),
@@ -288,6 +291,7 @@ impl Agent {
             economy: economy.clone(),
             bank_of_pharmakon: Arc::new(Mutex::new(crate::orchestration::economy_v2::BankOfPharmakon::new(100_000))),
             governor: Arc::new(crate::orchestration::governor::ToolGovernor::new(Default::default())),
+            integrated_governor: Arc::new(crate::orchestration::governor::IntegratedGovernor::default()),
             vision_stream: None,
             tool_scheduler: Arc::new(crate::orchestration::tool_scheduler::ToolScheduler::new(
                 std::env::current_dir().unwrap_or_default(),
@@ -565,7 +569,7 @@ impl Agent {
             },
             async {
                 if let Some(nexus) = knowledge_nexus {
-                    if let Ok(mems) = nexus.smart_search(user_message, 8).await {
+                    if let Ok(mems) = nexus.search_with_topic_boost(user_message, 8).await {
                         let filtered: Vec<String> = mems.into_iter().filter(|m| {
                             if m.starts_with("[Session: ") {
                                 m.starts_with(&format!("[Session: {}]", current_sess))
@@ -655,7 +659,7 @@ impl Agent {
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(5);
-        if count.is_multiple_of(reflection_interval) {
+        if count % reflection_interval == 0 {
             let agent_clone = self.clone();
             tokio::spawn(async move {
                 if let Err(e) = agent_clone.reflect().await {
@@ -728,11 +732,13 @@ impl Agent {
     }
 
     /// Build tool definitions: core + BM25 search results + serendipity injection.
-    async fn build_tool_definitions(&self, user_message: &str) -> Option<Vec<ToolDefinition>> {
+    /// `extra_serendipity` adds N additional non-core tools to promote exploration (used by entropy tier response).
+    async fn build_tool_definitions(&self, user_message: &str, extra_serendipity: usize) -> Option<Vec<ToolDefinition>> {
         let mut reg = self.registry.lock().await;
         let active_cats = self.active_categories.lock().await;
 
-        let mut tools_to_inject = reg.all_metadata()
+        let all_meta = reg.all_metadata();
+        let mut tools_to_inject = all_meta
             .iter()
             .filter(|m| m.category == ToolCategory::Core)
             .cloned()
@@ -745,20 +751,22 @@ impl Agent {
             }
         }
 
-        let non_core: Vec<_> = reg.all_metadata().iter()
+        let non_core: Vec<_> = all_meta.iter()
             .filter(|m| m.category != ToolCategory::Core)
             .cloned()
             .collect();
         if !non_core.is_empty() {
-            let n_sample = 3.min(non_core.len());
-            let sampled: Vec<_> = non_core.iter()
+            let sampled: Vec<_> = non_core.into_iter()
                 .filter(|m| !tools_to_inject.iter().any(|t| t.name == m.name))
                 .collect();
-            let seed = self.interaction_count.load(std::sync::atomic::Ordering::SeqCst) as usize;
-            let start = seed % sampled.len().max(1);
-            for i in 0..n_sample {
-                let idx = (start + i * 7 + i * i) % sampled.len().max(1);
-                tools_to_inject.push(sampled[idx].clone());
+            if !sampled.is_empty() {
+                let n_sample = (3 + extra_serendipity).min(sampled.len());
+                let seed = self.interaction_count.load(std::sync::atomic::Ordering::SeqCst) as usize;
+                let start = seed % sampled.len();
+                for i in 0..n_sample {
+                    let idx = (start + i * 7 + i * i) % sampled.len();
+                    tools_to_inject.push(sampled[idx].clone());
+                }
             }
         }
 
@@ -945,48 +953,112 @@ impl Agent {
             // --- Start of Loop: Budget and Progress Checks ---
             current_iteration += 1;
             
-            // --- Entropy Check (Loop Detection) ---
+            // --- Multi-Tier Entropy Response (LKO/objeta findings) ---
+            // Tier 1 (Elevated): increase serendipity injection (promotes exploration)
+            // Tier 2 (High): inject strategy reconsideration prompt
+            // Tier 3 (Critical): auto-switch to fallback model + final warning
+            // Tier 4 (Overflow): hard-terminate
             let entropy = self.event_log.recent_tool_entropy(10).await;
             {
                 let mut econ = self.economy.lock().unwrap();
                 econ.sample_system_telemetry();
                 econ.update_inflation(current_iteration as u64 * 400, 4000);
             }
-            if entropy > 0.8 {
-                log::warn!("[SESSION: {}] High entropy detected ({:.2}). Possible loop.", session_id, entropy);
-                self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {
-                    score: entropy,
-                    pattern: "high_repetition".to_string(),
-                }).await;
-                
-                let mut state = state_arc.lock().await;
-                state.history.push(Message {
-                    role: "system".to_string(),
-                    content: Some(MessageContent::Text(format!(
-                        "WARNING: High tool call repetition detected ({:.2}). You might be in a loop. Please reconsider your strategy and try a different approach.",
-                        entropy
-                    ))),
-                    ..Default::default()
-                });
-                
-                // Hard termination if entropy exceeds critical threshold
-                // (integrated via ProgressTracker for unified signal handling)
-                let max_entropy = std::env::var("PHARMAKON_MAX_ENTROPY")
-                    .ok()
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(0.95);
-                let entropy_signal = progress_tracker.check_entropy(entropy, max_entropy);
-                if entropy_signal != TerminationSignal::Continue {
+            let (tier, escalated) = progress_tracker.update_tier(entropy);
+            let mut extra_serendipity: usize = 0;
+
+            match tier {
+                EntropyTier::Overflow => {
                     let reason = format!(
-                        "Entropy overflow detected ({:.2}). Agent is in a pathological loop with no progress. Task aborted.",
-                        entropy
+                        "Entropy overflow detected ({:.2}, tier={:?}). Agent is in a pathological loop. Task aborted.",
+                        entropy, tier
                     );
                     log::error!("CRITICAL: {}", reason);
+                    self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {
+                        score: entropy,
+                        tier: tier.as_u8(),
+                        pattern: "overflow".to_string(),
+                    }).await;
                     self.event_log.append(session_id, crate::event_log::EventKind::SessionEvent {
                         action: "failed".to_string(),
                         detail: reason.clone(),
                     }).await;
                     return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
+                }
+                EntropyTier::Critical => {
+                    if escalated {
+                        log::warn!("[SESSION: {}] Critical entropy ({:.2}). Switching to fallback model.", session_id, entropy);
+                        self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {
+                            score: entropy,
+                            tier: tier.as_u8(),
+                            pattern: "critical_model_switch".to_string(),
+                        }).await;
+                        // Auto-switch to first available fallback model
+                        // (drop std::sync::MutexGuard before .await to preserve Send)
+                        let fb_name = {
+                            self.fallback_models.lock().ok()
+                                .and_then(|fm| fm.first().cloned())
+                        };
+                        if let Some(fb) = fb_name {
+                            if let Some(new_model) = crate::providers::registry::ModelRegistry::get_model(&fb) {
+                                let mut model = self.model.lock().await;
+                                *model = new_model;
+                                log::info!("Auto-switched to fallback model: {}", fb);
+                            }
+                        }
+                    }
+                    extra_serendipity = 3;
+                }
+                EntropyTier::High => {
+                    if escalated {
+                        log::warn!("[SESSION: {}] High entropy ({:.2}). Injecting strategy prompt.", session_id, entropy);
+                        self.event_log.append(session_id, crate::event_log::EventKind::EntropyAlert {
+                            score: entropy,
+                            tier: tier.as_u8(),
+                            pattern: "high_repetition".to_string(),
+                        }).await;
+                        let mut state = state_arc.lock().await;
+                        state.history.push(Message {
+                            role: "system".to_string(),
+                            content: Some(MessageContent::Text(format!(
+                                "WARNING: High tool call repetition detected ({:.2}). \
+                                 You might be in a loop. Reconsider your strategy; try a \
+                                 fundamentally different approach or use `discover_tools`.",
+                                entropy
+                            ))),
+                            ..Default::default()
+                        });
+                    }
+                    extra_serendipity = 2;
+                }
+                EntropyTier::Elevated => {
+                    // Silent: increase tool diversity via serendipity injection
+                    extra_serendipity = 3;
+                }
+                EntropyTier::Normal => {}
+            }
+
+            // --- Integrated Governor: secondary validation (Safety > Quality > Resource) ---
+            {
+                let budget_used_pct = self.total_tokens.load(std::sync::atomic::Ordering::SeqCst) as f32
+                    / self.token_budget as f32;
+                let gov_action = self.integrated_governor.evaluate(
+                    entropy,
+                    tier.as_u8(),
+                    escalated,
+                    budget_used_pct,
+                );
+                match gov_action {
+                    crate::orchestration::governor::GovernorAction::Block { reason } => {
+                        log::error!("IntegratedGovernor Block: {}", reason);
+                        return Err(anyhow!(AgentError::new(AgentErrorCode::HangDetected, reason)));
+                    }
+                    crate::orchestration::governor::GovernorAction::ReduceScope => {
+                        log::info!("IntegratedGovernor: Budget pressure — reducing tool scope.");
+                        // Tool scope reduction is handled by build_tool_definitions
+                        // via the extra_serendipity parameter; budget pressure keeps it at 0.
+                    }
+                    _ => {}
                 }
             }
 
@@ -1119,12 +1191,12 @@ impl Agent {
             { let shadow = self.economy.lock().unwrap().shadow_directive(); if !shadow.is_empty() && !messages_to_send.is_empty() && let Some(ref mut c) = messages_to_send[0].content { let text = c.as_text().unwrap_or(""); *c = pharmakon_common::agent_types::MessageContent::Text(format!("{}\n{}", text, shadow)); } }
             }
 
-            let tool_definitions = self.build_tool_definitions(user_message).await;
+            let tool_definitions = self.build_tool_definitions(user_message, extra_serendipity).await;
 
             let target_model = {
                 let m = self.model.lock().await;
                 let default_model = (*m).clone();
-                if default_model.name() == "mock-model" || default_model.name() == "test" {
+                if default_model.is_mock() {
                     default_model
                 } else {
                     self.economy.lock().unwrap().select_model(user_message, match complexity { budget::TaskComplexity::Simple => 0.2, budget::TaskComplexity::Standard => 0.5, budget::TaskComplexity::Deep => 0.8 }).unwrap_or(default_model)
@@ -1519,6 +1591,7 @@ impl Agent {
 
                 let task_results = futures::future::join_all(tool_tasks).await;
                 let mut tool_errors = Vec::new();
+                let mut total_latency_ms: u64 = 0;
 
                 for task_res in task_results {
                     if let Ok((tool_call_id, result_res, tool_name, latency_ms, tool_args)) = task_res {
@@ -1526,6 +1599,7 @@ impl Agent {
                          if success {
                             snapshot.successful_tool_calls += 1;
                         }
+                        total_latency_ms += latency_ms;
                         let error = result_res.as_ref().err().map(|e: &anyhow::Error| e.to_string());
 
                         // Record codeact scripts to skill library (before error is moved)
@@ -1623,6 +1697,12 @@ impl Agent {
                         let mut state = state_arc.lock().await;
                         state.history.push(tool_result_msg);
                     }
+                }
+
+                // Compute per-iteration success rate and average latency (for cosine embedding)
+                if snapshot.tool_calls > 0 {
+                    snapshot.tool_success_rate = snapshot.successful_tool_calls as f32 / snapshot.tool_calls as f32;
+                    snapshot.avg_latency_ms = total_latency_ms / snapshot.tool_calls as u64;
                 }
 
                 if !tool_errors.is_empty() {

@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use pharmakon_core::agent::Agent;
-use pharmakon_common::{AgentErrorCode, FinishReason};
+use pharmakon_common::AgentErrorCode;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;

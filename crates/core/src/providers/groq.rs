@@ -45,11 +45,25 @@ impl AgentModel for GroqModel {
     }
 
     fn context_window(&self) -> usize {
-        8192
+        let name = self.model_name.to_lowercase();
+        if name.contains("32768") || name.contains("mixtral") {
+            32768
+        } else if name.contains("llama-3.3") || name.contains("llama3-70b") || name.contains("llama-3.1") {
+            131072
+        } else if name.contains("8b") {
+            8192
+        } else {
+            131072
+        }
     }
 
     fn max_output_tokens(&self) -> usize {
-        4096
+        let name = self.model_name.to_lowercase();
+        if name.contains("llama-3.3") || name.contains("llama-3.1") {
+            8192
+        } else {
+            4096
+        }
     }
 
     async fn complete(&self, request: CompletionRequest) -> AgentResult<CompletionResponse> {
@@ -62,16 +76,21 @@ impl AgentModel for GroqModel {
         }
         messages.extend(request.messages.iter().map(|m| json!(m)));
 
+        let mut payload = json!({
+            "model": self.model_name,
+            "messages": messages,
+            "tools": request.tools,
+            "temperature": request.temperature.unwrap_or(0.7),
+        });
+        if let Some(max_t) = request.max_tokens {
+            payload["max_tokens"] = json!(max_t);
+        }
+
         let res = self
             .client
             .post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&json!({
-                "model": self.model_name,
-                "messages": messages,
-                "tools": request.tools,
-                "temperature": request.temperature.unwrap_or(0.7),
-            }))
+            .json(&payload)
             .send()
             .await
             .map_err(|e| AgentError(e.to_string()))?;
@@ -108,10 +127,17 @@ impl AgentModel for GroqModel {
 
         let finish_reason_str = choice["finish_reason"].as_str();
 
+        let usage = json.get("usage").map(|u| pharmakon_common::agent_types::Usage {
+            prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+            completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+            thoughts_tokens: None,
+        });
+
         Ok(CompletionResponse {
             content,
             tool_calls,
-            usage: None,
+            usage,
             finish_reason: map_groq_finish_reason(finish_reason_str),
         })
     }
@@ -129,17 +155,22 @@ impl AgentModel for GroqModel {
         }
         messages.extend(request.messages.iter().map(|m| json!(m)));
 
+        let mut payload = json!({
+            "model": self.model_name,
+            "messages": messages,
+            "tools": request.tools,
+            "temperature": request.temperature.unwrap_or(0.7),
+            "stream": true,
+        });
+        if let Some(max_t) = request.max_tokens {
+            payload["max_tokens"] = json!(max_t);
+        }
+
         let response = self
             .client
             .post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&json!({
-                "model": self.model_name,
-                "messages": messages,
-                "tools": request.tools,
-                "temperature": request.temperature.unwrap_or(0.7),
-                "stream": true,
-            }))
+            .json(&payload)
             .send()
             .await
             .map_err(|e| AgentError(e.to_string()))?;

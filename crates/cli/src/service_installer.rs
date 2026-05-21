@@ -23,6 +23,9 @@ fn install_macos_launchd(exe_path: PathBuf, home: PathBuf, port: u16) -> Result<
     let plist_path = plist_dir.join("ai.pharmakon.gateway.plist");
     let label = "ai.pharmakon.gateway";
 
+    let exe_str = exe_path.to_str().ok_or_else(|| anyhow!("Invalid executable path"))?;
+    let home_str = home.to_str().ok_or_else(|| anyhow!("Invalid home directory path"))?;
+
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -48,10 +51,10 @@ fn install_macos_launchd(exe_path: PathBuf, home: PathBuf, port: u16) -> Result<
 </dict>
 </plist>"#,
         label,
-        exe_path.to_str().unwrap(),
+        exe_str,
         port,
-        home.to_str().unwrap(),
-        home.to_str().unwrap()
+        home_str,
+        home_str
     );
 
     fs::write(&plist_path, plist_content)?;
@@ -69,6 +72,9 @@ fn install_linux_systemd(exe_path: PathBuf, home: PathBuf, port: u16) -> Result<
 
     let service_path = systemd_dir.join("pharmakon.service");
 
+    let exe_str = exe_path.to_str().ok_or_else(|| anyhow!("Invalid executable path"))?;
+    let home_str = home.to_str().ok_or_else(|| anyhow!("Invalid home directory path"))?;
+
     let service_content = format!(
         r#"[Unit]
 Description=Pharmakon Personal AI Assistant Gateway
@@ -83,10 +89,10 @@ StandardError=append:{}/.pharmakon/logs/gateway.err
 
 [Install]
 WantedBy=default.target"#,
-        exe_path.to_str().unwrap(),
+        exe_str,
         port,
-        home.to_str().unwrap(),
-        home.to_str().unwrap()
+        home_str,
+        home_str
     );
 
     fs::write(&service_path, service_content)?;
@@ -110,8 +116,9 @@ pub fn stop_service() -> Result<()> {
                 .join("ai.pharmakon.gateway.plist");
 
             if plist_path.exists() {
+                let plist_str = plist_path.to_str().ok_or_else(|| anyhow!("Invalid plist path"))?;
                 let _ = Command::new("launchctl")
-                    .args(["unload", plist_path.to_str().unwrap()])
+                    .args(["unload", plist_str])
                     .status();
             }
 

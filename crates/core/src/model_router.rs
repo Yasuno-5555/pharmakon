@@ -40,7 +40,7 @@ impl ModelRouter {
     }
 
     pub fn recommend_max_tokens(&self, model_name: &str) -> u64 {
-        self.economy.lock().unwrap().recommend_max_tokens(model_name) as u64
+        self.economy.lock().unwrap_or_else(|e| e.into_inner()).recommend_max_tokens(model_name) as u64
     }
 
     pub fn select_model(
@@ -49,24 +49,24 @@ impl ModelRouter {
         default_model: Arc<dyn AgentModel>,
         complexity: f64,
     ) -> Arc<dyn AgentModel> {
-        if default_model.name() == "mock-model" || default_model.name() == "test" {
+        if default_model.is_mock() {
             return default_model;
         }
-        self.economy.lock().unwrap()
+        self.economy.lock().unwrap_or_else(|e| e.into_inner())
             .select_model(user_message, complexity)
             .unwrap_or(default_model)
     }
 
     pub fn record_model_result(&self, name: &str, latency_ms: u64, success: bool, is_rate_limit: bool) {
-        self.economy.lock().unwrap().record_model_result(name, latency_ms, success, is_rate_limit);
+        self.economy.lock().unwrap_or_else(|e| e.into_inner()).record_model_result(name, latency_ms, success, is_rate_limit);
     }
 
     pub fn observe_latency(&self, latency_ms: u64) {
-        self.economy.lock().unwrap().observe_latency(latency_ms);
+        self.economy.lock().unwrap_or_else(|e| e.into_inner()).observe_latency(latency_ms);
     }
 
     pub fn record_token_usage(&self, prompt: u64, completion: u64) {
-        self.economy.lock().unwrap().record_token_usage(prompt, completion);
+        self.economy.lock().unwrap_or_else(|e| e.into_inner()).record_token_usage(prompt, completion);
     }
 
     pub fn budget_used_pct(&self) -> f64 {
@@ -123,7 +123,7 @@ impl ModelRouter {
                             .map(|c| c.to_string().contains("[Model stopped: Max tokens reached]")).unwrap_or(false);
 
                     if is_max_tokens {
-                        let fallback_list = fallback_models.lock().unwrap();
+                        let fallback_list = fallback_models.lock().unwrap_or_else(|e| e.into_inner());
                         if current_fallback_index < fallback_list.len() {
                             let fallback_id = &fallback_list[current_fallback_index];
                             log::warn!("Output token limit (MAX_TOKENS) for {}. Escalating to fallback: {}", target_model.name(), fallback_id);
@@ -149,7 +149,7 @@ impl ModelRouter {
                         log::warn!("Empty response from {} (consecutive: {})", target_model.name(), consecutive_empty_responses);
 
                         if consecutive_empty_responses >= 2 {
-                            let fallback_list = fallback_models.lock().unwrap();
+                            let fallback_list = fallback_models.lock().unwrap_or_else(|e| e.into_inner());
                             if current_fallback_index < fallback_list.len() {
                                 let fallback_id = &fallback_list[current_fallback_index];
                                 log::warn!("Two empty responses from {}. Switching to fallback: {}", target_model.name(), fallback_id);
@@ -183,7 +183,7 @@ impl ModelRouter {
                         || e.to_string().to_lowercase().contains("too many requests")
                         || e.to_string().to_lowercase().contains("quota");
 
-                    let fallback_list = fallback_models.lock().unwrap();
+                    let fallback_list = fallback_models.lock().unwrap_or_else(|e| e.into_inner());
                     if is_rate_limit && current_fallback_index < fallback_list.len() {
                         let fallback_id = &fallback_list[current_fallback_index];
                         log::warn!("Rate limit for {}. Falling back to: {}", target_model.name(), fallback_id);
@@ -222,7 +222,7 @@ impl ModelRouter {
             self.record_token_usage(usage.prompt_tokens as u64, usage.completion_tokens as u64);
             self.total_tokens.fetch_add(usage.total_tokens as u64, Ordering::SeqCst);
             let quality_proxy = if response.content.is_some() { 0.8 } else { 0.3 };
-            let mut economy = self.economy.lock().unwrap();
+            let mut economy = self.economy.lock().unwrap_or_else(|e| e.into_inner());
             economy.record_observation(crate::orchestration::dsge_integration::CallObservation {
                 tokens_spent: usage.total_tokens as u64,
                 latency_ms: start_time.elapsed().as_millis() as u64,
@@ -230,7 +230,7 @@ impl ModelRouter {
                 model_id: target_model.name().to_string(),
                 quality_proxy,
             });
-            if economy.observations.len().is_multiple_of(8) {
+            if economy.observations.len() % 8 == 0 {
                 economy.update_production_from_observations();
             }
         }

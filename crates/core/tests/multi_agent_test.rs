@@ -102,6 +102,11 @@ impl AgentModel for MultiAgentMockModel {
     fn max_output_tokens(&self) -> usize {
         4096
     }
+
+    fn is_mock(&self) -> bool {
+        true
+    }
+
     async fn stream_complete(
         &self,
         _request: CompletionRequest,

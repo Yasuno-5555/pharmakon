@@ -46,6 +46,7 @@ Pharmakon is a **modular AI agent framework** that coordinates LLMs, tools, and 
 │  │              Tool Scheduler                             │  │
 │  │  ExplorationBudget │ ToolPolicyEngine │ AttentionScore │  │
 │  │  DirectoryIndexingDaemon │ CodeActGate                  │  │
+│  │  IntegratedGovernor (Safety > Quality > Resource)         │  │
 │  └────────────────────────────────────────────────────────┘  │
 └───────────────────────────┬─────────────────────────────────┘
                             │
@@ -141,10 +142,11 @@ User message
 | Policy | Applied to | Behavior |
 |---|---|---|
 | `FixedIterations(8)` | Simple tasks | Loop terminates after 8 iterations |
-| `ProgressBased` | Standard/Deep | Terminates after N consecutive stalled iterations |
+| `ProgressBased` | Standard/Deep | Terminates after N consecutive stalled iterations (plus cosine stagnation detection) |
 | Hard wall time | All | Depends on complexity (2min simple → 30min deep) |
 | Token budget | All | Default 250k tokens per session |
-| Entropy overflow | All | >0.95 entropy hard-terminates |
+| Multi-tier entropy | All | Tier 1 (>0.50): increase serendipity; Tier 2 (>0.70): strategy prompt; Tier 3 (>0.85): model switch; Tier 4 (>0.95): hard-terminate |
+| Cosine stagnation | All | Iteration embedding cosine >0.98 for 2 consecutive iterations → early intervention |
 
 ### Model fallback chain
 
@@ -162,6 +164,7 @@ User message
 - **Embeddings**: local via `fastembed` (CPU, ONNX runtime)
 - **Access-aware decay**: High-access nodes have decay suppression
 - **Smart search**: Hybrid BM25 + vector similarity
+- **Topic clustering**: Cross-session knowledge sharing via centroid-based clusters (from objeta L3 cache pattern)
 
 ### GraphStore (relational)
 - **Backend**: SQLite with WAL mode
@@ -224,7 +227,7 @@ Each tool has an execution profile with:
 ## Multi-provider model routing
 
 The `ModelRouter` handles:
-1. **Model selection**: Economy-aware scoring (ROI-based) or manual override
+1. **Model selection**: Economy-aware scoring (ROI-based) or manual override. Mock detection via `AgentModel::is_mock()` (type-based, not string comparison).
 2. **Token budget tracking**: DSGE-inspired economics with shadow prices
 3. **Fallback chain**: On rate limits, MAX_TOKENS, or empty responses
 4. **Performance tracking**: Per-model success rates, latency, and cost
@@ -260,14 +263,15 @@ Supported providers:
 | `crates/core/src/event_log.rs` | ~400 | Append-only typed event log |
 | `crates/core/src/snapshot_store.rs` | ~500 | Content-addressed file snapshots |
 | `crates/memory/src/weaver.rs` | ~400 | KnowledgeNexus (LanceDB vector store) |
-| `crates/core/src/orchestration/tool_scheduler.rs` | ~530 | Tool policy, exploration budget, CodeAct gate |
+| `crates/core/src/orchestration/tool_scheduler.rs` | ~550 | Tool policy, exploration budget, CodeAct gate, DynamicLambda |
+| `crates/core/src/orchestration/governor.rs` | ~450 | ToolGovernor + IntegratedGovernor (3-loop control) |
 | `crates/core/src/orchestration/health_monitor.rs` | ~400 | Structured probes, state machine |
 
 ---
 
 ## Test status
 
-- 64 unit tests in `pharmakon-core`
+- 81 unit tests in `pharmakon-core`
 - All integration tests passing
 - 2 tests ignored (require Ollama)
-- `cargo clippy` clean for `pharmakon-core`
+- `cargo check --workspace` passes with 0 errors

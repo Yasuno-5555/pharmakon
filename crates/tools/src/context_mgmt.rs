@@ -101,7 +101,8 @@ impl Tool for UpdateContextTool {
                     "add_core_directive" => if !ctx.core_directives.contains(&value.to_string()) { ctx.core_directives.push(value.to_string()); }
                     _ => return Err(AgentError(format!("Invalid action for identity context: {}", action))),
                 }
-                fs::write(&path, serde_yaml::to_string(&ctx).unwrap()).map_err(|e| AgentError(e.to_string()))?;
+                let yaml_str = serde_yaml::to_string(&ctx).map_err(|e| AgentError(format!("YAML serialization error: {}", e)))?;
+                fs::write(&path, yaml_str).map_err(|e| AgentError(e.to_string()))?;
             }
             "user" => {
                 let path = base_dir.join("user.yml");
@@ -123,7 +124,8 @@ impl Tool for UpdateContextTool {
                     }
                     _ => return Err(AgentError(format!("Invalid action for user context: {}", action))),
                 }
-                fs::write(&path, serde_yaml::to_string(&ctx).unwrap()).map_err(|e| AgentError(e.to_string()))?;
+                let yaml_str = serde_yaml::to_string(&ctx).map_err(|e| AgentError(format!("YAML serialization error: {}", e)))?;
+                fs::write(&path, yaml_str).map_err(|e| AgentError(e.to_string()))?;
             }
             "tools" => {
                 let path = base_dir.join("tools.yml");
@@ -146,7 +148,8 @@ impl Tool for UpdateContextTool {
                     }
                     _ => return Err(AgentError(format!("Invalid action for tools context: {}", action))),
                 }
-                fs::write(&path, serde_yaml::to_string(&ctx).unwrap()).map_err(|e| AgentError(e.to_string()))?;
+                let yaml_str = serde_yaml::to_string(&ctx).map_err(|e| AgentError(format!("YAML serialization error: {}", e)))?;
+                fs::write(&path, yaml_str).map_err(|e| AgentError(e.to_string()))?;
             }
             _ => return Err(AgentError(format!("Invalid target: {}", target))),
         }

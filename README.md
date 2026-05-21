@@ -15,12 +15,15 @@ Pharmakon is a **local-first autonomous AI agent framework** written in Rust. It
 - **Multi-model agent loop**: Chat with an AI agent that can execute tools, search memory, and maintain conversation state across sessions
 - **7+ LLM providers**: Gemini, Claude, GPT, DeepSeek, Groq, Ollama, OpenRouter — with automatic fallback on rate limits
 - **65+ built-in tools**: File I/O, code search, shell execution, web search, browser automation, git, AST manipulation
-- **Memory system**: Semantic search (LanceDB vectors) + relational graph (SQLite) + causal DAG
+- **Memory system**: Semantic search (LanceDB vectors) + relational graph (SQLite) + causal DAG + topic clustering
 - **CodeAct scripting**: Multi-step operations in a single LLM turn via Rhai or Python
 - **Multi-channel gateway**: REST API, WebSocket, Telegram, Discord, Slack
 - **Autonomous background tasks**: Cron, heartbeat with structured health probes
 - **DSGE token economics**: Budget allocation with shadow pricing and production functions
 - **Snapshot-based rollback**: All file mutations reversible via content-addressed snapshots
+- **Multi-tier entropy response**: 4-tier escalating loop protection with hysteresis
+- **Integrated Governor**: 3-loop competing control (Safety > Quality > Resource) with DynamicLambda budget scaling
+- **Cosine stagnation detection**: Iteration embedding similarity catches subtle agent loops
 
 ---
 
@@ -153,8 +156,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full component diagram and decisi
 **Current**: All core functionality implemented and integration-tested. Ready for personal/team use.
 
 ```bash
-cargo test --workspace   # 64+ passing
-cargo clippy             # pharmakon-core: zero warnings
+cargo test --workspace   # 81+ passing
+cargo check --workspace  # 0 errors
 cargo build --release    # single binary, ~20MB
 ```
 
