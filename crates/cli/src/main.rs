@@ -275,7 +275,7 @@ async fn build_agent(
 
     // Inject API keys
     let secret_store = SecretStore::new();
-    for p in &["GEMINI", "OPENAI", "ANTHROPIC", "GROQ", "PERPLEXITY"] {
+    for p in &["GEMINI", "OPENAI", "ANTHROPIC", "GROQ", "PERPLEXITY", "DEEPSEEK"] {
         let key_name = format!("{}_API_KEY", p);
         if let Ok(key) = secret_store.get_secret(&key_name) {
             unsafe { std::env::set_var(&key_name, key); }
@@ -583,7 +583,7 @@ async fn main() -> Result<()> {
             // API Keys
             println!("\n🔑 API Keys:");
             let secret_store = SecretStore::new();
-            for p in &["GEMINI", "OPENAI", "ANTHROPIC", "GROQ", "PERPLEXITY"] {
+            for p in &["GEMINI", "OPENAI", "ANTHROPIC", "GROQ", "PERPLEXITY", "DEEPSEEK"] {
                 let key_name = format!("{}_API_KEY", p);
                 if let Ok(key) = secret_store.get_secret(&key_name) {
                     let masked = if key.len() > 8 {
@@ -831,6 +831,37 @@ async fn main() -> Result<()> {
                 ConfigCommands::Show => {
                     println!("📋 Pharmakon Configuration File Content:");
                     println!("{}", serde_json::to_string_pretty(&config)?);
+
+                    println!("\n⚙️  Runtime Environment Variables:");
+                    let env_vars = [
+                        ("PHARMAKON_ENTROPY_TIER1", "0.50", "Elevated entropy threshold"),
+                        ("PHARMAKON_ENTROPY_TIER2", "0.70", "High entropy threshold"),
+                        ("PHARMAKON_ENTROPY_TIER3", "0.85", "Critical entropy threshold"),
+                        ("PHARMAKON_MAX_ENTROPY", "0.95", "Overflow (hard-terminate) threshold"),
+                        ("PHARMAKON_REFLECTION_INTERVAL", "5", "Background reflection every N turns"),
+                        ("PHARMAKON_PRUNE_THRESHOLD", "20", "Compaction trigger (message count)"),
+                        ("PHARMAKON_RELEVANCE_THRESHOLD", "0.20", "Memory search relevance filter"),
+                        ("PHARMAKON_MAX_CACHED_SESSIONS", "100", "LRU eviction cap for sessions"),
+                        ("PHARMAKON_TOOL_TIMEOUT_SECS", "30", "Per-tool execution timeout"),
+                        ("PHARMAKON_GATEWAY_TLS_CERT", "", "TLS certificate path"),
+                        ("PHARMAKON_GATEWAY_TLS_KEY", "", "TLS key path"),
+                        ("PHARMAKON_CONTROL_API_KEY", "", "Gateway API auth key"),
+                    ];
+                    for (var, default, desc) in &env_vars {
+                        let val = std::env::var(var).unwrap_or_else(|_| "(default)".to_string());
+                        let display_val = if val == "(default)" { format!("({})", default) } else { val };
+                        println!("  {:<38} = {:<20} # {}", var, display_val, desc);
+                    }
+
+                    println!("\n🔑 Available Models (from API keys):");
+                    let models = ModelRegistry::list_available_models();
+                    if models.is_empty() {
+                        println!("  (no API keys configured — only mock models available)");
+                    } else {
+                        for m in &models {
+                            println!("  {}", m);
+                        }
+                    }
                 }
                 ConfigCommands::Set { key, value, save } => {
                     let mut mut_config = config.clone();

@@ -632,13 +632,11 @@ impl KnowledgeNexus {
                     if let Some(list_arr) = arr.as_any().downcast_ref::<FixedSizeListArray>() {
                         for row in 0..list_arr.len() {
                             let id = id_col.value(row).to_string();
-                            if let Ok(Some(node)) = self.graph.get_node(&id).await {
-                                if node.embedding_status == "COMPLETED" {
-                                    if let Some(float_arr) = list_arr.value(row).as_any().downcast_ref::<Float32Array>() {
-                                        let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
-                                        node_vectors.push((id, vec));
-                                    }
-                                }
+                            if let Ok(Some(node)) = self.graph.get_node(&id).await
+                                && node.embedding_status == "COMPLETED"
+                                && let Some(float_arr) = list_arr.value(row).as_any().downcast_ref::<Float32Array>() {
+                                    let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
+                                    node_vectors.push((id, vec));
                             }
                         }
                     }

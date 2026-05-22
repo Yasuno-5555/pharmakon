@@ -247,54 +247,110 @@ impl Channel for TelegramChannel {
                 anyhow::Result::<()>::Ok(())
             }));
 
-        let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+        let mut dispatcher = Dispatcher::builder(bot.clone(), handler.clone())
             .dependencies(dptree::deps![
                 agent.clone(),
                 self.last_chat_id.clone(),
                 self.chat_sessions.clone()
             ])
-            .enable_ctrlc_handler()
             .build();
 
         // Spawn event listener
         let bot_for_events = bot.clone();
         let agent_for_events = agent.clone();
         let last_chat_id = self.last_chat_id.clone();
+        let shutdown_token = agent_for_events.shutdown_token.clone();
         tokio::spawn(async move {
             let event_tx = agent_for_events.event_tx.clone();
             let mut event_rx = event_tx.subscribe();
             log::info!("Telegram event listener started.");
 
-            while let Ok(event) = event_rx.recv().await {
-                match &event {
-                    Event::ApprovalRequest { id, tool, args } => {
-                        log::info!("Telegram received ApprovalRequest: {}", id);
-                        let chat_id_opt = {
-                            let last_id = last_chat_id.lock().await;
-                            *last_id
-                        };
+            loop {
+                tokio::select! {
+                    result = event_rx.recv() => {
+                        match result {
+                            Ok(event) => {
+                                match &event {
+                                    Event::ApprovalRequest { id, tool, args } => {
+                                        log::info!("Telegram received ApprovalRequest: {}", id);
+                                        let chat_id_opt = {
+                                            let last_id = last_chat_id.lock().await;
+                                            *last_id
+                                        };
 
-                        if let Some(chat_id) = chat_id_opt {
-                            let _ = bot_for_events.send_message(chat_id, format!("🛡️ **Tool Approval Required**\n\n**Tool:** `{}`\n**Args:** `{}`\n\nTo approve, send:\n`/approve {}`\n\nTo deny, send:\n`/deny {}`", tool, args, id, id)).await;
+                                        if let Some(chat_id) = chat_id_opt {
+                                            let _ = bot_for_events.send_message(chat_id, format!("🛡️ **Tool Approval Required**\n\n**Tool:** `{}`\n**Args:** `{}`\n\nTo approve, send:\n`/approve {}`\n\nTo deny, send:\n`/deny {}`", tool, args, id, id)).await;
+                                        }
+                                    }
+                                    Event::AgentHangDetected { reason } => {
+                                        log::warn!("Telegram received HangDetected: {}", reason);
+                                        let chat_id_opt = {
+                                            let last_id = last_chat_id.lock().await;
+                                            *last_id
+                                        };
+
+                                        if let Some(chat_id) = chat_id_opt {
+                                            let _ = bot_for_events.send_message(chat_id, format!("🚨 **Watchdog Alert: Hang Detected**\n\n**Reason:** {}\n\nエージェントの暴走（無限ループ等）を検知したため、安全のためにプロセスを強制停止しました。コンテキストをクリアするために `/new` コマンドの実行をお勧めします。", reason)).await;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                log::info!("Telegram event listener: channel closed.");
+                                break;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                log::warn!("Telegram event listener lagged by {} events", n);
+                            }
                         }
                     }
-                    Event::AgentHangDetected { reason } => {
-                        log::warn!("Telegram received HangDetected: {}", reason);
-                        let chat_id_opt = {
-                            let last_id = last_chat_id.lock().await;
-                            *last_id
-                        };
-
-                        if let Some(chat_id) = chat_id_opt {
-                            let _ = bot_for_events.send_message(chat_id, format!("🚨 **Watchdog Alert: Hang Detected**\n\n**Reason:** {}\n\nエージェントの暴走（無限ループ等）を検知したため、安全のためにプロセスを強制停止しました。コンテキストをクリアするために `/new` コマンドの実行をお勧めします。", reason)).await;
+                    _ = async {
+                        while !shutdown_token.load(std::sync::atomic::Ordering::SeqCst) {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
+                    } => {
+                        log::info!("Telegram event listener: shutdown requested.");
+                        break;
                     }
-                    _ => {}
                 }
             }
         });
 
-        dispatcher.dispatch().await;
+        // Dispatch with retry. teloxide's dispatch() returns () and handles
+        // errors internally. If the process gets TerminatedByOtherGetUpdates,
+        // the dispatcher exits — we detect this by wrapping dispatch() in a
+        // select with a shutdown check.
+        //
+        // TerminatedByOtherGetUpdates means another bot instance was started
+        // with the same token. We wait and retry.
+        const DISPATCH_RETRY_DELAY: tokio::time::Duration =
+            tokio::time::Duration::from_secs(5);
+
+        loop {
+            tokio::select! {
+                _ = dispatcher.dispatch() => {
+                    log::warn!("Telegram: dispatcher returned. This usually means \
+                        TerminatedByOtherGetUpdates. Waiting 5s before retry...");
+                    tokio::time::sleep(DISPATCH_RETRY_DELAY).await;
+                    dispatcher = Dispatcher::builder(bot.clone(), handler.clone())
+                        .dependencies(dptree::deps![
+                            agent.clone(),
+                            self.last_chat_id.clone(),
+                            self.chat_sessions.clone()
+                        ])
+                        .build();
+                }
+                _ = async {
+                    while !agent.shutdown_token.load(std::sync::atomic::Ordering::SeqCst) {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                } => {
+                    log::info!("Telegram: shutdown requested, stopping dispatcher.");
+                    break;
+                }
+            }
+        }
 
         Ok(())
     }
