@@ -36,17 +36,41 @@ impl TaskTaxonomy {
         let lower = description.to_lowercase();
         if lower.contains("refactor") || lower.contains("clean") || lower.contains("restructure") {
             TaskTaxonomy::Refactor
-        } else if lower.contains("fix") || lower.contains("bug") || lower.contains("error") || lower.contains("issue") || lower.contains("compile") {
+        } else if lower.contains("fix")
+            || lower.contains("bug")
+            || lower.contains("error")
+            || lower.contains("issue")
+            || lower.contains("compile")
+        {
             TaskTaxonomy::Bugfix
-        } else if lower.contains("shell") || lower.contains("run") || lower.contains("cmd") || lower.contains("command") || lower.contains("execute") {
+        } else if lower.contains("shell")
+            || lower.contains("run")
+            || lower.contains("cmd")
+            || lower.contains("command")
+            || lower.contains("execute")
+        {
             TaskTaxonomy::ShellTask
-        } else if lower.contains("plan") || lower.contains("roadmap") || lower.contains("schedule") {
+        } else if lower.contains("plan") || lower.contains("roadmap") || lower.contains("schedule")
+        {
             TaskTaxonomy::Planning
-        } else if lower.contains("architecture") || lower.contains("design") || lower.contains("structure") || lower.contains("system") {
+        } else if lower.contains("architecture")
+            || lower.contains("design")
+            || lower.contains("structure")
+            || lower.contains("system")
+        {
             TaskTaxonomy::Architecture
-        } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") || lower.contains("read") || lower.contains("retrieval") {
+        } else if lower.contains("grep")
+            || lower.contains("search")
+            || lower.contains("find")
+            || lower.contains("read")
+            || lower.contains("retrieval")
+        {
             TaskTaxonomy::Retrieval
-        } else if lower.contains("summarize") || lower.contains("summary") || lower.contains("explain") || lower.contains("describe") {
+        } else if lower.contains("summarize")
+            || lower.contains("summary")
+            || lower.contains("explain")
+            || lower.contains("describe")
+        {
             TaskTaxonomy::Summarization
         } else {
             TaskTaxonomy::Generic
@@ -78,7 +102,12 @@ impl SwarmEconomy {
     }
 
     /// Register a sub-task as an economic agent.
-    pub fn register_task(&mut self, task_id: &str, description: &str, specialization: AgentSpecialization) {
+    pub fn register_task(
+        &mut self,
+        task_id: &str,
+        description: &str,
+        specialization: AgentSpecialization,
+    ) {
         let mut profile = AgentProfile::new(task_id, specialization);
         // Adjust token share based on task description complexity
         let complexity_weight = if description.len() > 200 { 1.5 } else { 1.0 };
@@ -119,7 +148,11 @@ impl SwarmEconomy {
         let est_output = budget.min(2000) / 2;
 
         let taxonomy = TaskTaxonomy::detect(task);
-        log::info!("SwarmEconomy: Detected TaskTaxonomy={:?} for task '{}'", taxonomy, task);
+        log::info!(
+            "SwarmEconomy: Detected TaskTaxonomy={:?} for task '{}'",
+            taxonomy,
+            task
+        );
 
         // Task Taxonomy-aware ROI optimization:
         // Adjust the market quotes according to taxonomy-based model strengths
@@ -158,12 +191,18 @@ impl SwarmEconomy {
             // Fast execution → prefer low-latency models
             match specialization {
                 AgentSpecialization::Deep | AgentSpecialization::Planner => {
-                    if q.avg_success_rate > 0.85 { q.model_id.clone() }
-                    else { "gemini/gemini-2.5-flash".into() }
+                    if q.avg_success_rate > 0.85 {
+                        q.model_id.clone()
+                    } else {
+                        "gemini/gemini-2.5-flash".into()
+                    }
                 }
                 AgentSpecialization::Fast | AgentSpecialization::Verifier => {
-                    if q.avg_latency_ms < 500 { q.model_id.clone() }
-                    else { "deepseek/deepseek-v4-flash".into() }
+                    if q.avg_latency_ms < 500 {
+                        q.model_id.clone()
+                    } else {
+                        "deepseek/deepseek-v4-flash".into()
+                    }
                 }
                 _ => q.model_id.clone(),
             }
@@ -171,10 +210,7 @@ impl SwarmEconomy {
     }
 
     /// After all sub-agents complete, merge results back into parent economy.
-    pub fn merge_results(
-        &self,
-        results: &[(String, Result<String, anyhow::Error>)],
-    ) -> String {
+    pub fn merge_results(&self, results: &[(String, Result<String, anyhow::Error>)]) -> String {
         let mut summary = String::new();
         let mut total_spent = 0u64;
         let mut success_count = 0usize;
@@ -195,7 +231,11 @@ impl SwarmEconomy {
                         "## {}\nBudget: {} tokens | ROI: {:.2}\n{}\n\n",
                         task_id,
                         budget,
-                        if budget > 0 { output.len() as f64 / budget as f64 } else { 0.0 },
+                        if budget > 0 {
+                            output.len() as f64 / budget as f64
+                        } else {
+                            0.0
+                        },
                         truncated,
                     ));
                 }
@@ -213,7 +253,11 @@ impl SwarmEconomy {
             success_count,
             results.len(),
             total_spent,
-            if !results.is_empty() { total_spent as f64 / results.len() as f64 } else { 0.0 },
+            if !results.is_empty() {
+                total_spent as f64 / results.len() as f64
+            } else {
+                0.0
+            },
         ));
 
         summary
@@ -229,9 +273,21 @@ mod tests {
         let economy = AgentEconomy::new(0.5);
         let mut swarm = SwarmEconomy::from_parent(&economy);
 
-        swarm.register_task("task-1", "grep and analyze all Rust files", AgentSpecialization::Researcher);
-        swarm.register_task("task-2", "apply patches to fix compilation", AgentSpecialization::Deep);
-        swarm.register_task("task-3", "quick syntax verification", AgentSpecialization::Fast);
+        swarm.register_task(
+            "task-1",
+            "grep and analyze all Rust files",
+            AgentSpecialization::Researcher,
+        );
+        swarm.register_task(
+            "task-2",
+            "apply patches to fix compilation",
+            AgentSpecialization::Deep,
+        );
+        swarm.register_task(
+            "task-3",
+            "quick syntax verification",
+            AgentSpecialization::Fast,
+        );
 
         let budgets = swarm.allocate_budgets();
         assert_eq!(budgets.len(), 3);
@@ -250,7 +306,8 @@ mod tests {
         let economy = AgentEconomy::new(0.5);
         let swarm = SwarmEconomy::from_parent(&economy);
 
-        let deep_model = swarm.select_model_for("complex analysis", &AgentSpecialization::Deep, 5000);
+        let deep_model =
+            swarm.select_model_for("complex analysis", &AgentSpecialization::Deep, 5000);
         assert!(deep_model.is_some());
 
         let fast_model = swarm.select_model_for("quick check", &AgentSpecialization::Fast, 500);
@@ -260,20 +317,43 @@ mod tests {
     #[test]
     fn test_task_taxonomy_detection_and_routing() {
         // Test detect categories
-        assert_eq!(TaskTaxonomy::detect("Refactor the world module to clean code"), TaskTaxonomy::Refactor);
-        assert_eq!(TaskTaxonomy::detect("Fix compiler error in aot.rs"), TaskTaxonomy::Bugfix);
-        assert_eq!(TaskTaxonomy::detect("Summarize the results in a report"), TaskTaxonomy::Summarization);
-        assert_eq!(TaskTaxonomy::detect("Search the workspace for pattern miner"), TaskTaxonomy::Retrieval);
-        assert_eq!(TaskTaxonomy::detect("Run a cargo check command"), TaskTaxonomy::ShellTask);
+        assert_eq!(
+            TaskTaxonomy::detect("Refactor the world module to clean code"),
+            TaskTaxonomy::Refactor
+        );
+        assert_eq!(
+            TaskTaxonomy::detect("Fix compiler error in aot.rs"),
+            TaskTaxonomy::Bugfix
+        );
+        assert_eq!(
+            TaskTaxonomy::detect("Summarize the results in a report"),
+            TaskTaxonomy::Summarization
+        );
+        assert_eq!(
+            TaskTaxonomy::detect("Search the workspace for pattern miner"),
+            TaskTaxonomy::Retrieval
+        );
+        assert_eq!(
+            TaskTaxonomy::detect("Run a cargo check command"),
+            TaskTaxonomy::ShellTask
+        );
 
         let economy = AgentEconomy::new(0.5);
         let swarm = SwarmEconomy::from_parent(&economy);
 
         // Under summarization taxonomy, deepseek/llama models should get positive boost, while under bugfix, gemini/claude gets boost.
-        let sum_model = swarm.select_model_for("Summarize the entire project changelog", &AgentSpecialization::Researcher, 3000);
+        let sum_model = swarm.select_model_for(
+            "Summarize the entire project changelog",
+            &AgentSpecialization::Researcher,
+            3000,
+        );
         assert!(sum_model.is_some());
 
-        let bug_model = swarm.select_model_for("Fix segment fault in memory controller", &AgentSpecialization::Deep, 8000);
+        let bug_model = swarm.select_model_for(
+            "Fix segment fault in memory controller",
+            &AgentSpecialization::Deep,
+            8000,
+        );
         assert!(bug_model.is_some());
     }
 }

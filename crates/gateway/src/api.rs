@@ -1,11 +1,9 @@
 use axum::extract::State;
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use pharmakon_core::agent::Agent;
 use pharmakon_common::AgentErrorCode;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Instant;
 use serde_json::json;
+use std::time::Instant;
 
 // ── Shared response types ──
 
@@ -23,10 +21,22 @@ pub struct ApiResponse<T: Serialize> {
 
 impl<T: Serialize> ApiResponse<T> {
     fn ok(data: T, session_id: &str) -> Self {
-        Self { success: true, data: Some(data), error: None, error_code: None, session_id: session_id.to_string() }
+        Self {
+            success: true,
+            data: Some(data),
+            error: None,
+            error_code: None,
+            session_id: session_id.to_string(),
+        }
     }
     fn err(msg: &str, code: &str, session_id: &str) -> Self {
-        Self { success: false, data: None, error: Some(msg.to_string()), error_code: Some(code.to_string()), session_id: session_id.to_string() }
+        Self {
+            success: false,
+            data: None,
+            error: Some(msg.to_string()),
+            error_code: Some(code.to_string()),
+            session_id: session_id.to_string(),
+        }
     }
 }
 
@@ -59,27 +69,42 @@ pub struct ChatData {
 }
 
 pub async fn agent_chat(
-    State((agent, _, _, _)): State<(
-        Arc<Agent>,
-        Arc<crate::canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
+    State((agent, _, _, _)): State<crate::GatewayState>,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
     let session_id = agent.session_id.lock().await.clone();
-    log::info!("API: Agent chat request (session={}): {}", session_id, req.message);
+    log::info!(
+        "API: Agent chat request (session={}): {}",
+        session_id,
+        req.message
+    );
 
     match agent.chat(&req.message).await {
         Ok(response) => {
-            let data = ChatData { response, finish_reason: None };
-            (StatusCode::OK, Json(json!(ApiResponse::ok(data, &session_id)))).into_response()
+            let data = ChatData {
+                response,
+                finish_reason: None,
+            };
+            (
+                StatusCode::OK,
+                Json(json!(ApiResponse::ok(data, &session_id))),
+            )
+                .into_response()
         }
         Err(e) => {
             let code = error_code_from_agent(&e);
             let msg = e.to_string();
-            log::error!("API: Chat failed (session={}): {} [{}]", session_id, msg, code);
-            (StatusCode::OK, Json(json!(ApiResponse::<()>::err(&msg, &code, &session_id)))).into_response()
+            log::error!(
+                "API: Chat failed (session={}): {} [{}]",
+                session_id,
+                msg,
+                code
+            );
+            (
+                StatusCode::OK,
+                Json(json!(ApiResponse::<()>::err(&msg, &code, &session_id))),
+            )
+                .into_response()
         }
     }
 }
@@ -99,12 +124,7 @@ pub struct ExecuteToolData {
 }
 
 pub async fn execute_tool(
-    State((agent, _, _, _)): State<(
-        Arc<Agent>,
-        Arc<crate::canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
+    State((agent, _, _, _)): State<crate::GatewayState>,
     Json(req): Json<ExecuteToolRequest>,
 ) -> impl IntoResponse {
     let session_id = agent.session_id.lock().await.clone();
@@ -113,22 +133,39 @@ pub async fn execute_tool(
     let start = Instant::now();
     let mut reg = agent.registry.lock().await;
     match reg.hydrate(&req.name) {
-        Some(tool) => {
-            match tool.call(req.args).await {
-                Ok(result) => {
-                    let ms = start.elapsed().as_millis() as u64;
-                    let data = ExecuteToolData { result, execution_time_ms: ms };
-                    (StatusCode::OK, Json(json!(ApiResponse::ok(data, &session_id)))).into_response()
-                }
-                Err(e) => {
-                    let code = error_code_from_agent(&anyhow::anyhow!("{}", e.0));
-                    (StatusCode::OK, Json(json!(ApiResponse::<()>::err(&e.0, &code, &session_id)))).into_response()
-                }
+        Some(tool) => match tool.call(req.args).await {
+            Ok(result) => {
+                let ms = start.elapsed().as_millis() as u64;
+                let data = ExecuteToolData {
+                    result,
+                    execution_time_ms: ms,
+                };
+                (
+                    StatusCode::OK,
+                    Json(json!(ApiResponse::ok(data, &session_id))),
+                )
+                    .into_response()
             }
-        }
+            Err(e) => {
+                let code = error_code_from_agent(&anyhow::anyhow!("{}", e.0));
+                (
+                    StatusCode::OK,
+                    Json(json!(ApiResponse::<()>::err(&e.0, &code, &session_id))),
+                )
+                    .into_response()
+            }
+        },
         None => {
             let msg = format!("Tool '{}' not found", req.name);
-            (StatusCode::NOT_FOUND, Json(json!(ApiResponse::<()>::err(&msg, "tool_not_found", &session_id)))).into_response()
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!(ApiResponse::<()>::err(
+                    &msg,
+                    "tool_not_found",
+                    &session_id
+                ))),
+            )
+                .into_response()
         }
     }
 }
@@ -145,20 +182,15 @@ pub struct StateData {
     pub tools_count: usize,
 }
 
-pub async fn get_state(
-    State((agent, _, _, _)): State<(
-        Arc<Agent>,
-        Arc<crate::canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
-) -> impl IntoResponse {
+pub async fn get_state(State((agent, _, _, _)): State<crate::GatewayState>) -> impl IntoResponse {
     let session_id = agent.session_id.lock().await.clone();
     let trajectory = agent.trajectory.lock().await;
     let state_arc = agent.get_current_session_state().await;
     let state = state_arc.lock().await;
     let tools_count = agent.registry.lock().await.all_metadata().len();
-    let total_tokens = agent.total_tokens.load(std::sync::atomic::Ordering::Relaxed);
+    let total_tokens = agent
+        .total_tokens
+        .load(std::sync::atomic::Ordering::Relaxed);
 
     let data = StateData {
         session_id: session_id.clone(),
@@ -173,14 +205,7 @@ pub async fn get_state(
 
 // ── Tools list endpoint ──
 
-pub async fn get_tools(
-    State((agent, _, _, _)): State<(
-        Arc<Agent>,
-        Arc<crate::canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
-) -> impl IntoResponse {
+pub async fn get_tools(State((agent, _, _, _)): State<crate::GatewayState>) -> impl IntoResponse {
     let session_id = agent.session_id.lock().await.clone();
     let reg = agent.registry.lock().await;
     let tools = reg.all_metadata();

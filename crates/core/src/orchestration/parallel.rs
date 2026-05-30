@@ -13,6 +13,7 @@
 //!   grep_src    ──┼── analyze ──┐
 //!   list_files  ──┘               ├── report
 //!   cargo_check ─────────────────┘
+#![allow(clippy::type_complexity)]
 
 use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
@@ -55,10 +56,7 @@ pub struct ParallelExecutor {
 trait ExecutableTask: Send {
     fn name(&self) -> &str;
     fn dependencies(&self) -> &[String];
-    async fn execute(
-        self: Box<Self>,
-        deps: HashMap<String, serde_json::Value>,
-    ) -> TaskOutput;
+    async fn execute(self: Box<Self>, deps: HashMap<String, serde_json::Value>) -> TaskOutput;
 }
 
 struct ErasedTask<F, T>
@@ -78,13 +76,14 @@ where
     F: Future<Output = Result<T>> + Send + 'static,
     T: serde::Serialize + Send + 'static,
 {
-    fn name(&self) -> &str { &self.name }
-    fn dependencies(&self) -> &[String] { &self.dependencies }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn dependencies(&self) -> &[String] {
+        &self.dependencies
+    }
 
-    async fn execute(
-        mut self: Box<Self>,
-        deps: HashMap<String, serde_json::Value>,
-    ) -> TaskOutput {
+    async fn execute(mut self: Box<Self>, deps: HashMap<String, serde_json::Value>) -> TaskOutput {
         let start = std::time::Instant::now();
         let work = self.work.take().unwrap();
         let future = work(deps);
@@ -141,18 +140,17 @@ impl ParallelExecutor {
     }
 
     /// Add a task with no dependencies.
-    pub fn add_independent<F, T>(
-        &mut self,
-        name: &str,
-        work: impl FnOnce() -> F + Send + 'static,
-    ) where
+    pub fn add_independent<F, T>(&mut self, name: &str, work: impl FnOnce() -> F + Send + 'static)
+    where
         F: Future<Output = Result<T>> + Send + 'static,
         T: serde::Serialize + Send + 'static,
     {
         self.tasks.push(Box::new(ErasedTask {
             name: name.to_string(),
             dependencies: vec![],
-            work: Some(Box::new(move |_deps: HashMap<String, serde_json::Value>| work())),
+            work: Some(Box::new(
+                move |_deps: HashMap<String, serde_json::Value>| work(),
+            )),
             _phantom: std::marker::PhantomData,
         }));
     }
@@ -166,7 +164,9 @@ impl ParallelExecutor {
         }
 
         // Build dependency graph
-        let name_to_idx: HashMap<String, usize> = self.tasks.iter()
+        let name_to_idx: HashMap<String, usize> = self
+            .tasks
+            .iter()
             .enumerate()
             .map(|(i, t)| (t.name().to_string(), i))
             .collect();
@@ -185,7 +185,8 @@ impl ParallelExecutor {
 
         // Topological sort into execution layers
         let mut layers: Vec<Vec<usize>> = Vec::new();
-        let mut queue: VecDeque<usize> = in_degree.iter()
+        let mut queue: VecDeque<usize> = in_degree
+            .iter()
             .enumerate()
             .filter(|(_, d)| **d == 0)
             .map(|(i, _)| i)
@@ -212,13 +213,15 @@ impl ParallelExecutor {
         }
 
         // Execute in dependency order, parallel within layers
-        let completed: Arc<Mutex<HashMap<String, serde_json::Value>>> = Arc::new(Mutex::new(HashMap::new()));
+        let completed: Arc<Mutex<HashMap<String, serde_json::Value>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let mut outputs = Vec::new();
 
         for layer in layers {
             let mut handles = Vec::new();
             for idx in &layer {
-                let task_name = name_to_idx.iter()
+                let task_name = name_to_idx
+                    .iter()
                     .find(|(_, v)| **v == *idx)
                     .map(|(k, _)| k.clone())
                     .unwrap();
@@ -236,20 +239,24 @@ impl ParallelExecutor {
 
             for handle in handles {
                 let (name, output) = handle.await.unwrap_or_else(|e| {
-                    ("unknown".to_string(), TaskOutput {
-                        name: "unknown".to_string(),
-                        success: false,
-                        result: None,
-                        error: Some(format!("Task panicked: {}", e)),
-                        duration_ms: 0,
-                    })
+                    (
+                        "unknown".to_string(),
+                        TaskOutput {
+                            name: "unknown".to_string(),
+                            success: false,
+                            result: None,
+                            error: Some(format!("Task panicked: {}", e)),
+                            duration_ms: 0,
+                        },
+                    )
                 });
 
                 if output.success
                     && let Some(ref result) = output.result
-                        && let Ok(value) = serde_json::from_str::<serde_json::Value>(result) {
-                            completed.lock().await.insert(name.clone(), value);
-                        }
+                    && let Ok(value) = serde_json::from_str::<serde_json::Value>(result)
+                {
+                    completed.lock().await.insert(name.clone(), value);
+                }
                 outputs.push(output);
             }
         }
@@ -260,35 +267,36 @@ impl ParallelExecutor {
 
 /// Simplified parallel execution: fire multiple independent async operations
 /// and collect all results.
-pub async fn parallel_execute<F, T>(
-    tasks: Vec<(&str, F)>,
-) -> Vec<TaskOutput>
+pub async fn parallel_execute<F, T>(tasks: Vec<(&str, F)>) -> Vec<TaskOutput>
 where
     F: Future<Output = Result<T>> + Send + 'static,
     T: serde::Serialize + Send + 'static,
 {
-    let handles: Vec<_> = tasks.into_iter().map(|(name, future)| {
-        let name = name.to_string();
-        tokio::spawn(async move {
-            let start = std::time::Instant::now();
-            match future.await {
-                Ok(value) => TaskOutput {
-                    name: name.clone(),
-                    success: true,
-                    result: Some(serde_json::to_string(&value).unwrap_or_default()),
-                    error: None,
-                    duration_ms: start.elapsed().as_millis() as u64,
-                },
-                Err(e) => TaskOutput {
-                    name,
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                    duration_ms: start.elapsed().as_millis() as u64,
-                },
-            }
+    let handles: Vec<_> = tasks
+        .into_iter()
+        .map(|(name, future)| {
+            let name = name.to_string();
+            tokio::spawn(async move {
+                let start = std::time::Instant::now();
+                match future.await {
+                    Ok(value) => TaskOutput {
+                        name: name.clone(),
+                        success: true,
+                        result: Some(serde_json::to_string(&value).unwrap_or_default()),
+                        error: None,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                    Err(e) => TaskOutput {
+                        name,
+                        success: false,
+                        result: None,
+                        error: Some(e.to_string()),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                }
+            })
         })
-    }).collect();
+        .collect();
 
     let mut outputs = Vec::new();
     for handle in handles {
@@ -331,7 +339,9 @@ mod tests {
             Ok::<_, anyhow::Error>("fn main() { }".to_string())
         });
 
-        executor.add_task("analyze", vec!["read_config".to_string(), "grep_main".to_string()],
+        executor.add_task(
+            "analyze",
+            vec!["read_config".to_string(), "grep_main".to_string()],
             |deps: HashMap<String, serde_json::Value>| async move {
                 let config = deps.get("read_config").unwrap();
                 let code = deps.get("grep_main").unwrap();
@@ -352,7 +362,9 @@ mod tests {
             Err::<String, _>(anyhow::anyhow!("intentional failure"))
         });
 
-        executor.add_task("depends_on_fail", vec!["failing".to_string()],
+        executor.add_task(
+            "depends_on_fail",
+            vec!["failing".to_string()],
             |_deps: HashMap<String, serde_json::Value>| async move {
                 // Should still execute even if dependency failed
                 Ok::<_, anyhow::Error>("ran anyway".to_string())
@@ -363,7 +375,10 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         let failing = outputs.iter().find(|o| o.name == "failing").unwrap();
         assert!(!failing.success);
-        let dependent = outputs.iter().find(|o| o.name == "depends_on_fail").unwrap();
+        let dependent = outputs
+            .iter()
+            .find(|o| o.name == "depends_on_fail")
+            .unwrap();
         assert!(dependent.success);
     }
 }

@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 use pharmakon_common::{AgentResult, Tool, ToolCategory};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
-use crate::codex_utils::scan_diff_risks;
 
 pub struct ProactiveSelfOptimizationTool;
 #[async_trait]

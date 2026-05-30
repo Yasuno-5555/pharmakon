@@ -7,7 +7,6 @@ pub struct TrayHandler {
     _tray_icon: TrayIcon,
 }
 
-
 impl TrayHandler {
     pub fn new() -> Option<Self> {
         match Self::try_new() {

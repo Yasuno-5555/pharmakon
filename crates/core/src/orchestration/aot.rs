@@ -49,7 +49,9 @@ impl AotCompiler {
         let mut count = 0;
 
         for template in &pattern_lib.templates {
-            if template.frequency >= self.min_frequency && template.success_rate >= self.min_success_rate {
+            if template.frequency >= self.min_frequency
+                && template.success_rate >= self.min_success_rate
+            {
                 let cache_file = self.cache_dir.join(format!("{}.bin", template.id));
                 let serialized = serde_json::to_vec(template)?;
                 std::fs::write(&cache_file, serialized)?;
@@ -68,13 +70,23 @@ impl AotCompiler {
         code.push_str("use crate::orchestration::world::{PlanNode, Condition};\n");
         code.push_str("use std::path::PathBuf;\n");
         code.push_str("use std::collections::HashMap;\n\n");
-        code.push_str(&format!("/// Get crystallized plan for: {}\n", template.template_key));
-        code.push_str(&format!("pub fn get_crystallized_{}() -> PlanNode {{\n", template.id.replace("-", "_")));
+        code.push_str(&format!(
+            "/// Get crystallized plan for: {}\n",
+            template.template_key
+        ));
+        code.push_str(&format!(
+            "pub fn get_crystallized_{}() -> PlanNode {{\n",
+            template.id.replace("-", "_")
+        ));
         code.push_str("    ");
         code.push_str(&format!("// Template Key: {}\n", template.template_key));
         code.push_str("    ");
-        code.push_str(&format!("// Success Rate: {:.2}%, Frequency: {}\n", template.success_rate * 100.0, template.frequency));
-        
+        code.push_str(&format!(
+            "// Success Rate: {:.2}%, Frequency: {}\n",
+            template.success_rate * 100.0,
+            template.frequency
+        ));
+
         let root_code = format_plan_node_as_rust(&template.root_node, "    ");
         code.push_str(&format!("    {}\n", root_code));
         code.push_str("}\n");
@@ -86,45 +98,81 @@ impl AotCompiler {
 fn format_plan_node_as_rust(node: &crate::orchestration::world::PlanNode, indent: &str) -> String {
     let next_indent = format!("{}    ", indent);
     match node {
-        crate::orchestration::world::PlanNode::Script { language, code, timeout_secs } => {
+        crate::orchestration::world::PlanNode::Script {
+            language,
+            code,
+            timeout_secs,
+        } => {
             let lang_str = match language {
-                crate::orchestration::world::ScriptLang::Rhai => "crate::orchestration::world::ScriptLang::Rhai",
-                crate::orchestration::world::ScriptLang::Python => "crate::orchestration::world::ScriptLang::Python",
+                crate::orchestration::world::ScriptLang::Rhai => {
+                    "crate::orchestration::world::ScriptLang::Rhai"
+                }
+                crate::orchestration::world::ScriptLang::Python => {
+                    "crate::orchestration::world::ScriptLang::Python"
+                }
             };
             format!(
                 "PlanNode::Script {{\n{}language: {},\n{}code: r#\"{}\"#.to_string(),\n{}timeout_secs: {},\n{}}}",
                 next_indent, lang_str, next_indent, code, next_indent, timeout_secs, indent
             )
         }
-        crate::orchestration::world::PlanNode::Step { tool, args, dry_run_first } => {
+        crate::orchestration::world::PlanNode::Step {
+            tool,
+            args,
+            dry_run_first,
+        } => {
             format!(
                 "PlanNode::Step {{\n{}tool: \"{}\".to_string(),\n{}args: serde_json::json!({}),\n{}dry_run_first: {},\n{}}}",
                 next_indent, tool, next_indent, args, next_indent, dry_run_first, indent
             )
         }
         crate::orchestration::world::PlanNode::Sequence { nodes } => {
-            let elements: Vec<String> = nodes.iter().map(|n| format_plan_node_as_rust(n, &next_indent)).collect();
+            let elements: Vec<String> = nodes
+                .iter()
+                .map(|n| format_plan_node_as_rust(n, &next_indent))
+                .collect();
             format!(
                 "PlanNode::Sequence {{\n{}nodes: vec![\n{}{}\n{}]\n{}}}",
-                next_indent, next_indent, elements.join(&format!(",\n{}", next_indent)), next_indent, indent
+                next_indent,
+                next_indent,
+                elements.join(&format!(",\n{}", next_indent)),
+                next_indent,
+                indent
             )
         }
         crate::orchestration::world::PlanNode::Parallel { nodes } => {
-            let elements: Vec<String> = nodes.iter().map(|n| format_plan_node_as_rust(n, &next_indent)).collect();
+            let elements: Vec<String> = nodes
+                .iter()
+                .map(|n| format_plan_node_as_rust(n, &next_indent))
+                .collect();
             format!(
                 "PlanNode::Parallel {{\n{}nodes: vec![\n{}{}\n{}]\n{}}}",
-                next_indent, next_indent, elements.join(&format!(",\n{}", next_indent)), next_indent, indent
+                next_indent,
+                next_indent,
+                elements.join(&format!(",\n{}", next_indent)),
+                next_indent,
+                indent
             )
         }
-        crate::orchestration::world::PlanNode::Conditional { condition, then_branch, else_branch } => {
+        crate::orchestration::world::PlanNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let then_code = format_plan_node_as_rust(then_branch, &next_indent);
             let else_code = match else_branch {
-                Some(b) => format!("Some(Box::new({}))", format_plan_node_as_rust(b, &next_indent)),
+                Some(b) => format!(
+                    "Some(Box::new({}))",
+                    format_plan_node_as_rust(b, &next_indent)
+                ),
                 None => "None".to_string(),
             };
             let cond_code = match condition {
                 crate::orchestration::world::Condition::FileExists { path } => {
-                    format!("Condition::FileExists {{ path: PathBuf::from(\"{}\") }}", path.display())
+                    format!(
+                        "Condition::FileExists {{ path: PathBuf::from(\"{}\") }}",
+                        path.display()
+                    )
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     "Condition::CargoCheckSuccess".to_string()
@@ -133,14 +181,29 @@ fn format_plan_node_as_rust(node: &crate::orchestration::world::PlanNode, indent
                     match strategy {
                         Some(strat) => {
                             let strat_code = match strat {
-                                crate::orchestration::world::VerifyStrategy::Cargo => "VerifyStrategy::Cargo".to_string(),
-                                crate::orchestration::world::VerifyStrategy::Cmake => "VerifyStrategy::Cmake".to_string(),
-                                crate::orchestration::world::VerifyStrategy::Npm => "VerifyStrategy::Npm".to_string(),
-                                crate::orchestration::world::VerifyStrategy::PythonTest => "VerifyStrategy::PythonTest".to_string(),
-                                crate::orchestration::world::VerifyStrategy::Go => "VerifyStrategy::Go".to_string(),
-                                crate::orchestration::world::VerifyStrategy::Shell(cmd) => format!("VerifyStrategy::Shell(\"{}\".to_string())", cmd),
+                                crate::orchestration::world::VerifyStrategy::Cargo => {
+                                    "VerifyStrategy::Cargo".to_string()
+                                }
+                                crate::orchestration::world::VerifyStrategy::Cmake => {
+                                    "VerifyStrategy::Cmake".to_string()
+                                }
+                                crate::orchestration::world::VerifyStrategy::Npm => {
+                                    "VerifyStrategy::Npm".to_string()
+                                }
+                                crate::orchestration::world::VerifyStrategy::PythonTest => {
+                                    "VerifyStrategy::PythonTest".to_string()
+                                }
+                                crate::orchestration::world::VerifyStrategy::Go => {
+                                    "VerifyStrategy::Go".to_string()
+                                }
+                                crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
+                                    format!("VerifyStrategy::Shell(\"{}\".to_string())", cmd)
+                                }
                             };
-                            format!("Condition::VerifySuccess {{ strategy: Some({}) }}", strat_code)
+                            format!(
+                                "Condition::VerifySuccess {{ strategy: Some({}) }}",
+                                strat_code
+                            )
                         }
                         None => "Condition::VerifySuccess { strategy: None }".to_string(),
                     }
@@ -164,7 +227,10 @@ fn format_plan_node_as_rust(node: &crate::orchestration::world::PlanNode, indent
                 next_indent, inner, next_indent, max_attempts, indent
             )
         }
-        crate::orchestration::world::PlanNode::Verify { node, assertion_script } => {
+        crate::orchestration::world::PlanNode::Verify {
+            node,
+            assertion_script,
+        } => {
             let inner = format_plan_node_as_rust(node, &next_indent);
             format!(
                 "PlanNode::Verify {{\n{}node: Box::new({}),\n{}assertion_script: \"{}\".to_string(),\n{}}}",
@@ -210,26 +276,27 @@ impl AotHotReloader {
                 let path = entry.path();
                 if path.extension().is_some_and(|ext| ext == "bin")
                     && let Ok(bytes) = std::fs::read(&path)
-                        && let Ok(template) = serde_json::from_slice::<PatternTemplate>(&bytes)
-                            && let Ok(re) = regex::Regex::new(&template.task_regex)
-                                && let Some(captures) = re.captures(task) {
-                                    let mut params = std::collections::HashMap::new();
-                                    for key in &template.parameter_keys {
-                                        if let Some(m) = captures.name(key) {
-                                            params.insert(key.clone(), m.as_str().to_string());
-                                        }
-                                    }
+                    && let Ok(template) = serde_json::from_slice::<PatternTemplate>(&bytes)
+                    && let Ok(re) = regex::Regex::new(&template.task_regex)
+                    && let Some(captures) = re.captures(task)
+                {
+                    let mut params = std::collections::HashMap::new();
+                    for key in &template.parameter_keys {
+                        if let Some(m) = captures.name(key) {
+                            params.insert(key.clone(), m.as_str().to_string());
+                        }
+                    }
 
-                                    // Instantiates matching plan instantly!
-                                    let instantiated_root = substitute_node(&template.root_node, &params);
-                                    return Some(CandidatePlan {
-                                        id: format!("aot-{}", &uuid::Uuid::new_v4().to_string()[..8]),
-                                        description: format!("AOT compiled plan loaded for: {}", task),
-                                        estimated_tokens: 10, // Maximum execution savings
-                                        steps: Vec::new(),
-                                        root: Some(instantiated_root),
-                                    });
-                                }
+                    // Instantiates matching plan instantly!
+                    let instantiated_root = substitute_node(&template.root_node, &params);
+                    return Some(CandidatePlan {
+                        id: format!("aot-{}", &uuid::Uuid::new_v4().to_string()[..8]),
+                        description: format!("AOT compiled plan loaded for: {}", task),
+                        estimated_tokens: 10, // Maximum execution savings
+                        steps: Vec::new(),
+                        root: Some(instantiated_root),
+                    });
+                }
             }
         }
 
@@ -237,9 +304,16 @@ impl AotHotReloader {
     }
 }
 
-fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::collections::HashMap<String, String>) -> crate::orchestration::world::PlanNode {
+fn substitute_node(
+    node: &crate::orchestration::world::PlanNode,
+    params: &std::collections::HashMap<String, String>,
+) -> crate::orchestration::world::PlanNode {
     match node {
-        crate::orchestration::world::PlanNode::Script { language, code, timeout_secs } => {
+        crate::orchestration::world::PlanNode::Script {
+            language,
+            code,
+            timeout_secs,
+        } => {
             let substituted_code = substitute_string(code, params);
             crate::orchestration::world::PlanNode::Script {
                 language: *language,
@@ -247,7 +321,11 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                 timeout_secs: *timeout_secs,
             }
         }
-        crate::orchestration::world::PlanNode::Step { tool, args, dry_run_first } => {
+        crate::orchestration::world::PlanNode::Step {
+            tool,
+            args,
+            dry_run_first,
+        } => {
             let sub_args = substitute_json_value(args, params);
             crate::orchestration::world::PlanNode::Step {
                 tool: tool.clone(),
@@ -265,11 +343,17 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                 nodes: nodes.iter().map(|n| substitute_node(n, params)).collect(),
             }
         }
-        crate::orchestration::world::PlanNode::Conditional { condition, then_branch, else_branch } => {
+        crate::orchestration::world::PlanNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let sub_condition = match condition {
                 crate::orchestration::world::Condition::FileExists { path } => {
                     let path_str = substitute_string(&path.to_string_lossy(), params);
-                    crate::orchestration::world::Condition::FileExists { path: PathBuf::from(path_str) }
+                    crate::orchestration::world::Condition::FileExists {
+                        path: PathBuf::from(path_str),
+                    }
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     crate::orchestration::world::Condition::CargoCheckSuccess
@@ -277,11 +361,15 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                 crate::orchestration::world::Condition::VerifySuccess { strategy } => {
                     let sub_strategy = strategy.as_ref().map(|s| match s {
                         crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
-                            crate::orchestration::world::VerifyStrategy::Shell(substitute_string(cmd, params))
+                            crate::orchestration::world::VerifyStrategy::Shell(substitute_string(
+                                cmd, params,
+                            ))
                         }
                         _ => s.clone(),
                     });
-                    crate::orchestration::world::Condition::VerifySuccess { strategy: sub_strategy }
+                    crate::orchestration::world::Condition::VerifySuccess {
+                        strategy: sub_strategy,
+                    }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     crate::orchestration::world::Condition::Script {
@@ -289,13 +377,17 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                     }
                 }
                 crate::orchestration::world::Condition::Legacy(script) => {
-                    crate::orchestration::world::Condition::Legacy(substitute_string(script, params))
+                    crate::orchestration::world::Condition::Legacy(substitute_string(
+                        script, params,
+                    ))
                 }
             };
             crate::orchestration::world::PlanNode::Conditional {
                 condition: sub_condition,
                 then_branch: Box::new(substitute_node(then_branch, params)),
-                else_branch: else_branch.as_ref().map(|b| Box::new(substitute_node(b, params))),
+                else_branch: else_branch
+                    .as_ref()
+                    .map(|b| Box::new(substitute_node(b, params))),
             }
         }
         crate::orchestration::world::PlanNode::Retry { node, max_attempts } => {
@@ -304,12 +396,13 @@ fn substitute_node(node: &crate::orchestration::world::PlanNode, params: &std::c
                 max_attempts: *max_attempts,
             }
         }
-        crate::orchestration::world::PlanNode::Verify { node, assertion_script } => {
-            crate::orchestration::world::PlanNode::Verify {
-                node: Box::new(substitute_node(node, params)),
-                assertion_script: substitute_string(assertion_script, params),
-            }
-        }
+        crate::orchestration::world::PlanNode::Verify {
+            node,
+            assertion_script,
+        } => crate::orchestration::world::PlanNode::Verify {
+            node: Box::new(substitute_node(node, params)),
+            assertion_script: substitute_string(assertion_script, params),
+        },
         crate::orchestration::world::PlanNode::Gate { gate_name, node } => {
             crate::orchestration::world::PlanNode::Gate {
                 gate_name: substitute_string(gate_name, params),
@@ -328,12 +421,17 @@ fn substitute_string(text: &str, params: &std::collections::HashMap<String, Stri
     result
 }
 
-fn substitute_json_value(val: &serde_json::Value, params: &std::collections::HashMap<String, String>) -> serde_json::Value {
+fn substitute_json_value(
+    val: &serde_json::Value,
+    params: &std::collections::HashMap<String, String>,
+) -> serde_json::Value {
     match val {
         serde_json::Value::String(s) => serde_json::Value::String(substitute_string(s, params)),
-        serde_json::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(|v| substitute_json_value(v, params)).collect())
-        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|v| substitute_json_value(v, params))
+                .collect(),
+        ),
         serde_json::Value::Object(obj) => {
             let mut new_obj = serde_json::Map::new();
             for (k, v) in obj {

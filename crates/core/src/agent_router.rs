@@ -49,28 +49,30 @@ impl AgentRouter {
         // Dynamically load model based on agent_config.model_id
         if let Some(config) = &agent_config
             && let Some(model_id) = &config.model_id
-                && let Some(dynamic_model) =
-                    crate::providers::registry::ModelRegistry::get_model(model_id)
-                {
-                    agent = Agent::new(dynamic_model, format!("agent-{}", name))
-                        .with_store(self.store.clone());
+            && let Some(dynamic_model) =
+                crate::providers::registry::ModelRegistry::get_model(model_id)
+        {
+            agent =
+                Agent::new(dynamic_model, format!("agent-{}", name)).with_store(self.store.clone());
 
-                    if let Some(n) = &self.nexus {
-                        agent = agent.with_knowledge_nexus(n.clone());
-                    }
-                    if let Some(f) = &self.fact_memory {
-                        agent = agent.with_fact_memory(f.clone());
-                    }
-                }
-
-        if agent.knowledge_nexus.is_none()
-            && let Some(n) = &self.nexus {
+            if let Some(n) = &self.nexus {
                 agent = agent.with_knowledge_nexus(n.clone());
             }
-        if agent.fact_memory.is_none()
-            && let Some(f) = &self.fact_memory {
+            if let Some(f) = &self.fact_memory {
                 agent = agent.with_fact_memory(f.clone());
             }
+        }
+
+        if agent.knowledge_nexus.is_none()
+            && let Some(n) = &self.nexus
+        {
+            agent = agent.with_knowledge_nexus(n.clone());
+        }
+        if agent.fact_memory.is_none()
+            && let Some(f) = &self.fact_memory
+        {
+            agent = agent.with_fact_memory(f.clone());
+        }
 
         let soul = if let Some(config) = &agent_config {
             if let Some(soul_path_str) = &config.soul_path {
@@ -91,7 +93,6 @@ impl AgentRouter {
         };
 
         agent.set_soul(soul).await;
-
 
         let agent_arc = Arc::new(Mutex::new(agent));
         self.agents.insert(name.to_string(), agent_arc.clone());

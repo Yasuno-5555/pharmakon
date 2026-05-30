@@ -2,7 +2,7 @@ use crate::agent::Agent;
 use anyhow::{Result, anyhow};
 use pharmakon_common::CronJobInfo;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use uuid::Uuid;
@@ -32,7 +32,7 @@ impl CronManager {
     pub async fn add_agent_job(
         &self,
         schedule: &str,
-        agent: std::sync::Weak<Mutex<Agent>>,
+        agent: Weak<Agent>,
         message: String,
     ) -> Result<Uuid> {
         let jobs_arc = self.jobs.clone();
@@ -45,8 +45,7 @@ impl CronManager {
             Box::pin(async move {
                 if let Some(agent_arc) = agent.upgrade() {
                     log::info!("Cron job triggered: {}", msg);
-                    let agent_lock = agent_arc.lock().await;
-                    if let Err(e) = agent_lock.chat(&msg).await {
+                    if let Err(e) = agent_arc.chat(&msg).await {
                         log::error!("Error in cron agent job: {}", e);
                     }
                 } else {
@@ -76,7 +75,7 @@ impl CronManager {
     pub async fn add_one_shot(
         &self,
         delay_secs: u64,
-        agent: std::sync::Weak<Mutex<Agent>>,
+        agent: Weak<Agent>,
         message: String,
     ) -> Result<Uuid> {
         let id = Uuid::new_v4();
@@ -99,8 +98,7 @@ impl CronManager {
                 let exists = jobs_arc.lock().await.contains_key(&id);
                 if exists {
                     log::info!("One-shot cron job triggered: {}", message);
-                    let agent_lock = agent_arc.lock().await;
-                    let _ = agent_lock.chat(&message).await;
+                    let _ = agent_arc.chat(&message).await;
                     // Remove after execution
                     jobs_arc.lock().await.remove(&id);
                 } else {

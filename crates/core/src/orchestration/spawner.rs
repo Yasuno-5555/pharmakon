@@ -37,6 +37,7 @@ impl AgentSpawner for DefaultAgentSpawner {
         }
 
         // Initialize all agent tools for the sub-agent so they can perform tasks
+        let agent = Arc::new(agent);
         crate::tool_init::init_all_agent_tools(&agent).await?;
 
         log::info!(

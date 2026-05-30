@@ -4,15 +4,14 @@ use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool};
 use serde_json::Value;
 use std::sync::{Arc, Weak};
-use tokio::sync::Mutex;
 
 pub struct CronTool {
     manager: Arc<CronManager>,
-    agent: Weak<Mutex<Agent>>,
+    agent: Weak<Agent>,
 }
 
 impl CronTool {
-    pub fn new(manager: Arc<CronManager>, agent: Weak<Mutex<Agent>>) -> Self {
+    pub fn new(manager: Arc<CronManager>, agent: Weak<Agent>) -> Self {
         Self { manager, agent }
     }
 }

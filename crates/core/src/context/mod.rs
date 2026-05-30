@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -76,7 +76,10 @@ impl ContextManager {
         if !self.user.environment.contains_key("default_workspace") {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
             let default_ws = home.join(".pharmakon").join("workspace");
-            self.user.environment.insert("default_workspace".to_string(), default_ws.to_string_lossy().to_string());
+            self.user.environment.insert(
+                "default_workspace".to_string(),
+                default_ws.to_string_lossy().to_string(),
+            );
             modified = true;
         }
 

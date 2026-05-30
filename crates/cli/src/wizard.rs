@@ -39,7 +39,15 @@ pub fn run_wizard() -> Result<()> {
         .interact_text()?;
 
     // 4. Provider & API Key
-    let provider_options = vec!["gemini", "openai", "anthropic", "groq", "perplexity", "deepseek", "openrouter"];
+    let provider_options = vec![
+        "gemini",
+        "openai",
+        "anthropic",
+        "groq",
+        "perplexity",
+        "deepseek",
+        "openrouter",
+    ];
     let mut selected_providers = Vec::new();
 
     println!(
@@ -191,10 +199,9 @@ pub fn run_wizard() -> Result<()> {
         .default(true)
         .interact()?;
 
-    if install_daemon
-        && let Err(e) = crate::service_installer::install_service(gateway_port) {
-            println!("❌ Failed to install service: {}", e);
-        }
+    if install_daemon && let Err(e) = crate::service_installer::install_service(gateway_port) {
+        println!("❌ Failed to install service: {}", e);
+    }
 
     // 9. Finalize
     let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;

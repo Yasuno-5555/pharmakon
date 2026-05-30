@@ -1,7 +1,7 @@
 pub mod anthropic;
 pub mod dalle;
-pub mod deepseek;
 pub mod deepgram;
+pub mod deepseek;
 pub mod elevenlabs;
 pub mod gemini;
 pub mod groq;
@@ -14,8 +14,8 @@ pub mod perplexity;
 pub mod registry;
 
 pub use anthropic::AnthropicModel;
-pub use deepseek::DeepSeekModel;
 pub use deepgram::DeepgramProvider;
+pub use deepseek::DeepSeekModel;
 pub use elevenlabs::ElevenLabsProvider;
 pub use gemini::GeminiModel;
 pub use groq::GroqModel;

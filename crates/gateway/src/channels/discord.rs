@@ -50,14 +50,20 @@ impl EventHandler for Handler {
         if content.starts_with("/approve ") {
             let id = content.trim_start_matches("/approve ").to_string();
             self.agent.approve(id.clone(), true);
-            let _ = msg.channel_id.say(&ctx.http, format!("✅ Tool call approved: {}", id)).await;
+            let _ = msg
+                .channel_id
+                .say(&ctx.http, format!("✅ Tool call approved: {}", id))
+                .await;
             return;
         }
 
         if content.starts_with("/deny ") {
             let id = content.trim_start_matches("/deny ").to_string();
             self.agent.approve(id.clone(), false);
-            let _ = msg.channel_id.say(&ctx.http, format!("❌ Tool call denied: {}", id)).await;
+            let _ = msg
+                .channel_id
+                .say(&ctx.http, format!("❌ Tool call denied: {}", id))
+                .await;
             return;
         }
 
@@ -71,7 +77,8 @@ impl EventHandler for Handler {
         let complexity = pharmakon_core::orchestration::scheduler::classify_task_complexity(
             content,
             Some(&active_model),
-        ).await;
+        )
+        .await;
 
         log::info!("Discord message complexity: {:?}", complexity);
 
@@ -85,8 +92,14 @@ impl EventHandler for Handler {
             pharmakon_core::orchestration::budget::TaskComplexity::Simple => {
                 tokio::spawn(async move {
                     match w.chat_on_session(&content_owned, &session_id).await {
-                        Ok(r) => { if !r.is_empty() { let _ = cid.say(&http, r).await; } }
-                        Err(e) => { let _ = cid.say(&http, format!("💀 {}", e)).await; }
+                        Ok(r) => {
+                            if !r.is_empty() {
+                                let _ = cid.say(&http, r).await;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = cid.say(&http, format!("💀 {}", e)).await;
+                        }
                     }
                 });
             }
@@ -94,8 +107,14 @@ impl EventHandler for Handler {
                 let _ = cid.say(&http, "🟢 Task dispatched to worker agent.\nYou can send other messages or status requests while it runs.").await;
                 tokio::spawn(async move {
                     match w.chat_on_session(&content_owned, &session_id).await {
-                        Ok(r) => { if !r.is_empty() { let _ = cid.say(&http, r).await; } }
-                        Err(e) => { let _ = cid.say(&http, format!("💀 {}", e)).await; }
+                        Ok(r) => {
+                            if !r.is_empty() {
+                                let _ = cid.say(&http, r).await;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = cid.say(&http, format!("💀 {}", e)).await;
+                        }
                     }
                 });
             }

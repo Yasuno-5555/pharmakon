@@ -21,7 +21,8 @@ pub struct ProceduralStore {
 
 impl ProceduralStore {
     pub fn new() -> Result<Self> {
-        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        let home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let path = home.join(".pharmakon").join("procedures.json");
         Self::new_with_path(path)
     }

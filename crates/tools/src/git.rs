@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel, Tool, ToolCategory};
+use pharmakon_common::{
+    AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel,
+    Tool, ToolCategory,
+};
 use serde_json::{Value, json};
 use std::process::Command;
 
@@ -67,7 +70,8 @@ impl Tool for GitStatusTool {
         }
 
         // Human-readable format with branch info
-        let branch = git(&["branch", "--show-current"]).unwrap_or_else(|_| "(detached)".to_string());
+        let branch =
+            git(&["branch", "--show-current"]).unwrap_or_else(|_| "(detached)".to_string());
         let status = git(&["status"]).unwrap_or_else(|_| "(empty repo)".to_string());
 
         // Add structured change summary
@@ -186,13 +190,18 @@ impl Tool for GitAddTool {
         let path = args["path"]
             .as_str()
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| AgentError("Missing path. Use '.' to stage all, or a specific file path.".to_string()))?;
+            .ok_or_else(|| {
+                AgentError(
+                    "Missing path. Use '.' to stage all, or a specific file path.".to_string(),
+                )
+            })?;
 
         // Warn about staging everything
         if path == "." {
             let staged = git(&["diff", "--cached", "--stat"]).unwrap_or_default();
             let unstaged_files = git(&["diff", "--name-only"]).unwrap_or_default();
-            let untracked = git(&["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
+            let untracked =
+                git(&["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
 
             let mut details = String::new();
             let unstaged_count = unstaged_files.lines().count();
@@ -267,7 +276,7 @@ impl Tool for GitCommitTool {
         let staged = git(&["diff", "--cached", "--name-only"]).unwrap_or_default();
         if staged.is_empty() && !amend {
             return Err(AgentError(
-                "No staged changes to commit. Use git_add <file> to stage files first.".to_string()
+                "No staged changes to commit. Use git_add <file> to stage files first.".to_string(),
             ));
         }
 
@@ -319,7 +328,7 @@ impl Tool for GitLogTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let count = args["count"].as_u64().unwrap_or(10).max(1).min(100);
+        let count = args["count"].as_u64().unwrap_or(10).clamp(1, 100);
         let oneline = args["oneline"].as_bool().unwrap_or(true);
 
         let mut cmd: Vec<String> = vec!["log".to_string(), format!("-n{}", count)];
@@ -386,15 +395,22 @@ impl Tool for GitBranchTool {
             "list" => {
                 let branches = git(&["branch"]).unwrap_or_default();
                 let current = git(&["branch", "--show-current"]).unwrap_or_default();
-                Ok(format!("Current branch: {}\n\nAll branches:\n{}", current, branches))
+                Ok(format!(
+                    "Current branch: {}\n\nAll branches:\n{}",
+                    current, branches
+                ))
             }
             "create" => {
-                let name = args["name"].as_str().filter(|s| !s.is_empty())
+                let name = args["name"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
                     .ok_or_else(|| AgentError("Missing branch name for create".to_string()))?;
                 git(&["checkout", "-b", name])
             }
             "delete" => {
-                let name = args["name"].as_str().filter(|s| !s.is_empty())
+                let name = args["name"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
                     .ok_or_else(|| AgentError("Missing branch name for delete".to_string()))?;
                 git(&["branch", "-d", name])
             }

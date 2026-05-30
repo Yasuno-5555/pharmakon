@@ -23,10 +23,11 @@ impl Default for Redactor {
 
 impl Redactor {
     pub fn new() -> Self {
-        let mut patterns = Vec::new();
-        patterns.push((RE_API_KEY.clone(), "[REDACTED_API_KEY]".to_string()));
-        patterns.push((RE_EMAIL.clone(), "[REDACTED_EMAIL]".to_string()));
-        patterns.push((RE_CREDIT_CARD.clone(), "[REDACTED_CC]".to_string()));
+        let patterns = vec![
+            (RE_API_KEY.clone(), "[REDACTED_API_KEY]".to_string()),
+            (RE_EMAIL.clone(), "[REDACTED_EMAIL]".to_string()),
+            (RE_CREDIT_CARD.clone(), "[REDACTED_CC]".to_string()),
+        ];
         Self { patterns }
     }
 

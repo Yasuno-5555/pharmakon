@@ -1,4 +1,3 @@
-
 use pharmakon_core::agent::Agent;
 use pharmakon_core::model::{
     AgentModel, AgentResult, CompletionRequest, CompletionResponse, FunctionCall, MessageContent,

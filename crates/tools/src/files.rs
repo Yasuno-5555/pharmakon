@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel, Tool, ToolCategory};
+use pharmakon_common::{
+    AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel,
+    Tool, ToolCategory,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,10 +26,7 @@ fn is_image_extension(path: &Path) -> bool {
 
 /// Check if a file extension suggests a PDF.
 fn is_pdf_extension(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|s| s.to_str()),
-        Some("pdf")
-    )
+    matches!(path.extension().and_then(|s| s.to_str()), Some("pdf"))
 }
 
 /// Get file metadata string (size, modified time).
@@ -41,15 +41,20 @@ fn format_file_metadata(path: &Path) -> String {
             } else {
                 format!("{}B", size)
             };
-            let modified = meta.modified().ok().map(|t| {
-                let dur = t.duration_since(std::time::UNIX_EPOCH).ok();
-                dur.and_then(|d| {
-                    let secs = d.as_secs();
-                    // Use chrono for formatting
-                    chrono::DateTime::from_timestamp(secs as i64, 0)
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                }).unwrap_or_default()
-            }).unwrap_or_default();
+            let modified = meta
+                .modified()
+                .ok()
+                .map(|t| {
+                    let dur = t.duration_since(std::time::UNIX_EPOCH).ok();
+                    dur.and_then(|d| {
+                        let secs = d.as_secs();
+                        // Use chrono for formatting
+                        chrono::DateTime::from_timestamp(secs as i64, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    })
+                    .unwrap_or_default()
+                })
+                .unwrap_or_default();
             format!("{} (modified: {})", size_str, modified)
         }
         Err(_) => "unknown".to_string(),
@@ -102,15 +107,22 @@ impl Tool for FileReadTool {
         let path = Path::new(path_str);
 
         // === Resolve symlinks and check existence ===
-        let canonical = path.canonicalize()
-            .map_err(|e| AgentError(format!("File not found or inaccessible: {} ({})", path_str, e)))?;
+        let canonical = path.canonicalize().map_err(|e| {
+            AgentError(format!(
+                "File not found or inaccessible: {} ({})",
+                path_str, e
+            ))
+        })?;
 
         // === Check file metadata ===
         let metadata = fs::metadata(&canonical)
             .map_err(|e| AgentError(format!("Cannot read file metadata: {} ({})", path_str, e)))?;
 
         if !metadata.is_file() {
-            return Err(AgentError(format!("'{}' is not a file (it may be a directory or special file)", path_str)));
+            return Err(AgentError(format!(
+                "'{}' is not a file (it may be a directory or special file)",
+                path_str
+            )));
         }
 
         let file_size = metadata.len();
@@ -120,7 +132,9 @@ impl Tool for FileReadTool {
         if file_size > MAX_FILE_SIZE {
             return Ok(format!(
                 "File too large: {} ({}). Maximum readable size is 50MB.\n{}",
-                path_str, file_info, "Use grep_files or view_file with line ranges for selective reading."
+                path_str,
+                file_info,
+                "Use grep_files or view_file with line ranges for selective reading."
             ));
         }
 
@@ -151,10 +165,12 @@ impl Tool for FileReadTool {
         }
 
         // === Decode as UTF-8 (with fallback) ===
-        let content = String::from_utf8(data)
-            .map_err(|_| AgentError(format!(
-                "File {} is not valid UTF-8 text. Try using grep_files or a binary reader.", path_str
-            )))?;
+        let content = String::from_utf8(data).map_err(|_| {
+            AgentError(format!(
+                "File {} is not valid UTF-8 text. Try using grep_files or a binary reader.",
+                path_str
+            ))
+        })?;
 
         // === Apply limit_kb ===
         if let Some(kb) = limit_kb {
@@ -173,15 +189,16 @@ impl Tool for FileReadTool {
 
         // === Determine line range ===
         let actual_start = start_line.max(1);
-        let actual_end = end_line.unwrap_or_else(|| {
-            if start_line > 1 {
-                // Default to showing 200 lines from start
-                (start_line + 199).min(total_lines)
-            } else {
-                total_lines
-            }
-        })
-        .min(total_lines);
+        let actual_end = end_line
+            .unwrap_or_else(|| {
+                if start_line > 1 {
+                    // Default to showing 200 lines from start
+                    (start_line + 199).min(total_lines)
+                } else {
+                    total_lines
+                }
+            })
+            .min(total_lines);
 
         if actual_start > total_lines {
             return Ok(format!(
@@ -205,8 +222,13 @@ impl Tool for FileReadTool {
             path_str, file_info, range_size
         );
 
-        for i in (actual_start.saturating_sub(1))..actual_end {
-            result.push_str(&format!("{:>4}: {}\n", i + 1, lines[i]));
+        for (i, line) in lines
+            .iter()
+            .enumerate()
+            .take(actual_end)
+            .skip(actual_start.saturating_sub(1))
+        {
+            result.push_str(&format!("{:>4}: {}\n", i + 1, line));
         }
 
         // === Truncation notice ===
@@ -214,7 +236,9 @@ impl Tool for FileReadTool {
             let remaining = total_lines - actual_end;
             result.push_str(&format!(
                 "\n... ({} more lines. Use start_line={} and end_line={} to read more.)",
-                remaining, actual_end + 1, total_lines
+                remaining,
+                actual_end + 1,
+                total_lines
             ));
         }
 
@@ -285,8 +309,13 @@ impl Tool for FileWriteTool {
 
         // === Create parent directory ===
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| AgentError(format!("Failed to create directory {}: {}", parent.display(), e)))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                AgentError(format!(
+                    "Failed to create directory {}: {}",
+                    parent.display(),
+                    e
+                ))
+            })?;
         }
 
         // === Backup existing file ===
@@ -384,7 +413,10 @@ impl Tool for ApplyPatchTool {
             .ok_or_else(|| AgentError("Missing patch".to_string()))?;
         let verify_ast = args["verify_ast"].as_bool().unwrap_or(true);
         let speculative_check = args["speculative_check"].as_bool().unwrap_or(true);
-        let reasoning = args["reasoning"].as_str().unwrap_or("Unspecified enhancement").to_string();
+        let reasoning = args["reasoning"]
+            .as_str()
+            .unwrap_or("Unspecified enhancement")
+            .to_string();
 
         let path = Path::new(path_str);
         let original = fs::read_to_string(path)
@@ -403,12 +435,13 @@ impl Tool for ApplyPatchTool {
             let mut parser = tree_sitter::Parser::new();
             if parser.set_language(&tree_sitter_rust::language()).is_ok()
                 && let Some(tree) = parser.parse(&patched, None)
-                    && has_error_nodes(tree.root_node()) {
-                        return Err(AgentError(format!(
-                            "AST Validation Failed: Patched code for {} has syntax errors.",
-                            path_str
-                        )));
-                    }
+                && has_error_nodes(tree.root_node())
+            {
+                return Err(AgentError(format!(
+                    "AST Validation Failed: Patched code for {} has syntax errors.",
+                    path_str
+                )));
+            }
         }
 
         let mut check_success = true;
@@ -423,7 +456,8 @@ impl Tool for ApplyPatchTool {
             fs::write(path, &patched)
                 .map_err(|e| AgentError(format!("Speculative write failed: {}", e)))?;
 
-            let check_dir = find_cargo_toml_dir(path).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let check_dir = find_cargo_toml_dir(path)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
             let output = std::process::Command::new("cargo")
                 .arg("check")
                 .current_dir(&check_dir)
@@ -467,9 +501,8 @@ impl Tool for ApplyPatchTool {
             if path.exists() {
                 fs::copy(path, &backup_path).ok();
             }
-            fs::write(path, &patched).map_err(|e| {
-                AgentError(format!("Failed to write patched content: {}", e))
-            })?;
+            fs::write(path, &patched)
+                .map_err(|e| AgentError(format!("Failed to write patched content: {}", e)))?;
         }
 
         // 3. Forensic Journal

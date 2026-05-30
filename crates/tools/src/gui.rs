@@ -7,11 +7,15 @@ use std::path::PathBuf;
 pub struct NativeGuiEmulatorTool;
 
 impl Default for NativeGuiEmulatorTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NativeGuiEmulatorTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 enum Widget {
@@ -30,14 +34,16 @@ fn extract_string_param(line: &str, method: &str) -> Option<String> {
     if let Some(pos) = line.find(method) {
         let after = &line[pos + method.len()..];
         if let Some(start) = after.find('"')
-            && let Some(end) = after[start+1..].find('"') {
-                return Some(after[start+1..start+1+end].to_string());
-            }
+            && let Some(end) = after[start + 1..].find('"')
+        {
+            return Some(after[start + 1..start + 1 + end].to_string());
+        }
         // Fallback to single quotes
         if let Some(start) = after.find('\'')
-            && let Some(end) = after[start+1..].find('\'') {
-                return Some(after[start+1..start+1+end].to_string());
-            }
+            && let Some(end) = after[start + 1..].find('\'')
+        {
+            return Some(after[start + 1..start + 1 + end].to_string());
+        }
     }
     None
 }
@@ -45,7 +51,11 @@ fn extract_string_param(line: &str, method: &str) -> Option<String> {
 fn extract_text_edit_placeholder(line: &str) -> String {
     if let Some(pos) = line.find('&') {
         let after = &line[pos..];
-        let var_name: String = after.chars().skip(1).take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        let var_name: String = after
+            .chars()
+            .skip(1)
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
         if !var_name.is_empty() {
             return format!("Text: {}", var_name);
         }
@@ -78,30 +88,36 @@ impl Tool for NativeGuiEmulatorTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let action = args["action"].as_str().ok_or_else(|| AgentError("Missing action".into()))?;
+        let action = args["action"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing action".into()))?;
 
         match action {
             "preview" => {
-                let path_str = args["path"].as_str().ok_or_else(|| AgentError("Missing path".into()))?;
+                let path_str = args["path"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing path".into()))?;
                 let path = PathBuf::from(path_str);
                 if !path.exists() {
                     return Err(AgentError(format!("File does not exist: {}", path_str)));
                 }
 
-                let content = fs::read_to_string(&path).map_err(|e| AgentError(format!("Failed to read file: {}", e)))?;
-                
+                let content = fs::read_to_string(&path)
+                    .map_err(|e| AgentError(format!("Failed to read file: {}", e)))?;
+
                 // Parse out egui widgets
                 let mut widgets = Vec::new();
                 let mut current_window = "egui Application Viewport".to_string();
-                
+
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if trimmed.contains("egui::Window::new")
                         && let Some(start) = trimmed.find('"')
-                            && let Some(end) = trimmed[start+1..].find('"') {
-                                current_window = trimmed[start+1..start+1+end].to_string();
-                            }
-                    
+                        && let Some(end) = trimmed[start + 1..].find('"')
+                    {
+                        current_window = trimmed[start + 1..start + 1 + end].to_string();
+                    }
+
                     if trimmed.contains(".heading(") {
                         if let Some(val) = extract_string_param(trimmed, ".heading(") {
                             widgets.push(Widget::Heading(val));
@@ -117,7 +133,8 @@ impl Tool for NativeGuiEmulatorTool {
                     } else if trimmed.contains("text_edit_") {
                         widgets.push(Widget::TextEdit(extract_text_edit_placeholder(trimmed)));
                     } else if trimmed.contains("checkbox(") {
-                        let val = extract_string_param(trimmed, "checkbox(").unwrap_or_else(|| "Checkbox option".to_string());
+                        let val = extract_string_param(trimmed, "checkbox(")
+                            .unwrap_or_else(|| "Checkbox option".to_string());
                         widgets.push(Widget::Checkbox(val));
                     } else if trimmed.contains("slider(") || trimmed.contains("Slider::new") {
                         widgets.push(Widget::Slider);
@@ -178,7 +195,11 @@ impl Tool for NativeGuiEmulatorTool {
                             }
                         }
                         Widget::Heading(text) => {
-                            let x = if in_horizontal { current_x + horizontal_x_adv } else { current_x };
+                            let x = if in_horizontal {
+                                current_x + horizontal_x_adv
+                            } else {
+                                current_x
+                            };
                             svg.push_str(&format!(r##"  <text x="{}" y="{}" font-family="sans-serif" font-size="20" font-weight="bold" fill="#ffffff">{}</text>
 "##, x, current_y + 18.0, text));
                             if in_horizontal {
@@ -188,7 +209,11 @@ impl Tool for NativeGuiEmulatorTool {
                             }
                         }
                         Widget::Label(text) => {
-                            let x = if in_horizontal { current_x + horizontal_x_adv } else { current_x };
+                            let x = if in_horizontal {
+                                current_x + horizontal_x_adv
+                            } else {
+                                current_x
+                            };
                             svg.push_str(&format!(r##"  <text x="{}" y="{}" font-family="sans-serif" font-size="13" fill="#cbcbcb">{}</text>
 "##, x, current_y + 14.0, text));
                             if in_horizontal {
@@ -198,7 +223,11 @@ impl Tool for NativeGuiEmulatorTool {
                             }
                         }
                         Widget::Button(text) => {
-                            let x = if in_horizontal { current_x + horizontal_x_adv } else { current_x };
+                            let x = if in_horizontal {
+                                current_x + horizontal_x_adv
+                            } else {
+                                current_x
+                            };
                             let width = (text.len() * 9).max(80) as f64;
                             svg.push_str(&format!(r##"  <rect x="{}" y="{}" width="{}" height="24" rx="4" fill="#2d2d2d" stroke="#4f46e5" stroke-width="1" />
   <text x="{}" y="{}" font-family="sans-serif" font-size="12" fill="#ffffff" text-anchor="middle">{}</text>
@@ -210,7 +239,11 @@ impl Tool for NativeGuiEmulatorTool {
                             }
                         }
                         Widget::TextEdit(placeholder) => {
-                            let x = if in_horizontal { current_x + horizontal_x_adv } else { current_x };
+                            let x = if in_horizontal {
+                                current_x + horizontal_x_adv
+                            } else {
+                                current_x
+                            };
                             let width = 180.0;
                             svg.push_str(&format!(r##"  <rect x="{}" y="{}" width="{}" height="24" rx="3" fill="#0d0d0d" stroke="#3e3e3e" stroke-width="1" />
   <text x="{}" y="{}" font-family="sans-serif" font-size="12" fill="#888888">{}</text>
@@ -222,7 +255,11 @@ impl Tool for NativeGuiEmulatorTool {
                             }
                         }
                         Widget::Checkbox(label) => {
-                            let x = if in_horizontal { current_x + horizontal_x_adv } else { current_x };
+                            let x = if in_horizontal {
+                                current_x + horizontal_x_adv
+                            } else {
+                                current_x
+                            };
                             svg.push_str(&format!(r##"  <rect x="{}" y="{}" width="14" height="14" rx="2" fill="#2d2d2d" stroke="#4a4a4a" stroke-width="1" />
   <polyline points="{},{} {},{} {},{}" fill="none" stroke="#4f46e5" stroke-width="2" />
   <text x="{}" y="{}" font-family="sans-serif" font-size="12" fill="#cbcbcb">{}</text>
@@ -234,7 +271,11 @@ impl Tool for NativeGuiEmulatorTool {
                             }
                         }
                         Widget::Slider => {
-                            let x = if in_horizontal { current_x + horizontal_x_adv } else { current_x };
+                            let x = if in_horizontal {
+                                current_x + horizontal_x_adv
+                            } else {
+                                current_x
+                            };
                             let width = 140.0;
                             svg.push_str(&format!(r##"  <rect x="{}" y="{}" width="{}" height="6" rx="3" fill="#090909" />
   <rect x="{}" y="{}" width="40" height="6" rx="3" fill="#4f46e5" />
@@ -265,11 +306,18 @@ impl Tool for NativeGuiEmulatorTool {
                     let _ = fs::create_dir_all(&out_dir);
                 }
                 let out_path = out_dir.join("egui_preview.svg");
-                fs::write(&out_path, &svg).map_err(|e| AgentError(format!("Failed to save egui preview: {}", e)))?;
+                fs::write(&out_path, &svg)
+                    .map_err(|e| AgentError(format!("Failed to save egui preview: {}", e)))?;
 
                 let mut report = format!("### egui Visual Layout Analysis for `{}`\n\n", path_str);
-                report.push_str(&format!("- Active Application Window: **{}**\n", current_window));
-                report.push_str(&format!("- Rendered Preview Saved to: **{:?}**\n\n", out_path));
+                report.push_str(&format!(
+                    "- Active Application Window: **{}**\n",
+                    current_window
+                ));
+                report.push_str(&format!(
+                    "- Rendered Preview Saved to: **{:?}**\n\n",
+                    out_path
+                ));
                 report.push_str("#### Widget Hierarchy Tree\n");
                 for w in &widgets {
                     let w_desc = match w {
@@ -289,15 +337,19 @@ impl Tool for NativeGuiEmulatorTool {
                 Ok(report)
             }
             "scaffold" => {
-                let dir_str = args["directory"].as_str().ok_or_else(|| AgentError("Missing directory".into()))?;
+                let dir_str = args["directory"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing directory".into()))?;
                 let app_name = args["app_name"].as_str().unwrap_or("pharmakon_gui_app");
                 let dir = PathBuf::from(dir_str).join(app_name);
 
                 let src_dir = dir.join("src");
-                fs::create_dir_all(&src_dir).map_err(|e| AgentError(format!("Failed to create directories: {}", e)))?;
+                fs::create_dir_all(&src_dir)
+                    .map_err(|e| AgentError(format!("Failed to create directories: {}", e)))?;
 
                 // 1. Scaffold Cargo.toml
-                let cargo_toml = format!(r##"[package]
+                let cargo_toml = format!(
+                    r##"[package]
 name = "{}"
 version = "0.1.0"
 edition = "2021"
@@ -308,8 +360,11 @@ egui = "0.27.0"
 vello = "0.1.0"
 log = "0.4"
 env_logger = "0.10"
-"##, app_name);
-                fs::write(dir.join("Cargo.toml"), cargo_toml).map_err(|e| AgentError(format!("Failed to write Cargo.toml: {}", e)))?;
+"##,
+                    app_name
+                );
+                fs::write(dir.join("Cargo.toml"), cargo_toml)
+                    .map_err(|e| AgentError(format!("Failed to write Cargo.toml: {}", e)))?;
 
                 // 2. Scaffold main.rs
                 let main_rs = r##"use eframe::egui;
@@ -373,11 +428,15 @@ impl eframe::App for CustomApp {
     }
 }
 "##;
-                fs::write(src_dir.join("main.rs"), main_rs).map_err(|e| AgentError(format!("Failed to write main.rs: {}", e)))?;
+                fs::write(src_dir.join("main.rs"), main_rs)
+                    .map_err(|e| AgentError(format!("Failed to write main.rs: {}", e)))?;
 
-                Ok(format!("Successfully scaffolded fully compiling egui & Vello template at: {:?}\nIncludes package configuration and reactive state main.rs implementation.", dir))
+                Ok(format!(
+                    "Successfully scaffolded fully compiling egui & Vello template at: {:?}\nIncludes package configuration and reactive state main.rs implementation.",
+                    dir
+                ))
             }
-            _ => Err(AgentError("Unknown action".into()))
+            _ => Err(AgentError("Unknown action".into())),
         }
     }
 }

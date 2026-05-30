@@ -254,14 +254,14 @@ pub trait AgentModel: Send + Sync {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum ToolCategory {
-    Core,           // Always loaded tools
-    FileSystem,     // File operations
-    Network,        // Web search, fetching
-    Media,          // Camera, screenshot
-    Autonomous,     // Meta-cognitive, reflection
-    System,         // Shell, Terminal, Environment
-    Orchestration,  // Swarm, MCTS, Tool Routing
-    Coding,         // Quality, Linter, AST
+    Core,          // Always loaded tools
+    FileSystem,    // File operations
+    Network,       // Web search, fetching
+    Media,         // Camera, screenshot
+    Autonomous,    // Meta-cognitive, reflection
+    System,        // Shell, Terminal, Environment
+    Orchestration, // Swarm, MCTS, Tool Routing
+    Coding,        // Quality, Linter, AST
     Custom(String),
 }
 

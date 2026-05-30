@@ -26,14 +26,20 @@ impl IncrementalPlanner {
         replacement: PlanNode,
     ) -> PlanNode {
         match root {
-            PlanNode::Script { language, code, timeout_secs } => {
-                PlanNode::Script {
-                    language: *language,
-                    code: code.clone(),
-                    timeout_secs: *timeout_secs,
-                }
-            }
-            PlanNode::Step { tool, args, dry_run_first } => {
+            PlanNode::Script {
+                language,
+                code,
+                timeout_secs,
+            } => PlanNode::Script {
+                language: *language,
+                code: code.clone(),
+                timeout_secs: *timeout_secs,
+            },
+            PlanNode::Step {
+                tool,
+                args,
+                dry_run_first,
+            } => {
                 if tool == target_tool {
                     replacement
                 } else {
@@ -58,31 +64,36 @@ impl IncrementalPlanner {
                 }
                 PlanNode::Parallel { nodes: new_nodes }
             }
-            PlanNode::Conditional { condition, then_branch, else_branch } => {
-                PlanNode::Conditional {
-                    condition: condition.clone(),
-                    then_branch: Box::new(self.replan_node(then_branch, target_tool, replacement.clone())),
-                    else_branch: else_branch.as_ref().map(|b| Box::new(self.replan_node(b, target_tool, replacement.clone()))),
-                }
-            }
-            PlanNode::Retry { node, max_attempts } => {
-                PlanNode::Retry {
-                    node: Box::new(self.replan_node(node, target_tool, replacement.clone())),
-                    max_attempts: *max_attempts,
-                }
-            }
-            PlanNode::Verify { node, assertion_script } => {
-                PlanNode::Verify {
-                    node: Box::new(self.replan_node(node, target_tool, replacement.clone())),
-                    assertion_script: assertion_script.clone(),
-                }
-            }
-            PlanNode::Gate { gate_name, node } => {
-                PlanNode::Gate {
-                    gate_name: gate_name.clone(),
-                    node: Box::new(self.replan_node(node, target_tool, replacement.clone())),
-                }
-            }
+            PlanNode::Conditional {
+                condition,
+                then_branch,
+                else_branch,
+            } => PlanNode::Conditional {
+                condition: condition.clone(),
+                then_branch: Box::new(self.replan_node(
+                    then_branch,
+                    target_tool,
+                    replacement.clone(),
+                )),
+                else_branch: else_branch
+                    .as_ref()
+                    .map(|b| Box::new(self.replan_node(b, target_tool, replacement.clone()))),
+            },
+            PlanNode::Retry { node, max_attempts } => PlanNode::Retry {
+                node: Box::new(self.replan_node(node, target_tool, replacement.clone())),
+                max_attempts: *max_attempts,
+            },
+            PlanNode::Verify {
+                node,
+                assertion_script,
+            } => PlanNode::Verify {
+                node: Box::new(self.replan_node(node, target_tool, replacement.clone())),
+                assertion_script: assertion_script.clone(),
+            },
+            PlanNode::Gate { gate_name, node } => PlanNode::Gate {
+                gate_name: gate_name.clone(),
+                node: Box::new(self.replan_node(node, target_tool, replacement.clone())),
+            },
         }
     }
 }
@@ -122,7 +133,11 @@ mod tests {
             PlanNode::Sequence { nodes } => {
                 assert_eq!(nodes.len(), 2);
                 match &nodes[1] {
-                    PlanNode::Step { tool, dry_run_first, .. } => {
+                    PlanNode::Step {
+                        tool,
+                        dry_run_first,
+                        ..
+                    } => {
                         assert_eq!(tool, "recovered_tool");
                         assert!(*dry_run_first);
                     }

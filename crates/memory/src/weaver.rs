@@ -6,11 +6,11 @@ use async_trait::async_trait;
 use fastembed::{InitOptions, TextEmbedding};
 use futures::StreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
-use lancedb::{Connection, connect};
 use lancedb::table::OptimizeAction;
+use lancedb::{Connection, connect};
 use pharmakon_common::{AgentError, AgentResult, EmbeddingModel};
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct LocalEmbeddingModel {
     model: TextEmbedding,
@@ -126,7 +126,10 @@ impl KnowledgeNexus {
                 Field::new("node_type", DataType::Utf8, false),
                 Field::new(
                     "vector",
-                    DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 384),
+                    DataType::FixedSizeList(
+                        Arc::new(Field::new("item", DataType::Float32, true)),
+                        384,
+                    ),
                     false,
                 ),
             ]));
@@ -140,22 +143,29 @@ impl KnowledgeNexus {
                 // Check text-level deduplication cache to completely bypass expensive neural inference
                 let vector = match deduplication_cache.get(&job.text) {
                     Some(v) => {
-                        log::debug!("⚡ EmbeddingQueue Deduplication Hit: Avoided neural inference for node: {}", job.id);
+                        log::debug!(
+                            "⚡ EmbeddingQueue Deduplication Hit: Avoided neural inference for node: {}",
+                            job.id
+                        );
                         v.clone()
                     }
-                    None => {
-                        match embedding_model_clone.generate_embedding(&job.text).await {
-                            Ok(v) => {
-                                deduplication_cache.insert(job.text.clone(), v.clone());
-                                v
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to generate embedding for {}: {}. Marking as FAILED.", job.id, e);
-                                let _ = graph_clone.update_embedding_status(&job.id, "FAILED", None).await;
-                                continue;
-                            }
+                    None => match embedding_model_clone.generate_embedding(&job.text).await {
+                        Ok(v) => {
+                            deduplication_cache.insert(job.text.clone(), v.clone());
+                            v
                         }
-                    }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to generate embedding for {}: {}. Marking as FAILED.",
+                                job.id,
+                                e
+                            );
+                            let _ = graph_clone
+                                .update_embedding_status(&job.id, "FAILED", None)
+                                .await;
+                            continue;
+                        }
+                    },
                 };
 
                 let id_array = StringArray::from(vec![job.id.clone()]);
@@ -164,7 +174,7 @@ impl KnowledgeNexus {
                 let access_array = UInt32Array::from(vec![node_info.access_count]);
                 let node_type_array = StringArray::from(vec![node_info.node_type]);
                 let vector_data = Float32Array::from(vector);
-                
+
                 let vector_array = match FixedSizeListArray::try_new(
                     Arc::new(Field::new("item", DataType::Float32, true)),
                     384,
@@ -173,7 +183,11 @@ impl KnowledgeNexus {
                 ) {
                     Ok(arr) => arr,
                     Err(e) => {
-                        log::error!("Failed to construct FixedSizeListArray for {}: {}", job.id, e);
+                        log::error!(
+                            "Failed to construct FixedSizeListArray for {}: {}",
+                            job.id,
+                            e
+                        );
                         continue;
                     }
                 };
@@ -204,18 +218,28 @@ impl KnowledgeNexus {
                 let table = match table_opt {
                     Ok(t) => t,
                     Err(e) => {
-                        log::error!("Failed to open table for embedding write of node {}: {}", job.id, e);
+                        log::error!(
+                            "Failed to open table for embedding write of node {}: {}",
+                            job.id,
+                            e
+                        );
                         continue;
                     }
                 };
 
                 if let Err(e) = table.add(vec![batch]).execute().await {
-                    log::error!("Failed to insert batch into LanceDB for node {}: {}", job.id, e);
+                    log::error!(
+                        "Failed to insert batch into LanceDB for node {}: {}",
+                        job.id,
+                        e
+                    );
                     continue;
                 }
 
                 // sqlite status complete
-                let _ = graph_clone.update_embedding_status(&job.id, "COMPLETED", Some(&job.id)).await;
+                let _ = graph_clone
+                    .update_embedding_status(&job.id, "COMPLETED", Some(&job.id))
+                    .await;
             }
         });
 
@@ -373,30 +397,35 @@ impl KnowledgeNexus {
         if self.is_isolated {
             let mut documents = Vec::new();
             let query_lower = query.to_lowercase();
-            let query_tokens: std::collections::HashSet<_> = query_lower.split_whitespace().collect();
-            
+            let query_tokens: std::collections::HashSet<_> =
+                query_lower.split_whitespace().collect();
+
             let nodes = self.local_nodes.lock().await.clone();
             let mut ranked = Vec::new();
-            
+
             // Try to generate a query embedding for cosine approximation if needed
             let query_vector = self.embedding_model.generate_embedding(query).await.ok();
-            
+
             for node in nodes {
                 let text_lower = node.content.to_lowercase();
-                
+
                 // Keyword match score (weight 0.3)
-                let match_count = query_tokens.iter().filter(|&&t| text_lower.contains(t)).count();
+                let match_count = query_tokens
+                    .iter()
+                    .filter(|&&t| text_lower.contains(t))
+                    .count();
                 let keyword_score = match_count as f32 / query_tokens.len().max(1) as f32;
-                
+
                 // Cosine similarity approximation (weight 0.7)
                 let mut similarity = 0.0f32;
-                if let Some(ref q_vec) = query_vector {
-                    if let Ok(node_vec) = self.embedding_model.generate_embedding(&node.content).await {
-                        let dot: f32 = q_vec.iter().zip(node_vec.iter()).map(|(a, b)| a * b).sum();
-                        similarity = dot;
-                    }
+                if let Some(ref q_vec) = query_vector
+                    && let Ok(node_vec) =
+                        self.embedding_model.generate_embedding(&node.content).await
+                {
+                    let dot: f32 = q_vec.iter().zip(node_vec.iter()).map(|(a, b)| a * b).sum();
+                    similarity = dot;
                 }
-                
+
                 let score = (similarity * 0.7) + (keyword_score * 0.3);
                 let relevance_threshold = std::env::var("PHARMAKON_RELEVANCE_THRESHOLD")
                     .ok()
@@ -406,7 +435,7 @@ impl KnowledgeNexus {
                     ranked.push((node, score));
                 }
             }
-            
+
             ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             for (node, _) in ranked.into_iter().take(limit) {
                 documents.push(node.content);
@@ -420,7 +449,13 @@ impl KnowledgeNexus {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
 
-        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
+        let table = self
+            .conn
+            .lock()
+            .await
+            .open_table(&self.table_name)
+            .execute()
+            .await?;
         // Request more than limit to allow for re-ranking
         let mut results = table
             .vector_search(vector)?
@@ -544,7 +579,11 @@ impl KnowledgeNexus {
     /// After the standard smart_search scoring, applies a cluster affinity boost:
     /// nodes in the same topic cluster as the top result get a +15% score boost.
     /// This enables cross-session knowledge discovery (from objeta L3 cache pattern).
-    pub async fn search_with_topic_boost(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
+    pub async fn search_with_topic_boost(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<String>> {
         let results = self.smart_search(query, limit * 2).await?;
         if results.len() <= 1 {
             return Ok(results.into_iter().take(limit).collect());
@@ -562,13 +601,12 @@ impl KnowledgeNexus {
 
         for cluster in clusters.iter() {
             for member_id in &cluster.member_ids {
-                if let Ok(Some(node)) = self.graph.get_node(member_id).await {
-                    if top_result.contains(&node.content)
-                        || node.content.contains(top_result.as_str())
-                    {
-                        boost_cluster_id = Some(cluster.id);
-                        break;
-                    }
+                if let Ok(Some(node)) = self.graph.get_node(member_id).await
+                    && (top_result.contains(&node.content)
+                        || node.content.contains(top_result.as_str()))
+                {
+                    boost_cluster_id = Some(cluster.id);
+                    break;
                 }
             }
             if boost_cluster_id.is_some() {
@@ -586,13 +624,11 @@ impl KnowledgeNexus {
                 let score = if i == 0 {
                     2.0
                 } else {
-                    let in_cluster = clusters.iter()
-                        .filter(|c| c.id == cluster_id)
-                        .any(|c| {
-                            c.member_ids.iter().any(|mid| {
-                                text.contains(mid) // simple id-based match; content overlap is heavier but async
-                            })
-                        });
+                    let in_cluster = clusters.iter().filter(|c| c.id == cluster_id).any(|c| {
+                        c.member_ids.iter().any(|mid| {
+                            text.contains(mid) // simple id-based match; content overlap is heavier but async
+                        })
+                    });
                     if in_cluster { 1.15 } else { 1.0 }
                 };
                 boosted.push((text, score));
@@ -620,24 +656,37 @@ impl KnowledgeNexus {
             return Ok(());
         }
 
-        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
+        let table = self
+            .conn
+            .lock()
+            .await
+            .open_table(&self.table_name)
+            .execute()
+            .await?;
         let mut node_vectors: Vec<(String, Vec<f32>)> = Vec::new();
 
         // Fetch all vectors from LanceDB via full table scan
         if let Ok(mut stream) = table.query().execute().await {
             while let Some(Ok(batch)) = stream.next().await {
-                let id_col = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+                let id_col = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
                 let vector_col = batch.column_by_name("vector");
-                if let Some(arr) = vector_col {
-                    if let Some(list_arr) = arr.as_any().downcast_ref::<FixedSizeListArray>() {
-                        for row in 0..list_arr.len() {
-                            let id = id_col.value(row).to_string();
-                            if let Ok(Some(node)) = self.graph.get_node(&id).await
-                                && node.embedding_status == "COMPLETED"
-                                && let Some(float_arr) = list_arr.value(row).as_any().downcast_ref::<Float32Array>() {
-                                    let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
-                                    node_vectors.push((id, vec));
-                            }
+                if let Some(arr) = vector_col
+                    && let Some(list_arr) = arr.as_any().downcast_ref::<FixedSizeListArray>()
+                {
+                    for row in 0..list_arr.len() {
+                        let id = id_col.value(row).to_string();
+                        if let Ok(Some(node)) = self.graph.get_node(&id).await
+                            && node.embedding_status == "COMPLETED"
+                            && let Some(float_arr) =
+                                list_arr.value(row).as_any().downcast_ref::<Float32Array>()
+                        {
+                            let vec: Vec<f32> =
+                                (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
+                            node_vectors.push((id, vec));
                         }
                     }
                 }
@@ -670,7 +719,11 @@ impl KnowledgeNexus {
             let mut best_sim = f32::NEG_INFINITY;
 
             for (ci, cluster) in clusters.iter().enumerate() {
-                let dot: f32 = vector.iter().zip(cluster.centroid.iter()).map(|(a, b)| a * b).sum();
+                let dot: f32 = vector
+                    .iter()
+                    .zip(cluster.centroid.iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
                 if dot > best_sim {
                     best_sim = dot;
                     best_cluster = ci;
@@ -727,7 +780,13 @@ impl KnowledgeNexus {
 
     pub async fn decay_memories(&self, factor: f32) -> anyhow::Result<()> {
         let node_ids = self.graph.get_all_node_ids().await?;
-        let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
+        let table = self
+            .conn
+            .lock()
+            .await
+            .open_table(&self.table_name)
+            .execute()
+            .await?;
 
         for id in node_ids {
             if let Some(node) = self.graph.get_node(&id).await? {
@@ -735,12 +794,12 @@ impl KnowledgeNexus {
                 let suppression = (node.access_count as f32 / 100.0).min(0.95);
                 let bounded_factor = factor.clamp(0.90, 1.0);
                 let actual_factor = 1.0 - (1.0 - bounded_factor) * (1.0 - suppression);
-                
+
                 let new_score = (node.decay_score * actual_factor).max(0.01);
-                
+
                 // Update SQLite
                 self.graph.update_decay_score(&id, new_score).await?;
-                
+
                 // Update LanceDB
                 table
                     .update()
@@ -759,14 +818,16 @@ impl KnowledgeNexus {
         {
             let mut nodes = self.local_nodes.lock().await;
             let mut edges = self.local_edges.lock().await;
-            
+
             let pattern = format!("\"session_id\":\"{}\"", session_id);
             nodes.retain(|n| {
                 let props_str = serde_json::to_string(&n.properties).unwrap_or_default();
                 !props_str.contains(&pattern)
             });
-            let remaining_ids: std::collections::HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
-            edges.retain(|e| remaining_ids.contains(&e.from_id) && remaining_ids.contains(&e.to_id));
+            let remaining_ids: std::collections::HashSet<String> =
+                nodes.iter().map(|n| n.id.clone()).collect();
+            edges
+                .retain(|e| remaining_ids.contains(&e.from_id) && remaining_ids.contains(&e.to_id));
         }
 
         // 2. Identify the node IDs to delete from LanceDB BEFORE we delete them from SQLite
@@ -774,7 +835,13 @@ impl KnowledgeNexus {
 
         // 3. Delete from LanceDB & Compact table
         if !node_ids_to_delete.is_empty() {
-            let table = self.conn.lock().await.open_table(&self.table_name).execute().await?;
+            let table = self
+                .conn
+                .lock()
+                .await
+                .open_table(&self.table_name)
+                .execute()
+                .await?;
             for id in node_ids_to_delete {
                 if let Err(e) = table.delete(&format!("id = '{}'", id)).await {
                     log::warn!("Failed to delete node '{}' from LanceDB: {}", id, e);
@@ -804,14 +871,11 @@ mod tests {
         let db_path = format!("target/test_lancedb_{}", r_id);
         let graph_db_path = format!("target/test_graph_{}.db", r_id);
 
-        let nexus = KnowledgeNexus::new(
-            &db_path,
-            &graph_db_path,
-        ).await?;
+        let nexus = KnowledgeNexus::new(&db_path, &graph_db_path).await?;
 
         // Test delete_by_session with isolated/delta nodes
         let isolated = nexus.isolated();
-        
+
         let props = serde_json::json!({
             "session_id": "test-session-123"
         });
@@ -831,7 +895,8 @@ mod tests {
         };
 
         {
-            let mut nodes: tokio::sync::MutexGuard<'_, Vec<Node>> = isolated.local_nodes.lock().await;
+            let mut nodes: tokio::sync::MutexGuard<'_, Vec<Node>> =
+                isolated.local_nodes.lock().await;
             nodes.push(node);
         }
 

@@ -237,28 +237,31 @@ impl GeminiModel {
             let mut parts = Vec::new();
 
             if let Some(ref content) = m.content
-                && m.role != "tool" {
-                    match content {
-                        MessageContent::Text(t) => parts.push(GeminiPart {
-                            text: Some(t.clone()),
-                            inline_data: None,
-                            function_call: None,
-                            function_response: None,
-                            thought: None,
-                        }),
-                        MessageContent::Multimodal(p) => {
-                            for part in p {
-                                if let ContentPart::Text { text } = part { parts.push(GeminiPart {
+                && m.role != "tool"
+            {
+                match content {
+                    MessageContent::Text(t) => parts.push(GeminiPart {
+                        text: Some(t.clone()),
+                        inline_data: None,
+                        function_call: None,
+                        function_response: None,
+                        thought: None,
+                    }),
+                    MessageContent::Multimodal(p) => {
+                        for part in p {
+                            if let ContentPart::Text { text } = part {
+                                parts.push(GeminiPart {
                                     text: Some(text.clone()),
                                     inline_data: None,
                                     function_call: None,
                                     function_response: None,
                                     thought: None,
-                                }) }
+                                })
                             }
                         }
                     }
                 }
+            }
 
             if let Some(ref tool_calls) = m.tool_calls {
                 for tc in tool_calls {
@@ -279,8 +282,9 @@ impl GeminiModel {
             }
 
             if m.role == "tool"
-                && let Some(ref content) = m.content {
-                    let function_name = m.name.clone().filter(|n| !n.is_empty()).or_else(|| {
+                && let Some(ref content) = m.content
+            {
+                let function_name = m.name.clone().filter(|n| !n.is_empty()).or_else(|| {
                         log::debug!(
                             "Tool message is missing the 'name' field, attempting fallback lookup for tool_call_id: {:?}.",
                             m.tool_call_id
@@ -308,31 +312,34 @@ impl GeminiModel {
                         }
                     }).unwrap_or_default();
 
-                    // Pre-flight validation: Ensure the function name is not empty before sending to API
-                    if function_name.is_empty() {
-                       log::error!("A tool response part has an empty function name for tool_call_id {:?}. Falling back to text part to avoid API rejection.", m.tool_call_id);
-                        // Emit the tool result as a text part instead so the model still receives the information
-                        // and the request isn't rejected by the Gemini API for an invalid function_response.
-                        parts.push(GeminiPart {
-                            text: Some(format!("[Tool result (unknown tool)]: {}", content)),
-                            inline_data: None,
-                            function_call: None,
-                            function_response: None,
-                            thought: None,
-                        });
-                    } else {
-                        parts.push(GeminiPart {
-                            text: None,
-                            inline_data: None,
-                            function_call: None,
-                            function_response: Some(GeminiFunctionResponse {
-                                name: function_name,
-                                response: serde_json::json!({ "result": content.to_string() }),
-                            }),
-                            thought: None,
-                        });
-                    }
+                // Pre-flight validation: Ensure the function name is not empty before sending to API
+                if function_name.is_empty() {
+                    log::error!(
+                        "A tool response part has an empty function name for tool_call_id {:?}. Falling back to text part to avoid API rejection.",
+                        m.tool_call_id
+                    );
+                    // Emit the tool result as a text part instead so the model still receives the information
+                    // and the request isn't rejected by the Gemini API for an invalid function_response.
+                    parts.push(GeminiPart {
+                        text: Some(format!("[Tool result (unknown tool)]: {}", content)),
+                        inline_data: None,
+                        function_call: None,
+                        function_response: None,
+                        thought: None,
+                    });
+                } else {
+                    parts.push(GeminiPart {
+                        text: None,
+                        inline_data: None,
+                        function_call: None,
+                        function_response: Some(GeminiFunctionResponse {
+                            name: function_name,
+                            response: serde_json::json!({ "result": content.to_string() }),
+                        }),
+                        thought: None,
+                    });
                 }
+            }
 
             if !parts.is_empty() {
                 raw_contents.push(GeminiContent {
@@ -346,11 +353,12 @@ impl GeminiModel {
         let mut cleaned_contents: Vec<GeminiContent> = Vec::new();
         for content in raw_contents {
             if let Some(last) = cleaned_contents.last_mut()
-                && last.role == content.role {
-                    // Merge parts if roles are the same
-                    last.parts.extend(content.parts);
-                    continue;
-                }
+                && last.role == content.role
+            {
+                // Merge parts if roles are the same
+                last.parts.extend(content.parts);
+                continue;
+            }
             cleaned_contents.push(content);
         }
 
@@ -478,7 +486,7 @@ impl AgentModel for GeminiModel {
                         google_search_retrieval: None,
                     });
                 }
-                
+
                 gemini_tools
             }),
             tool_config: if request.tools.is_some() {
@@ -647,7 +655,9 @@ impl AgentModel for GeminiModel {
             );
             if let Some(reason) = &candidate.finish_reason {
                 if reason == "MAX_TOKENS" {
-                    content = Some(MessageContent::Text("[Model stopped: Max tokens reached]".to_string()));
+                    content = Some(MessageContent::Text(
+                        "[Model stopped: Max tokens reached]".to_string(),
+                    ));
                 } else if reason == "STOP" {
                     content = Some(MessageContent::Text(String::new()));
                 } else {
@@ -668,13 +678,14 @@ impl AgentModel for GeminiModel {
                 );
 
                 if let Some(ref t) = part.text
-                    && !t.is_empty() {
-                        if content.is_none() {
-                            content = Some(MessageContent::Text(t.clone()));
-                        } else if let Some(MessageContent::Text(ref mut existing)) = content {
-                            existing.push_str(t);
-                        }
+                    && !t.is_empty()
+                {
+                    if content.is_none() {
+                        content = Some(MessageContent::Text(t.clone()));
+                    } else if let Some(MessageContent::Text(ref mut existing)) = content {
+                        existing.push_str(t);
                     }
+                }
                 if let Some(ref th) = part.thought {
                     log::info!("Received native thought from Gemini (length: {})", th.len());
                     if content.is_none() {
@@ -773,9 +784,14 @@ impl AgentModel for GeminiModel {
                         fn fix_array_items(val: &mut serde_json::Value) {
                             if let Some(obj) = val.as_object_mut() {
                                 if let Some(type_val) = obj.get("type")
-                                    && type_val == "array" && !obj.contains_key("items") {
-                                        obj.insert("items".to_string(), serde_json::json!({ "type": "string" }));
-                                    }
+                                    && type_val == "array"
+                                    && !obj.contains_key("items")
+                                {
+                                    obj.insert(
+                                        "items".to_string(),
+                                        serde_json::json!({ "type": "string" }),
+                                    );
+                                }
                                 for (_, v) in obj.iter_mut() {
                                     fix_array_items(v);
                                 }
@@ -861,7 +877,8 @@ impl AgentModel for GeminiModel {
                 // for actual output beyond the thinking budget, otherwise Gemini
                 // returns MAX_TOKENS with empty candidates.
                 let min_output_headroom = if complexity >= 0.7 { 4096u32 } else { 2048u32 };
-                let effective_max = request.max_tokens
+                let effective_max = request
+                    .max_tokens
                     .unwrap_or(8192)
                     .max(thinking_budget + min_output_headroom)
                     .min(8192); // Gemini hard cap
@@ -943,29 +960,27 @@ impl AgentModel for GeminiModel {
                         }
                         if let Some(data) = line.strip_prefix("data: ")
                             && let Ok(json) = serde_json::from_str::<serde_json::Value>(data)
-                                && let Some(candidates) = json["candidates"].as_array()
-                                    && let Some(first_candidate) = candidates.first() {
-                                        let parts = first_candidate["content"]["parts"].as_array();
-                                        let mut chunk_text = String::new();
+                            && let Some(candidates) = json["candidates"].as_array()
+                            && let Some(first_candidate) = candidates.first()
+                        {
+                            let parts = first_candidate["content"]["parts"].as_array();
+                            let mut chunk_text = String::new();
 
-                                        if let Some(parts_vec) = parts {
-                                            for part in parts_vec {
-                                                if let Some(text) = part["text"].as_str() {
-                                                    chunk_text.push_str(text);
-                                                }
-                                                if let Some(thought) = part["thought"].as_str() {
-                                                    chunk_text.push_str(&format!(
-                                                        "<think>{}</think>",
-                                                        thought
-                                                    ));
-                                                }
-                                            }
-                                        }
-
-                                        if !chunk_text.is_empty() {
-                                            return Some((Ok(chunk_text), (byte_stream, buffer)));
-                                        }
+                            if let Some(parts_vec) = parts {
+                                for part in parts_vec {
+                                    if let Some(text) = part["text"].as_str() {
+                                        chunk_text.push_str(text);
                                     }
+                                    if let Some(thought) = part["thought"].as_str() {
+                                        chunk_text.push_str(&format!("<think>{}</think>", thought));
+                                    }
+                                }
+                            }
+
+                            if !chunk_text.is_empty() {
+                                return Some((Ok(chunk_text), (byte_stream, buffer)));
+                            }
+                        }
                         continue;
                     }
 

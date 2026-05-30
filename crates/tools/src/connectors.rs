@@ -54,9 +54,10 @@ impl Tool for ContextConnectorTool {
 
         for connector in &self.connectors {
             if let Some(s) = specific_source
-                && connector.name() != s {
-                    continue;
-                }
+                && connector.name() != s
+            {
+                continue;
+            }
 
             match connector.fetch_context(query).await {
                 Ok(context) => {

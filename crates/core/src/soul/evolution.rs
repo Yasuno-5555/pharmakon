@@ -46,13 +46,11 @@ impl SoulEvolutionWorker {
         );
 
         let request = CompletionRequest {
-            messages: vec![
-                Message {
-                    role: "user".to_string(),
-                    content: Some(MessageContent::Text(user_prompt)),
-                    ..Default::default()
-                },
-            ],
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text(user_prompt)),
+                ..Default::default()
+            }],
             temperature: Some(0.3),
             max_tokens: Some(500),
             tools: None,

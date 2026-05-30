@@ -1,3 +1,4 @@
+use crate::channels::Channel;
 use anyhow::Result;
 use axum::{
     Json, Router,
@@ -13,16 +14,22 @@ use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use crate::channels::Channel;
 
 pub mod acp;
 pub mod api;
 pub mod auth;
 pub mod canvas;
-pub mod pairing;
-pub mod webhooks;
 pub mod channels;
+pub mod pairing;
 pub mod ui;
+pub mod webhooks;
+
+pub type GatewayState = (
+    Arc<Agent>,
+    Arc<canvas::CanvasHost>,
+    Arc<pharmakon_core::automation::cron::CronManager>,
+    Arc<pharmakon_common::Config>,
+);
 
 #[derive(Serialize)]
 struct StatusResponse {
@@ -75,7 +82,9 @@ impl Gateway {
         // Gateway-specific: Brave search with API key, if available
         if let Ok(key) = std::env::var("BRAVE_SEARCH_API_KEY") {
             use pharmakon_tools::search::BraveSearchTool;
-            self.agent.add_tool(Arc::new(BraveSearchTool::new(key))).await;
+            self.agent
+                .add_tool(Arc::new(BraveSearchTool::new(key)))
+                .await;
         }
 
         Ok(())
@@ -137,8 +146,12 @@ impl Gateway {
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         log::info!("Gateway listening on http://{}", addr);
-        log::warn!("Gateway is using plain HTTP. Set PHARMAKON_GATEWAY_TLS_CERT and PHARMAKON_GATEWAY_TLS_KEY env vars for HTTPS.");
-        log::warn!("For production, place a reverse proxy (nginx/caddy) in front of the gateway for TLS termination.");
+        log::warn!(
+            "Gateway is using plain HTTP. Set PHARMAKON_GATEWAY_TLS_CERT and PHARMAKON_GATEWAY_TLS_KEY env vars for HTTPS."
+        );
+        log::warn!(
+            "For production, place a reverse proxy (nginx/caddy) in front of the gateway for TLS termination."
+        );
 
         // (CronManager is now managed externally via CronTool)
 
@@ -173,12 +186,7 @@ impl Gateway {
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    State((agent, canvas_host, cron_manager, _config)): State<(
-        Arc<pharmakon_core::agent::Agent>,
-        Arc<canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
+    State((agent, canvas_host, cron_manager, _config)): State<GatewayState>,
 ) -> impl IntoResponse {
     tracing::info!("WebSocket upgrade request received!");
     ws.on_upgrade(move |socket| handle_socket(socket, agent, canvas_host, cron_manager))
@@ -186,12 +194,7 @@ async fn ws_handler(
 
 async fn acp_handler(
     ws: WebSocketUpgrade,
-    State((agent, _, _, _)): State<(
-        Arc<pharmakon_core::agent::Agent>,
-        Arc<canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
+    State((agent, _, _, _)): State<GatewayState>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| crate::acp::server::handle_acp_socket(socket, agent))
 }
@@ -210,7 +213,8 @@ async fn handle_socket(
     // Send initial canvas state
     let initial_state = canvas_host.get_state();
     for primitive in initial_state.elements {
-        if let Ok(msg) = serde_json::to_string(&pharmakon_common::Event::CanvasUpdate { primitive }) {
+        if let Ok(msg) = serde_json::to_string(&pharmakon_common::Event::CanvasUpdate { primitive })
+        {
             let _ = sender.send(WsMessage::Text(msg.into())).await;
         }
     }
@@ -406,12 +410,13 @@ async fn handle_socket(
                     Request::GetTools => {
                         let agent_lock = agent_clone_inner;
                         let reg = agent_lock.registry.lock().await;
-                        let tools = reg.all_metadata()
+                        let tools = reg
+                            .all_metadata()
                             .iter()
                             .map(|t| pharmakon_common::ToolInfo {
                                 name: t.name.clone(),
                                 description: t.description.clone(),
-                                parameters: serde_json::Value::Null, 
+                                parameters: serde_json::Value::Null,
                             })
                             .collect();
                         let event = Event::ToolList { tools };
@@ -465,17 +470,18 @@ async fn handle_socket(
                     Request::GetGraphMemory { query } => {
                         let agent_lock = agent_clone_inner;
                         if let Some(graph) = &agent_lock.graph_store
-                            && let Ok(relations) = graph.query_relations(&query).await {
-                                let relations_str = relations
-                                    .into_iter()
-                                    .map(|(n, e)| {
-                                        format!("{} -> {} ({})", e.from_id, n.label, e.relation)
-                                    })
-                                    .collect();
-                                let _ = agent_lock.event_tx.send(Event::GraphUpdate {
-                                    relations: relations_str,
-                                });
-                            }
+                            && let Ok(relations) = graph.query_relations(&query).await
+                        {
+                            let relations_str = relations
+                                .into_iter()
+                                .map(|(n, e)| {
+                                    format!("{} -> {} ({})", e.from_id, n.label, e.relation)
+                                })
+                                .collect();
+                            let _ = agent_lock.event_tx.send(Event::GraphUpdate {
+                                relations: relations_str,
+                            });
+                        }
                     }
                     Request::GetModels => {
                         let models = pharmakon_core::providers::registry::ModelRegistry::list_available_models();

@@ -8,7 +8,11 @@ interface Soul {
   system_prompt: string;
 }
 
-const SoulConfigurator: React.FC<{ socket: WebSocket | null }> = ({ socket }) => {
+interface SoulConfiguratorProps {
+  onSync: (traits: string[], systemPrompt: string) => void;
+}
+
+const SoulConfigurator: React.FC<SoulConfiguratorProps> = ({ onSync }) => {
   const [soul, setSoul] = useState<Soul>({
     name: 'Pharmakon',
     traits: ['helpful', 'efficient', 'precise'],
@@ -16,14 +20,7 @@ const SoulConfigurator: React.FC<{ socket: WebSocket | null }> = ({ socket }) =>
   });
 
   const updateSoul = () => {
-    if (!socket) return;
-    socket.send(JSON.stringify({
-      type: 'UpdateSoul',
-      payload: {
-        traits: soul.traits,
-        system_prompt: soul.system_prompt
-      }
-    }));
+    onSync(soul.traits, soul.system_prompt);
   };
 
   return (

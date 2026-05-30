@@ -66,10 +66,11 @@ impl PairingManager {
         let path = Self::get_pending_path();
         if path.exists()
             && let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(pending) = serde_json::from_str(&content) {
-                    let mut lock = self.pending_pairings.lock().unwrap();
-                    *lock = pending;
-                }
+            && let Ok(pending) = serde_json::from_str(&content)
+        {
+            let mut lock = self.pending_pairings.lock().unwrap();
+            *lock = pending;
+        }
         Ok(())
     }
 

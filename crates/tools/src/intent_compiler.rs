@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use pharmakon_common::{AgentResult, Tool, ToolCategory};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct IntentCompilerTool;
 

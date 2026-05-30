@@ -7,11 +7,15 @@ use std::path::PathBuf;
 pub struct PlaybookTool;
 
 impl Default for PlaybookTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PlaybookTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 /// Structured playbook metadata for discovery and suggestion.
@@ -47,7 +51,15 @@ impl PlaybookTool {
                 name: "web_research",
                 category: "Research",
                 description: "Search the web and compile structured findings with citations",
-                keywords: &["search", "google", "research", "lookup", "find information", "web", "internet"],
+                keywords: &[
+                    "search",
+                    "google",
+                    "research",
+                    "lookup",
+                    "find information",
+                    "web",
+                    "internet",
+                ],
                 tools: &["search", "web_fetch"],
                 content: "GOAL: Gather information from the web and produce a structured report.\n\n1. Identify 2-4 specific search queries related to the topic.\n2. Use `search` with each query to discover relevant pages.\n3. For the most promising 2-3 results per query, use `web_fetch` to retrieve full content.\n4. Extract key facts, dates, and claims from each source.\n5. Cross-reference: verify critical claims across at least 2 sources.\n6. Produce a structured summary:\n   - **Topic**: one-line summary\n   - **Key Findings**: bulleted list with source URLs\n   - **Confidence**: high/medium/low per finding\n   - **Sources**: numbered list of all URLs consulted",
             },
@@ -55,7 +67,14 @@ impl PlaybookTool {
                 name: "deep_research",
                 category: "Research",
                 description: "Multi-source deep dive with source verification and structured output",
-                keywords: &["deep research", "comprehensive", "thorough", "investigate", "analyze", "survey"],
+                keywords: &[
+                    "deep research",
+                    "comprehensive",
+                    "thorough",
+                    "investigate",
+                    "analyze",
+                    "survey",
+                ],
                 tools: &["search", "web_fetch", "duckduckgo_search"],
                 content: "GOAL: Conduct exhaustive multi-source research on a complex topic.\n\n1. Define the research scope: what to include and exclude.\n2. Use `search` with 5-8 varied query formulations.\n3. For each promising result, use `web_fetch` to extract full article text.\n4. Categorize findings by theme/subtopic.\n5. For each category, cross-reference at least 3 sources.\n6. Identify contradictions between sources and note them.\n7. Produce:\n   - **Executive Summary** (3-5 sentences)\n   - **Detailed Findings** by category with source citations\n   - **Contradictions & Open Questions**\n   - **Source List** with brief credibility notes",
             },
@@ -72,7 +91,14 @@ impl PlaybookTool {
                 name: "security_audit",
                 category: "Quality",
                 description: "Security-focused audit of code and dependencies",
-                keywords: &["security", "vulnerability", "audit", "secret", "unsafe", "exploit"],
+                keywords: &[
+                    "security",
+                    "vulnerability",
+                    "audit",
+                    "secret",
+                    "unsafe",
+                    "exploit",
+                ],
                 tools: &["grep_files", "read_file", "shell", "web_fetch"],
                 content: "GOAL: Identify security vulnerabilities in the codebase.\n\n1. Use `shell` to list dependencies (cargo audit, npm audit, pip audit).\n2. Use `grep_files` with patterns:\n   - `(?i)(api_key|secret|password|token|credential)\\s*=` (hardcoded secrets)\n   - `unsafe\\s*\\{` (unsafe Rust blocks)\n   - `eval\\(|exec\\(|system\\(` (code injection risks)\n3. Review any `.env` or config files for committed secrets.\n4. Use `web_fetch` to check dependency CVEs if applicable.\n5. Rate each finding: CRITICAL / HIGH / MEDIUM / LOW.\n6. For each CRITICAL/HIGH, provide a concrete fix recommendation.",
             },
@@ -82,23 +108,51 @@ impl PlaybookTool {
                 category: "Development",
                 description: "Safe Rust refactoring with compiler-guided verification",
                 keywords: &["refactor", "rust", "rewrite", "restructure", "cargo"],
-                tools: &["read_file", "grep_files", "apply_patch", "write_file", "shell"],
+                tools: &[
+                    "read_file",
+                    "grep_files",
+                    "apply_patch",
+                    "write_file",
+                    "shell",
+                ],
                 content: "GOAL: Refactor Rust code with minimal risk.\n\n1. Use `read_file` to understand the current module structure.\n2. Use `grep_files` to find all call sites and trait implementations.\n3. Plan the new structure before writing code.\n4. Create new module/impl incrementally using `write_file`.\n5. Update call sites using `apply_patch` (preferred) or `write_file`.\n6. After each change, run `shell` with `cargo check`.\n7. If check fails, fix errors immediately before proceeding.\n8. After all changes, run `cargo test`.\n9. DO NOT proceed to step 5 until step 4 compiles cleanly.",
             },
             PlaybookDef {
                 name: "implement_feature",
                 category: "Development",
                 description: "End-to-end feature implementation workflow",
-                keywords: &["implement", "feature", "build", "create", "add", "new endpoint", "new function"],
-                tools: &["read_file", "write_file", "grep_files", "shell", "apply_patch"],
+                keywords: &[
+                    "implement",
+                    "feature",
+                    "build",
+                    "create",
+                    "add",
+                    "new endpoint",
+                    "new function",
+                ],
+                tools: &[
+                    "read_file",
+                    "write_file",
+                    "grep_files",
+                    "shell",
+                    "apply_patch",
+                ],
                 content: "GOAL: Implement a new feature from specification to passing tests.\n\n1. Understand the codebase: use `read_file` on relevant existing modules.\n2. Use `grep_files` to find patterns similar to what you need to build.\n3. Write tests FIRST using `write_file` (TDD approach).\n4. Implement the minimum code to pass tests.\n5. Run `shell` with `cargo test` (or equivalent test runner).\n6. Iterate steps 4-5 until all tests pass.\n7. Use `write_file` to update documentation if applicable.\n8. Run final full test suite to check for regressions.",
             },
             PlaybookDef {
                 name: "bug_hunt",
                 category: "Development",
                 description: "Systematic bug diagnosis and fix workflow",
-                keywords: &["bug", "fix", "error", "crash", "broken", "debug", "issue", "problem"],
-                tools: &["read_file", "grep_files", "shell", "write_file", "apply_patch"],
+                keywords: &[
+                    "bug", "fix", "error", "crash", "broken", "debug", "issue", "problem",
+                ],
+                tools: &[
+                    "read_file",
+                    "grep_files",
+                    "shell",
+                    "write_file",
+                    "apply_patch",
+                ],
                 content: "GOAL: Find and fix a bug with minimal collateral damage.\n\n1. Reproduce the bug: what exact input/state triggers it?\n2. Read the error output carefully — note file paths and line numbers.\n3. Use `read_file` on the failing module, focusing on the error site.\n4. Use `grep_files` to find ALL code paths that lead to the failing function.\n5. Add diagnostic `shell` commands or temporary logging to isolate the cause.\n6. Once root cause is identified, write the minimal fix.\n7. Verify the fix resolves the original bug.\n8. Run the full test suite to ensure no regressions.\n9. If the fix is >20 lines, consider whether a broader refactor is needed.",
             },
             // ── Infrastructure ──
@@ -106,7 +160,15 @@ impl PlaybookTool {
                 name: "dependency_update",
                 category: "Infrastructure",
                 description: "Safe dependency version update workflow",
-                keywords: &["dependency", "update", "upgrade", "crate", "package", "version", "bump"],
+                keywords: &[
+                    "dependency",
+                    "update",
+                    "upgrade",
+                    "crate",
+                    "package",
+                    "version",
+                    "bump",
+                ],
                 tools: &["read_file", "shell", "grep_files", "apply_patch"],
                 content: "GOAL: Update project dependencies safely.\n\n1. Use `shell` to check current versions: `cargo outdated` or `npm outdated`.\n2. Read the changelog of the target dependency using `web_fetch`.\n3. Update version in Cargo.toml / package.json using `apply_patch`.\n4. Run `shell` with build command (cargo build / npm build).\n5. If build fails, check for breaking changes in the dependency's changelog.\n6. Fix any API breakage using `grep_files` to find all affected call sites.\n7. Run full test suite.\n8. If all passes, the update is complete. If not, roll back and report blockers.",
             },
@@ -114,8 +176,22 @@ impl PlaybookTool {
                 name: "project_setup",
                 category: "Infrastructure",
                 description: "Initialize or assess a project structure",
-                keywords: &["setup", "init", "scaffold", "project", "workspace", "new project", "onboard"],
-                tools: &["workspace_perception", "repomap", "read_file", "shell", "list_dir"],
+                keywords: &[
+                    "setup",
+                    "init",
+                    "scaffold",
+                    "project",
+                    "workspace",
+                    "new project",
+                    "onboard",
+                ],
+                tools: &[
+                    "workspace_perception",
+                    "repomap",
+                    "read_file",
+                    "shell",
+                    "list_dir",
+                ],
                 content: "GOAL: Understand and document a project's structure.\n\n1. Use `workspace_perception` to detect project type and structure.\n2. Use `repomap` to get a structural overview.\n3. Use `list_dir` to explore the top-level directory layout.\n4. Identify: build system, test framework, key entry points, config files.\n5. Use `read_file` on README, Cargo.toml/package.json, and main entry point.\n6. Produce:\n   - **Project Type**: language, framework, build system\n   - **Key Modules**: top 3-5 directories and their purpose\n   - **Entry Points**: main file, config, test runner\n   - **Dependencies**: count and notable ones\n   - **Quick Start**: commands to build, test, and run",
             },
             // ── Documentation ──
@@ -132,7 +208,15 @@ impl PlaybookTool {
                 name: "data_analysis",
                 category: "Analysis",
                 description: "Analyze codebase data: metrics, patterns, trends",
-                keywords: &["analyze", "metrics", "statistics", "count", "measure", "profile", "benchmark"],
+                keywords: &[
+                    "analyze",
+                    "metrics",
+                    "statistics",
+                    "count",
+                    "measure",
+                    "profile",
+                    "benchmark",
+                ],
                 tools: &["shell", "grep_files", "read_file", "codeact"],
                 content: "GOAL: Extract quantitative insights from the codebase.\n\n1. Define what to measure (lines of code, test coverage, dependency count, etc).\n2. Use `shell` with tools like `tokei`, `cloc`, or `wc -l` for line counts.\n3. Use `grep_files` with patterns to count occurrences of patterns.\n4. For complex analysis, use `codeact` to write a Rhai script.\n5. Present results as structured data:\n   - Raw numbers with context\n   - Trends if historical data is available\n   - Comparison to benchmarks if applicable\n6. Suggest actionable insights based on the data.",
             },
@@ -166,7 +250,9 @@ impl PlaybookTool {
         let mut scored: Vec<(&PlaybookDef, usize)> = all
             .iter()
             .map(|p| {
-                let score = p.keywords.iter()
+                let score = p
+                    .keywords
+                    .iter()
                     .filter(|kw| lower.contains(&kw.to_lowercase()))
                     .count();
                 (p, score)
@@ -186,23 +272,27 @@ impl PlaybookTool {
 
         let recipes_dir = PathBuf::from(".pharmakon/recipes");
         if recipes_dir.exists()
-            && let Ok(entries) = fs::read_dir(&recipes_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file()
-                        && let Some(name) = path.file_stem().and_then(|s| s.to_str())
-                            && !names.contains(&name.to_string()) {
-                                names.push(name.to_string());
-                            }
+            && let Ok(entries) = fs::read_dir(&recipes_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+                    && !names.contains(&name.to_string())
+                {
+                    names.push(name.to_string());
                 }
             }
+        }
         names
     }
 }
 
 #[async_trait]
 impl Tool for PlaybookTool {
-    fn name(&self) -> &str { "playbook" }
+    fn name(&self) -> &str {
+        "playbook"
+    }
     fn description(&self) -> &str {
         "Manage and execute pre-defined workflows (playbooks). Use `suggest` to find the right playbook for your task, `load` to read its steps, or `inject` to activate it for the session."
     }
@@ -233,21 +323,29 @@ impl Tool for PlaybookTool {
             "suggest" => {
                 let query = args["query"].as_str().unwrap_or("");
                 if query.is_empty() {
-                    return Err(AgentError("Provide a `query` describing your task for suggestions.".into()));
+                    return Err(AgentError(
+                        "Provide a `query` describing your task for suggestions.".into(),
+                    ));
                 }
                 let matches = Self::suggest_for_task(query);
                 if matches.is_empty() {
-                    Ok("No matching playbooks found. Try `list` to see all available playbooks.".into())
+                    Ok(
+                        "No matching playbooks found. Try `list` to see all available playbooks."
+                            .into(),
+                    )
                 } else {
-                    let lines: Vec<String> = matches.iter().map(|p| {
-                        format!(
-                            "- **{}** [{}]: {} (uses: {})",
-                            p.name,
-                            p.category,
-                            p.description,
-                            p.tools.join(", ")
-                        )
-                    }).collect();
+                    let lines: Vec<String> = matches
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "- **{}** [{}]: {} (uses: {})",
+                                p.name,
+                                p.category,
+                                p.description,
+                                p.tools.join(", ")
+                            )
+                        })
+                        .collect();
                     Ok(format!(
                         "### Suggested Playbooks for: \"{}\"\n\n{}\n\nUse `load` with the playbook name to see its steps, or `inject` to activate it.",
                         query,
@@ -267,22 +365,24 @@ impl Tool for PlaybookTool {
 
                 // Local recipes
                 if recipes_dir.exists()
-                    && let Ok(entries) = fs::read_dir(&recipes_dir) {
-                        let mut custom = vec![];
-                        for e in entries.flatten() {
-                            let path = e.path();
-                            if path.is_file()
-                                && let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                                    custom.push(name.to_string());
-                                }
-                        }
-                        if !custom.is_empty() {
-                            lines.push("\n## Custom Recipes\n".into());
-                            for name in &custom {
-                                lines.push(format!("- {} (custom)", name));
-                            }
+                    && let Ok(entries) = fs::read_dir(&recipes_dir)
+                {
+                    let mut custom = vec![];
+                    for e in entries.flatten() {
+                        let path = e.path();
+                        if path.is_file()
+                            && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+                        {
+                            custom.push(name.to_string());
                         }
                     }
+                    if !custom.is_empty() {
+                        lines.push("\n## Custom Recipes\n".into());
+                        for name in &custom {
+                            lines.push(format!("- {} (custom)", name));
+                        }
+                    }
+                }
 
                 if lines.len() <= 1 {
                     Ok("No playbooks found.".into())
@@ -291,7 +391,8 @@ impl Tool for PlaybookTool {
                 }
             }
             "load" | "inject" => {
-                let name = args["name"].as_str()
+                let name = args["name"]
+                    .as_str()
                     .ok_or_else(|| AgentError("Missing playbook `name`.".into()))?;
 
                 let mut content = Self::all_playbooks()
@@ -304,7 +405,10 @@ impl Tool for PlaybookTool {
                     if !path.exists() {
                         for ext in &["json", "yaml", "md", "txt"] {
                             let p = recipes_dir.join(format!("{}.{}", name, ext));
-                            if p.exists() { path = p; break; }
+                            if p.exists() {
+                                path = p;
+                                break;
+                            }
                         }
                     }
                     if path.exists() {
@@ -328,7 +432,9 @@ impl Tool for PlaybookTool {
                     ))
                 }
             }
-            _ => Err(AgentError("Invalid action. Use: suggest, list, load, inject.".into())),
+            _ => Err(AgentError(
+                "Invalid action. Use: suggest, list, load, inject.".into(),
+            )),
         }
     }
 }

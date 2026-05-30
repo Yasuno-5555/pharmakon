@@ -10,14 +10,12 @@ use std::collections::HashMap;
 
 /// Stop words filtered from BM25 indexing.
 const STOP_WORDS: &[&str] = &[
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "to", "of", "in", "for",
-    "on", "with", "at", "by", "from", "as", "into", "through", "during",
-    "before", "after", "above", "below", "between", "under", "and", "but",
-    "or", "nor", "not", "so", "yet", "both", "either", "neither", "each",
-    "this", "that", "these", "those", "it", "its", "use", "using", "used",
-    "tool", "tools", "based", "specific", "given",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can", "to",
+    "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "through", "during",
+    "before", "after", "above", "below", "between", "under", "and", "but", "or", "nor", "not",
+    "so", "yet", "both", "either", "neither", "each", "this", "that", "these", "those", "it",
+    "its", "use", "using", "used", "tool", "tools", "based", "specific", "given",
 ];
 
 /// BM25-indexed tool catalog for deferred loading.
@@ -121,7 +119,11 @@ impl ToolMetaCatalog {
             })
             .collect();
 
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(top_k);
         results
     }
@@ -190,7 +192,10 @@ impl ToolMetaCatalog {
 
     /// Get all tools mapped to a specific capability.
     pub fn by_capability(&self, capability: &crate::capability::Capability) -> Vec<&ToolMeta> {
-        self.entries.iter().filter(|m| crate::capability::Capability::from_tool_name(&m.name) == Some(*capability)).collect()
+        self.entries
+            .iter()
+            .filter(|m| crate::capability::Capability::from_tool_name(&m.name) == Some(*capability))
+            .collect()
     }
 }
 

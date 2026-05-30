@@ -145,14 +145,11 @@ impl AgentModel for PerplexityModel {
                         }
                         if let Some(data) = line.strip_prefix("data: ")
                             && let Ok(json) = serde_json::from_str::<Value>(data)
-                                && let Some(content) =
-                                    json["choices"][0]["delta"]["content"].as_str()
-                                    && !content.is_empty() {
-                                        return Some((
-                                            Ok(content.to_string()),
-                                            (byte_stream, buffer),
-                                        ));
-                                    }
+                            && let Some(content) = json["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            return Some((Ok(content.to_string()), (byte_stream, buffer)));
+                        }
                         continue;
                     }
 

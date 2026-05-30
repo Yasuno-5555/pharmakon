@@ -12,10 +12,10 @@
 //!   Trajectory Compression — extract safe_refactor() patterns from traces
 //!   Skill Crystallization — suggest Rhai→Rust native translation
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
-use anyhow::Result;
 
 // ═══════════════════════════════════════════════════════════
 // Data Structures
@@ -32,8 +32,12 @@ pub enum Label {
 }
 
 impl Label {
-    pub fn is_success(&self) -> bool { matches!(self, Label::Success { .. }) }
-    pub fn is_failure(&self) -> bool { !self.is_success() }
+    pub fn is_success(&self) -> bool {
+        matches!(self, Label::Success { .. })
+    }
+    pub fn is_failure(&self) -> bool {
+        !self.is_success()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,20 +68,27 @@ pub struct SkillGenome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailureMode { pub mode: String, pub count: usize }
+pub struct FailureMode {
+    pub mode: String,
+    pub count: usize,
+}
 
 /// Composite Skill — merged from two or more primitives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompositeSkill {
-    pub id: String, pub name: String,
-    pub sources: Vec<String>, pub script: String,
-    pub description: String, pub genome: SkillGenome,
+    pub id: String,
+    pub name: String,
+    pub sources: Vec<String>,
+    pub script: String,
+    pub description: String,
+    pub genome: SkillGenome,
 }
 
 /// Trajectory Compression — high-level pattern from raw traces.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressedPattern {
-    pub pattern_name: String, pub signature: String,
+    pub pattern_name: String,
+    pub signature: String,
     pub description: String,
     #[serde(default)]
     pub occurrence_count: usize,
@@ -86,30 +97,46 @@ pub struct CompressedPattern {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ModelTier {
-    Cheap, Medium, Premium,
+    Cheap,
+    Medium,
+    Premium,
 }
 
 /// Skill Crystallization — Rhai ready for Rust native translation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrystallizationCandidate {
-    pub skill_id: String, pub rhai_signature: String,
-    pub suggested_rust_name: String, pub confidence: f32, pub reason: String,
+    pub skill_id: String,
+    pub rhai_signature: String,
+    pub suggested_rust_name: String,
+    pub confidence: f32,
+    pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum PrimitiveStage {
     #[default]
-    Experimental, Stable, Core, Deprecated, Removed,
+    Experimental,
+    Stable,
+    Core,
+    Deprecated,
+    Removed,
 }
-
 
 impl PrimitiveStage {
     pub fn promote(&mut self) {
-        *self = match self { Self::Experimental => Self::Stable, Self::Stable => Self::Core, _ => return };
+        *self = match self {
+            Self::Experimental => Self::Stable,
+            Self::Stable => Self::Core,
+            _ => return,
+        };
     }
     pub fn demote(&mut self) {
-        *self = match self { Self::Core => Self::Stable, Self::Stable => Self::Experimental, Self::Experimental => Self::Deprecated, _ => return };
+        *self = match self {
+            Self::Core => Self::Stable,
+            Self::Stable => Self::Experimental,
+            Self::Experimental => Self::Deprecated,
+            _ => return,
+        };
     }
 }
 
@@ -126,7 +153,13 @@ pub struct AntiPattern {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AntiPatternCategory {
-    SyntaxError, TypeMismatch, MissingFunction, AsyncMisuse, IteratorMisuse, OwnershipError, Other,
+    SyntaxError,
+    TypeMismatch,
+    MissingFunction,
+    AsyncMisuse,
+    IteratorMisuse,
+    OwnershipError,
+    Other,
 }
 
 impl std::fmt::Display for AntiPatternCategory {
@@ -137,7 +170,9 @@ impl std::fmt::Display for AntiPatternCategory {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DreamTask {
-    pub description: String, pub category: String, pub mock_data: Option<String>,
+    pub description: String,
+    pub category: String,
+    pub mock_data: Option<String>,
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -163,68 +198,104 @@ impl Default for RhaiSkillLibrary {
 impl RhaiSkillLibrary {
     pub fn new() -> Self {
         Self {
-            entries: Vec::new(), anti_patterns: Vec::new(),
-            composite_skills: Vec::new(), compressed_patterns: Vec::new(),
-            task_queue: VecDeque::new(), max_entries: 1000, max_anti_patterns: 50,
+            entries: Vec::new(),
+            anti_patterns: Vec::new(),
+            composite_skills: Vec::new(),
+            compressed_patterns: Vec::new(),
+            task_queue: VecDeque::new(),
+            max_entries: 1000,
+            max_anti_patterns: 50,
         }
     }
 
     pub fn add(&mut self, script: LabeledScript) {
-        if script.label.is_failure() { self.extract_anti_pattern(&script); }
-        else { self.promote_similar(&script); }
+        if script.label.is_failure() {
+            self.extract_anti_pattern(&script);
+        } else {
+            self.promote_similar(&script);
+        }
         self.entries.push(script);
         self.prune();
     }
 
     pub fn query_few_shots(&self, task: &str, k: usize) -> Vec<&LabeledScript> {
-        let mut scored: Vec<(&LabeledScript, usize)> = self.entries.iter()
+        let mut scored: Vec<(&LabeledScript, usize)> = self
+            .entries
+            .iter()
             .filter(|s| s.label.is_success() && s.lifecycle != PrimitiveStage::Removed)
             .map(|s| (s, keyword_overlap(task, &s.task_description)))
             .collect();
-        scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.usage_count.cmp(&a.0.usage_count)));
+        scored.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| b.0.usage_count.cmp(&a.0.usage_count))
+        });
         scored.truncate(k);
         scored.into_iter().map(|(s, _)| s).collect()
     }
 
     pub fn core_primitives(&self) -> Vec<&LabeledScript> {
-        self.entries.iter().filter(|s| s.lifecycle == PrimitiveStage::Core && s.label.is_success()).collect()
+        self.entries
+            .iter()
+            .filter(|s| s.lifecycle == PrimitiveStage::Core && s.label.is_success())
+            .collect()
     }
 
     pub fn active_anti_patterns(&self) -> Vec<&AntiPattern> {
-        self.anti_patterns.iter().filter(|ap| ap.frequency >= 3).collect()
+        self.anti_patterns
+            .iter()
+            .filter(|ap| ap.frequency >= 3)
+            .collect()
     }
 
     pub fn record_usage(&mut self, script_id: &str) {
         if let Some(entry) = self.entries.iter_mut().find(|s| s.id == script_id) {
             entry.usage_count += 1;
-            if entry.usage_count > 10 && entry.lifecycle == PrimitiveStage::Experimental { entry.lifecycle.promote(); }
-            if entry.usage_count > 50 && entry.lifecycle == PrimitiveStage::Stable { entry.lifecycle.promote(); }
+            if entry.usage_count > 10 && entry.lifecycle == PrimitiveStage::Experimental {
+                entry.lifecycle.promote();
+            }
+            if entry.usage_count > 50 && entry.lifecycle == PrimitiveStage::Stable {
+                entry.lifecycle.promote();
+            }
         }
     }
 
     pub fn decay(&mut self) {
         for entry in &mut self.entries {
-            if entry.usage_count < 2 && entry.lifecycle == PrimitiveStage::Experimental { entry.lifecycle = PrimitiveStage::Deprecated; }
+            if entry.usage_count < 2 && entry.lifecycle == PrimitiveStage::Experimental {
+                entry.lifecycle = PrimitiveStage::Deprecated;
+            }
         }
-        self.entries.retain(|e| e.lifecycle != PrimitiveStage::Removed);
+        self.entries
+            .retain(|e| e.lifecycle != PrimitiveStage::Removed);
     }
 
     pub fn build_few_shot_prompt(&self, task: &str) -> String {
         let few_shots = self.query_few_shots(task, 2);
-        if few_shots.is_empty() { return String::new(); }
+        if few_shots.is_empty() {
+            return String::new();
+        }
         let mut prompt = String::from("// ── Verified Examples ──\n");
         for (i, shot) in few_shots.iter().enumerate() {
-            if let Some(ref sig) = shot.function_signature { prompt.push_str(&format!("// Skill #{}: {}\n", i + 1, sig)); }
-            prompt.push_str(&format!("// Task: {}\n// ```rhai\n{}\n// ```\n\n", shot.task_description, shot.script));
+            if let Some(ref sig) = shot.function_signature {
+                prompt.push_str(&format!("// Skill #{}: {}\n", i + 1, sig));
+            }
+            prompt.push_str(&format!(
+                "// Task: {}\n// ```rhai\n{}\n// ```\n\n",
+                shot.task_description, shot.script
+            ));
         }
         prompt
     }
 
     pub fn build_anti_pattern_guidance(&self) -> String {
         let patterns = self.active_anti_patterns();
-        if patterns.is_empty() { return String::new(); }
+        if patterns.is_empty() {
+            return String::new();
+        }
         let mut guidance = String::from("// ── Rhai Best Practices (auto-learned) ──\n");
-        for ap in patterns.iter().take(5) { guidance.push_str(&format!("// ✅ {}\n", ap.correct_guidance)); }
+        for ap in patterns.iter().take(5) {
+            guidance.push_str(&format!("// ✅ {}\n", ap.correct_guidance));
+        }
         guidance
     }
 
@@ -234,28 +305,43 @@ impl RhaiSkillLibrary {
     pub fn compose_skills(&mut self, a_id: &str, b_id: &str) -> Option<CompositeSkill> {
         let a = self.entries.iter().find(|s| s.id == a_id)?;
         let b = self.entries.iter().find(|s| s.id == b_id)?;
-        if !a.label.is_success() || !b.label.is_success() { return None; }
+        if !a.label.is_success() || !b.label.is_success() {
+            return None;
+        }
         let name = format!("{}+{}", a_id, b_id).replace('-', "_");
         Some(CompositeSkill {
-            id: uuid::Uuid::new_v4().to_string(), name,
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
             sources: vec![a_id.to_string(), b_id.to_string()],
-            script: format!("// {}\n{}\n\n// {}\n{}", a.task_description, a.script, b.task_description, b.script),
-            description: format!("Composite of: {}, {}", a.task_description, b.task_description),
+            script: format!(
+                "// {}\n{}\n\n// {}\n{}",
+                a.task_description, a.script, b.task_description, b.script
+            ),
+            description: format!(
+                "Composite of: {}, {}",
+                a.task_description, b.task_description
+            ),
             genome: SkillGenome::default(),
         })
     }
 
     /// Suggest Crystallization candidates (Rhai→Rust).
     pub fn suggest_crystallizations(&self) -> Vec<CrystallizationCandidate> {
-        self.entries.iter()
-            .filter(|s| s.lifecycle == PrimitiveStage::Core || s.lifecycle == PrimitiveStage::Stable)
+        self.entries
+            .iter()
+            .filter(|s| {
+                s.lifecycle == PrimitiveStage::Core || s.lifecycle == PrimitiveStage::Stable
+            })
             .filter(|s| s.label.is_success() && s.usage_count > 20)
             .map(|s| CrystallizationCandidate {
                 skill_id: s.id.clone(),
                 rhai_signature: s.function_signature.clone().unwrap_or_default(),
                 suggested_rust_name: format!("crystallized_{}", s.id.replace('-', "_")),
                 confidence: (s.usage_count as f32 / 100.0).min(1.0),
-                reason: format!("Used {} times with stable success. Ready for Rust native compilation.", s.usage_count),
+                reason: format!(
+                    "Used {} times with stable success. Ready for Rust native compilation.",
+                    s.usage_count
+                ),
             })
             .collect()
     }
@@ -299,25 +385,39 @@ impl RhaiSkillLibrary {
         };
 
         let response = model.complete(request).await?;
-        let text = response.content.as_ref()
+        let text = response
+            .content
+            .as_ref()
             .and_then(|c| c.as_text())
             .unwrap_or("")
             .trim();
 
         // Clean markdown blocks if present
         let clean_json = if text.starts_with("```json") {
-            text.strip_prefix("```json").unwrap_or(text).strip_suffix("```").unwrap_or(text).trim()
+            text.strip_prefix("```json")
+                .unwrap_or(text)
+                .strip_suffix("```")
+                .unwrap_or(text)
+                .trim()
         } else if text.starts_with("```") {
-            text.strip_prefix("```").unwrap_or(text).strip_suffix("```").unwrap_or(text).trim()
+            text.strip_prefix("```")
+                .unwrap_or(text)
+                .strip_suffix("```")
+                .unwrap_or(text)
+                .trim()
         } else {
             text
         };
 
         let mut pattern: CompressedPattern = serde_json::from_str(clean_json)?;
         pattern.occurrence_count = 1;
-        
+
         // Add to our list of compressed patterns or update frequency
-        if let Some(existing) = self.compressed_patterns.iter_mut().find(|p| p.pattern_name == pattern.pattern_name) {
+        if let Some(existing) = self
+            .compressed_patterns
+            .iter_mut()
+            .find(|p| p.pattern_name == pattern.pattern_name)
+        {
             existing.occurrence_count += 1;
             return Ok(existing.clone());
         } else {
@@ -332,33 +432,54 @@ impl RhaiSkillLibrary {
     fn extract_anti_pattern(&mut self, script: &LabeledScript) {
         let (category, pattern_fragment) = classify_error(script);
         for ap in &mut self.anti_patterns {
-            if keyword_overlap(&ap.error_pattern, &pattern_fragment) > 0 { ap.frequency += 1; return; }
+            if keyword_overlap(&ap.error_pattern, &pattern_fragment) > 0 {
+                ap.frequency += 1;
+                return;
+            }
         }
         let guidance = generate_positive_guidance(category.clone(), &pattern_fragment);
         self.anti_patterns.push(AntiPattern {
-            id: uuid::Uuid::new_v4().to_string(), mistake: pattern_fragment.clone(),
-            correct_guidance: guidance, error_pattern: pattern_fragment,
-            frequency: 1, example: truncate(&script.script, 200), category,
+            id: uuid::Uuid::new_v4().to_string(),
+            mistake: pattern_fragment.clone(),
+            correct_guidance: guidance,
+            error_pattern: pattern_fragment,
+            frequency: 1,
+            example: truncate(&script.script, 200),
+            category,
         });
         if self.anti_patterns.len() > self.max_anti_patterns {
-            self.anti_patterns.sort_by(|a, b| b.frequency.cmp(&a.frequency));
+            self.anti_patterns
+                .sort_by(|a, b| b.frequency.cmp(&a.frequency));
             self.anti_patterns.truncate(self.max_anti_patterns);
         }
     }
 
     fn promote_similar(&mut self, script: &LabeledScript) {
         for entry in &mut self.entries {
-            if entry.label.is_success() && keyword_overlap(&entry.task_description, &script.task_description) > 2
-                && entry.function_signature.is_none() && script.function_signature.is_some() {
-                    entry.function_signature = script.function_signature.clone();
-                }
+            if entry.label.is_success()
+                && keyword_overlap(&entry.task_description, &script.task_description) > 2
+                && entry.function_signature.is_none()
+                && script.function_signature.is_some()
+            {
+                entry.function_signature = script.function_signature.clone();
+            }
         }
     }
 
     fn prune(&mut self) {
         if self.entries.len() > self.max_entries {
-            let mut successes: Vec<_> = self.entries.iter().filter(|e| e.label.is_success()).cloned().collect();
-            let mut failures: Vec<_> = self.entries.iter().filter(|e| e.label.is_failure()).cloned().collect();
+            let mut successes: Vec<_> = self
+                .entries
+                .iter()
+                .filter(|e| e.label.is_success())
+                .cloned()
+                .collect();
+            let mut failures: Vec<_> = self
+                .entries
+                .iter()
+                .filter(|e| e.label.is_failure())
+                .cloned()
+                .collect();
             successes.truncate(self.max_entries / 2);
             failures.truncate(self.max_entries / 2);
             self.entries = successes;
@@ -375,16 +496,28 @@ fn classify_error(script: &LabeledScript) -> (AntiPatternCategory, String) {
     match &script.label {
         Label::ParseError { message, .. } => {
             let lower = message.to_lowercase();
-            if lower.contains("async") || lower.contains("await") { (AntiPatternCategory::AsyncMisuse, "async/await in Rhai".into()) }
-            else if lower.contains("type") || lower.contains("expected") { (AntiPatternCategory::TypeMismatch, message.clone()) }
-            else if lower.contains("not found") || lower.contains("undefined") { (AntiPatternCategory::MissingFunction, message.clone()) }
-            else if lower.contains("iter") || lower.contains(".map") { (AntiPatternCategory::IteratorMisuse, message.clone()) }
-            else { (AntiPatternCategory::SyntaxError, message.clone()) }
+            if lower.contains("async") || lower.contains("await") {
+                (
+                    AntiPatternCategory::AsyncMisuse,
+                    "async/await in Rhai".into(),
+                )
+            } else if lower.contains("type") || lower.contains("expected") {
+                (AntiPatternCategory::TypeMismatch, message.clone())
+            } else if lower.contains("not found") || lower.contains("undefined") {
+                (AntiPatternCategory::MissingFunction, message.clone())
+            } else if lower.contains("iter") || lower.contains(".map") {
+                (AntiPatternCategory::IteratorMisuse, message.clone())
+            } else {
+                (AntiPatternCategory::SyntaxError, message.clone())
+            }
         }
         Label::RuntimeError { message } => {
             let lower = message.to_lowercase();
-            if lower.contains("cannot index") { (AntiPatternCategory::TypeMismatch, message.clone()) }
-            else { (AntiPatternCategory::Other, message.clone()) }
+            if lower.contains("cannot index") {
+                (AntiPatternCategory::TypeMismatch, message.clone())
+            } else {
+                (AntiPatternCategory::Other, message.clone())
+            }
         }
         _ => (AntiPatternCategory::Other, "Unknown".into()),
     }
@@ -393,11 +526,21 @@ fn classify_error(script: &LabeledScript) -> (AntiPatternCategory, String) {
 fn generate_positive_guidance(cat: AntiPatternCategory, _e: &str) -> String {
     match cat {
         AntiPatternCategory::AsyncMisuse => "Rhai is synchronous. No .await needed.".into(),
-        AntiPatternCategory::TypeMismatch => "Rhai uses dynamic typing. Use `let x = value;` without annotations.".into(),
-        AntiPatternCategory::MissingFunction => "Available: read_file, write_file, grep, shell, list_dir.".into(),
-        AntiPatternCategory::IteratorMisuse => "Use for-loops: `for item in items { ... }` instead of .iter().map().".into(),
-        AntiPatternCategory::SyntaxError => "Rhai syntax is Rust-like: let, fn, // comments, no semicolons required.".into(),
-        AntiPatternCategory::OwnershipError => "Rhai handles ownership automatically. No borrow checker.".into(),
+        AntiPatternCategory::TypeMismatch => {
+            "Rhai uses dynamic typing. Use `let x = value;` without annotations.".into()
+        }
+        AntiPatternCategory::MissingFunction => {
+            "Available: read_file, write_file, grep, shell, list_dir.".into()
+        }
+        AntiPatternCategory::IteratorMisuse => {
+            "Use for-loops: `for item in items { ... }` instead of .iter().map().".into()
+        }
+        AntiPatternCategory::SyntaxError => {
+            "Rhai syntax is Rust-like: let, fn, // comments, no semicolons required.".into()
+        }
+        AntiPatternCategory::OwnershipError => {
+            "Rhai handles ownership automatically. No borrow checker.".into()
+        }
         AntiPatternCategory::Other => "Wrap in try-catch: `try { ... } catch { ... }`".into(),
     }
 }
@@ -406,37 +549,97 @@ fn generate_positive_guidance(cat: AntiPatternCategory, _e: &str) -> String {
 // Verifier & Dream Mode
 // ═══════════════════════════════════════════════════════════
 
-pub async fn verify_script(task: &str, script: &str, output: &str, model: &Arc<dyn pharmakon_common::AgentModel>) -> Label {
-    let prompt = format!("Task: {}\nScript:\n```\n{}\n```\nOutput:\n{}\n\nAccomplished? YES/NO:", truncate(task, 300), truncate(script, 500), truncate(output, 500));
+pub async fn verify_script(
+    task: &str,
+    script: &str,
+    output: &str,
+    model: &Arc<dyn pharmakon_common::AgentModel>,
+) -> Label {
+    let prompt = format!(
+        "Task: {}\nScript:\n```\n{}\n```\nOutput:\n{}\n\nAccomplished? YES/NO:",
+        truncate(task, 300),
+        truncate(script, 500),
+        truncate(output, 500)
+    );
     let request = pharmakon_common::CompletionRequest {
-        messages: vec![pharmakon_common::Message { role: "user".into(), content: Some(pharmakon_common::MessageContent::Text(prompt)), ..Default::default() }],
-        temperature: Some(0.0), max_tokens: Some(4), tools: None, complexity: None, system_instruction: None,
+        messages: vec![pharmakon_common::Message {
+            role: "user".into(),
+            content: Some(pharmakon_common::MessageContent::Text(prompt)),
+            ..Default::default()
+        }],
+        temperature: Some(0.0),
+        max_tokens: Some(4),
+        tools: None,
+        complexity: None,
+        system_instruction: None,
     };
     match model.complete(request).await {
         Ok(resp) => {
-            let text = resp.content.as_ref().and_then(|c| c.as_text()).unwrap_or("").trim().to_uppercase();
-            if text.contains("YES") { Label::Success { verified_by: model.name().to_string() } }
-            else { Label::WrongOutput { expected: task.to_string(), got: output.to_string() } }
+            let text = resp
+                .content
+                .as_ref()
+                .and_then(|c| c.as_text())
+                .unwrap_or("")
+                .trim()
+                .to_uppercase();
+            if text.contains("YES") {
+                Label::Success {
+                    verified_by: model.name().to_string(),
+                }
+            } else {
+                Label::WrongOutput {
+                    expected: task.to_string(),
+                    got: output.to_string(),
+                }
+            }
         }
-        Err(e) => Label::Skipped { reason: format!("Verifier failed: {}", e) },
+        Err(e) => Label::Skipped {
+            reason: format!("Verifier failed: {}", e),
+        },
     }
 }
 
-pub async fn generate_dream_tasks(model: &Arc<dyn pharmakon_common::AgentModel>, count: usize) -> Vec<DreamTask> {
-    let prompt = format!("Generate {} task descriptions for file/code automation. Categories: grep_and_transform, batch_rename, code_stats, text_processing, file_organization, config_merging, log_parsing, data_extraction. One per line: CATEGORY: description", count);
+pub async fn generate_dream_tasks(
+    model: &Arc<dyn pharmakon_common::AgentModel>,
+    count: usize,
+) -> Vec<DreamTask> {
+    let prompt = format!(
+        "Generate {} task descriptions for file/code automation. Categories: grep_and_transform, batch_rename, code_stats, text_processing, file_organization, config_merging, log_parsing, data_extraction. One per line: CATEGORY: description",
+        count
+    );
     let request = pharmakon_common::CompletionRequest {
-        messages: vec![pharmakon_common::Message { role: "user".into(), content: Some(pharmakon_common::MessageContent::Text(prompt)), ..Default::default() }],
-        temperature: Some(0.8), max_tokens: Some(500), tools: None, complexity: None, system_instruction: None,
+        messages: vec![pharmakon_common::Message {
+            role: "user".into(),
+            content: Some(pharmakon_common::MessageContent::Text(prompt)),
+            ..Default::default()
+        }],
+        temperature: Some(0.8),
+        max_tokens: Some(500),
+        tools: None,
+        complexity: None,
+        system_instruction: None,
     };
     match model.complete(request).await {
-        Ok(resp) => {
-            resp.content.as_ref().and_then(|c| c.as_text()).unwrap_or("")
-                .lines().filter_map(|line| {
-                    let parts: Vec<&str> = line.splitn(2, ": ").collect();
-                    if parts.len() == 2 { Some(DreamTask { category: parts[0].trim().into(), description: parts[1].trim().into(), mock_data: None }) }
-                    else { None }
-                }).take(count).collect()
-        }
+        Ok(resp) => resp
+            .content
+            .as_ref()
+            .and_then(|c| c.as_text())
+            .unwrap_or("")
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(2, ": ").collect();
+                if parts.len() == 2 {
+                    Some(DreamTask {
+                        category: parts[0].trim().into(),
+                        description: parts[1].trim().into(),
+                        mock_data: None,
+                    })
+                } else {
+                    None
+                }
+            })
+            .take(count)
+            .collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -444,14 +647,21 @@ pub async fn generate_dream_tasks(model: &Arc<dyn pharmakon_common::AgentModel>,
 pub fn build_codeact_system_prompt(library: &RhaiSkillLibrary, task: &str) -> String {
     let mut prompt = String::new();
     let apg = library.build_anti_pattern_guidance();
-    if !apg.is_empty() { prompt.push_str(&apg); prompt.push('\n'); }
+    if !apg.is_empty() {
+        prompt.push_str(&apg);
+        prompt.push('\n');
+    }
     let fs = library.build_few_shot_prompt(task);
-    if !fs.is_empty() { prompt.push_str(&fs); }
+    if !fs.is_empty() {
+        prompt.push_str(&fs);
+    }
     let core = library.core_primitives();
     if !core.is_empty() {
         prompt.push_str("// ── Verified Functions ──\n");
         for prim in core.iter().take(5) {
-            if let Some(ref sig) = prim.function_signature { prompt.push_str(&format!("// fn {} — {}\n", sig, prim.task_description)); }
+            if let Some(ref sig) = prim.function_signature {
+                prompt.push_str(&format!("// fn {} — {}\n", sig, prim.task_description));
+            }
         }
         prompt.push_str("// Call these directly.\n\n");
     }
@@ -470,7 +680,8 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         // Find the last char boundary at or before `max` to avoid panicking on multi-byte UTF-8
-        let end = s.char_indices()
+        let end = s
+            .char_indices()
             .take_while(|(i, _)| *i <= max)
             .last()
             .map(|(i, _)| i)
@@ -494,18 +705,35 @@ mod tests {
     fn test_compose_skills() {
         let mut lib = RhaiSkillLibrary::new();
         let s1 = LabeledScript {
-            id: "s1".into(), task_description: "grep files".into(), script: "let x = grep(\"p\", \".\")".into(),
-            label: Label::Success { verified_by: "test".into() }, category: "grep".into(),
-            timestamp: chrono::Utc::now(), function_signature: Some("grep_files(dir)".into()),
-            usage_count: 10, lifecycle: PrimitiveStage::Core, genome: SkillGenome::default(),
+            id: "s1".into(),
+            task_description: "grep files".into(),
+            script: "let x = grep(\"p\", \".\")".into(),
+            label: Label::Success {
+                verified_by: "test".into(),
+            },
+            category: "grep".into(),
+            timestamp: chrono::Utc::now(),
+            function_signature: Some("grep_files(dir)".into()),
+            usage_count: 10,
+            lifecycle: PrimitiveStage::Core,
+            genome: SkillGenome::default(),
         };
         let s2 = LabeledScript {
-            id: "s2".into(), task_description: "write output".into(), script: "write_file(\"o\", x)".into(),
-            label: Label::Success { verified_by: "test".into() }, category: "write".into(),
-            timestamp: chrono::Utc::now(), function_signature: Some("write_output(path)".into()),
-            usage_count: 10, lifecycle: PrimitiveStage::Core, genome: SkillGenome::default(),
+            id: "s2".into(),
+            task_description: "write output".into(),
+            script: "write_file(\"o\", x)".into(),
+            label: Label::Success {
+                verified_by: "test".into(),
+            },
+            category: "write".into(),
+            timestamp: chrono::Utc::now(),
+            function_signature: Some("write_output(path)".into()),
+            usage_count: 10,
+            lifecycle: PrimitiveStage::Core,
+            genome: SkillGenome::default(),
         };
-        lib.add(s1); lib.add(s2);
+        lib.add(s1);
+        lib.add(s2);
         let comp = lib.compose_skills("s1", "s2");
         assert!(comp.is_some());
     }
@@ -513,7 +741,10 @@ mod tests {
     struct MockCompressModel;
     #[async_trait::async_trait]
     impl pharmakon_common::AgentModel for MockCompressModel {
-        async fn complete(&self, _request: pharmakon_common::CompletionRequest) -> pharmakon_common::AgentResult<pharmakon_common::CompletionResponse> {
+        async fn complete(
+            &self,
+            _request: pharmakon_common::CompletionRequest,
+        ) -> pharmakon_common::AgentResult<pharmakon_common::CompletionResponse> {
             Ok(pharmakon_common::CompletionResponse {
                 content: Some(pharmakon_common::MessageContent::Text(
                     "```json\n{\n  \"pattern_name\": \"batch_rename\",\n  \"signature\": \"fn batch_rename(dir, ext)\",\n  \"description\": \"Rename all files in directory\",\n  \"generalized_script\": \"let files = list_dir(dir);\"\n}\n```".to_string()
@@ -526,27 +757,42 @@ mod tests {
         async fn stream_complete(
             &self,
             _req: pharmakon_common::CompletionRequest,
-        ) -> pharmakon_common::AgentResult<std::pin::Pin<Box<dyn futures::Stream<Item = pharmakon_common::AgentResult<String>> + Send + 'static>>> {
+        ) -> pharmakon_common::AgentResult<
+            std::pin::Pin<
+                Box<
+                    dyn futures::Stream<Item = pharmakon_common::AgentResult<String>>
+                        + Send
+                        + 'static,
+                >,
+            >,
+        > {
             unimplemented!()
         }
-        fn name(&self) -> &str { "mock_compress" }
-        fn context_window(&self) -> usize { 8192 }
-        fn max_output_tokens(&self) -> usize { 4096 }
+        fn name(&self) -> &str {
+            "mock_compress"
+        }
+        fn context_window(&self) -> usize {
+            8192
+        }
+        fn max_output_tokens(&self) -> usize {
+            4096
+        }
     }
 
     #[tokio::test]
     async fn test_compress_trajectory() {
         let mut lib = RhaiSkillLibrary::new();
-        let trajectory = crate::trajectory::Trajectory::new("session-123".to_string(), "test-model".to_string());
+        let trajectory =
+            crate::trajectory::Trajectory::new("session-123".to_string(), "test-model".to_string());
         let model: Arc<dyn pharmakon_common::AgentModel> = Arc::new(MockCompressModel);
-        
+
         let pattern = lib.compress_trajectory(&trajectory, &model).await.unwrap();
         assert_eq!(pattern.pattern_name, "batch_rename");
         assert_eq!(pattern.signature, "fn batch_rename(dir, ext)");
         assert_eq!(pattern.description, "Rename all files in directory");
         assert_eq!(pattern.generalized_script, "let files = list_dir(dir);");
         assert_eq!(pattern.occurrence_count, 1);
-        
+
         let second_pattern = lib.compress_trajectory(&trajectory, &model).await.unwrap();
         assert_eq!(second_pattern.occurrence_count, 2);
     }

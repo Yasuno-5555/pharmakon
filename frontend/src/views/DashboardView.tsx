@@ -5,13 +5,14 @@ import {
   BarChart, Bar, Cell
 } from 'recharts';
 import { motion } from 'framer-motion';
+import type { HealthStats, McpStatEntry, UsageEntry } from '../types';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 interface DashboardViewProps {
-  stats: any;
-  mcpStats: any[];
-  usageHistory: any[];
+  stats: HealthStats | null;
+  mcpStats: McpStatEntry[];
+  usageHistory: UsageEntry[];
 }
 
 const DashboardView: React.FC<DashboardViewProps> = ({ stats, mcpStats, usageHistory }) => {

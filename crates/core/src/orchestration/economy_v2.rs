@@ -14,13 +14,15 @@ use serde::{Deserialize, Serialize};
 /// Cognitive ROI: capability gain per unit cost.
 /// Higher is better. Negative means net loss.
 pub fn cognitive_roi(
-    estimated_quality_gain: f64,  // 0.0–1.0: expected task quality improvement
+    estimated_quality_gain: f64, // 0.0–1.0: expected task quality improvement
     token_cost: u64,
     latency_ms: u64,
 ) -> f64 {
     let cost = token_cost as f64 * 0.0001   // token cost weight
-             + latency_ms as f64 * 0.0005;    // latency weight (ms → normalized)
-    if cost <= 0.0 { return estimated_quality_gain; }
+             + latency_ms as f64 * 0.0005; // latency weight (ms → normalized)
+    if cost <= 0.0 {
+        return estimated_quality_gain;
+    }
     estimated_quality_gain / cost
 }
 
@@ -94,7 +96,7 @@ pub struct ResearchInvestment {
     pub category: ResearchCategory,
     pub tokens_invested: u64,
     pub estimated_future_savings: u64,
-    pub roi: f64,  // savings / investment
+    pub roi: f64, // savings / investment
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -124,9 +126,9 @@ impl std::fmt::Display for ResearchCategory {
 pub struct BankOfPharmakon {
     pub reserve: TokenReserve,
     pub investments: Vec<ResearchInvestment>,
-    pub roi_history: Vec<(chrono::DateTime<chrono::Utc>, f64)>,  // timestamp → ROI
+    pub roi_history: Vec<(chrono::DateTime<chrono::Utc>, f64)>, // timestamp → ROI
     pub total_tokens_spent: u64,
-    pub total_tokens_saved: u64,  // cumulative savings from investments
+    pub total_tokens_saved: u64, // cumulative savings from investments
 }
 
 impl BankOfPharmakon {
@@ -153,7 +155,11 @@ impl BankOfPharmakon {
 
     /// Record an R&D investment.
     pub fn invest(&mut self, category: ResearchCategory, tokens: u64, estimated_savings: u64) {
-        let roi = if tokens > 0 { estimated_savings as f64 / tokens as f64 } else { 0.0 };
+        let roi = if tokens > 0 {
+            estimated_savings as f64 / tokens as f64
+        } else {
+            0.0
+        };
         self.investments.push(ResearchInvestment {
             category,
             tokens_invested: tokens,
@@ -184,7 +190,9 @@ impl BankOfPharmakon {
 
     /// Net token savings (saved − invested).
     pub fn net_savings(&self) -> i64 {
-        let invested: u64 = self.investments.iter()
+        let invested: u64 = self
+            .investments
+            .iter()
             .filter(|i| i.completed_at.is_some())
             .map(|i| i.tokens_invested)
             .sum();
@@ -192,10 +200,15 @@ impl BankOfPharmakon {
     }
 
     /// Check if a task is worth executing based on ROI threshold.
-    pub fn should_execute(&self, estimated_tokens: u64, estimated_quality: f64, estimated_latency: u64) -> bool {
+    pub fn should_execute(
+        &self,
+        estimated_tokens: u64,
+        estimated_quality: f64,
+        estimated_latency: u64,
+    ) -> bool {
         let roi = cognitive_roi(estimated_quality, estimated_tokens, estimated_latency);
-        let threshold = self.average_roi() * 0.5;  // half of average ROI
-        roi > threshold || estimated_quality > 0.8  // always run high-quality tasks
+        let threshold = self.average_roi() * 0.5; // half of average ROI
+        roi > threshold || estimated_quality > 0.8 // always run high-quality tasks
     }
 
     /// Status dashboard string.
@@ -223,7 +236,10 @@ impl BankOfPharmakon {
             self.net_savings(),
             self.average_roi(),
             self.investments.len(),
-            self.investments.iter().filter(|i| i.completed_at.is_none()).count(),
+            self.investments
+                .iter()
+                .filter(|i| i.completed_at.is_none())
+                .count(),
         )
     }
 }
@@ -242,7 +258,10 @@ mod tests {
     fn test_cognitive_roi() {
         let high_roi = cognitive_roi(0.9, 500, 200);
         let low_roi = cognitive_roi(0.2, 5000, 5000);
-        assert!(high_roi > low_roi, "High quality/low cost should have higher ROI");
+        assert!(
+            high_roi > low_roi,
+            "High quality/low cost should have higher ROI"
+        );
     }
 
     #[test]

@@ -25,13 +25,13 @@ fn find_available_model() -> Option<(String, Arc<dyn pharmakon_core::model::Agen
     candidates
         .into_iter()
         .filter(|id| !id.starts_with("ollama/") && !id.starts_with("openrouter/"))
-        .find_map(|id| {
-            ModelRegistry::get_model(&id).map(|m| (id, m))
-        })
+        .find_map(|id| ModelRegistry::get_model(&id).map(|m| (id, m)))
 }
 
 /// Find a second model (different provider) for switch/fallback tests.
-fn find_second_model(first_provider: &str) -> Option<(String, Arc<dyn pharmakon_core::model::AgentModel>)> {
+fn find_second_model(
+    first_provider: &str,
+) -> Option<(String, Arc<dyn pharmakon_core::model::AgentModel>)> {
     let candidates = ModelRegistry::list_available_models();
     candidates
         .into_iter()
@@ -40,9 +40,7 @@ fn find_second_model(first_provider: &str) -> Option<(String, Arc<dyn pharmakon_
                 && !id.starts_with("openrouter/")
                 && !id.starts_with(first_provider)
         })
-        .find_map(|id| {
-            ModelRegistry::get_model(&id).map(|m| (id, m))
-        })
+        .find_map(|id| ModelRegistry::get_model(&id).map(|m| (id, m)))
 }
 
 /// Helper to run a simple chat and get the response.
@@ -68,14 +66,21 @@ async fn test_real_basic_chat() {
     let agent = Agent::new(model, "smoke-basic".to_string());
     let response = quick_chat(&agent, "Say exactly 'OK' and nothing else.").await;
 
-    assert!(!response.is_empty(), "Expected non-empty response from {}", model_id);
+    assert!(
+        !response.is_empty(),
+        "Expected non-empty response from {}",
+        model_id
+    );
     assert!(
         response.to_lowercase().contains("ok"),
         "Expected 'OK' in response, got: {}",
         response.chars().take(200).collect::<String>()
     );
 
-    eprintln!("✓ Basic chat OK: {}", response.chars().take(100).collect::<String>());
+    eprintln!(
+        "✓ Basic chat OK: {}",
+        response.chars().take(100).collect::<String>()
+    );
 }
 
 /// Test 2: Model switch via /model command.
@@ -89,7 +94,10 @@ async fn test_real_model_switch() {
 
     let first_provider = first_id.split('/').next().unwrap_or("");
     let Some((second_id, _second_model)) = find_second_model(first_provider) else {
-        eprintln!("SKIP: Only one provider available ({}). Need two for switch test.", first_id);
+        eprintln!(
+            "SKIP: Only one provider available ({}). Need two for switch test.",
+            first_id
+        );
         return;
     };
 
@@ -108,7 +116,10 @@ async fn test_real_model_switch() {
     // Switch via /model command
     let switch_cmd = format!("/model {}", second_id);
     let switch_resp = quick_chat(&agent, &switch_cmd).await;
-    eprintln!("→ Switch response: {}", switch_resp.chars().take(100).collect::<String>());
+    eprintln!(
+        "→ Switch response: {}",
+        switch_resp.chars().take(100).collect::<String>()
+    );
 
     // Verify model switched
     let current = agent.model_name().await;
@@ -155,6 +166,12 @@ async fn test_real_fallback_chain() {
     // that the setup doesn't crash and a basic chat works.)
     let response = quick_chat(&agent, "Say 'hello' in one word.").await;
 
-    assert!(!response.is_empty(), "Response should not be empty (fallback setup OK)");
-    eprintln!("✓ Fallback setup OK: {}", response.chars().take(100).collect::<String>());
+    assert!(
+        !response.is_empty(),
+        "Response should not be empty (fallback setup OK)"
+    );
+    eprintln!(
+        "✓ Fallback setup OK: {}",
+        response.chars().take(100).collect::<String>()
+    );
 }

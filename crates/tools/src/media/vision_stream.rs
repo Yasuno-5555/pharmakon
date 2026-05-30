@@ -59,13 +59,14 @@ impl VisionRingBuffer {
         // Strictly enforce capacity and delete old files immediately
         if self.frames.len() > self.max_frames
             && let Some(old_frame) = self.frames.pop_front()
-                && old_frame.path.exists() {
-                    log::debug!(
-                        "VisionStream: Deleting old frame to save space: {:?}",
-                        old_frame.path
-                    );
-                    let _ = fs::remove_file(old_frame.path);
-                }
+            && old_frame.path.exists()
+        {
+            log::debug!(
+                "VisionStream: Deleting old frame to save space: {:?}",
+                old_frame.path
+            );
+            let _ = fs::remove_file(old_frame.path);
+        }
 
         Ok(path)
     }

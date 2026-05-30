@@ -16,9 +16,9 @@
 //!   - Model-agnostic: works with any provider without prompt engineering
 
 use anyhow::Result;
-use rhai::{Engine, Scope, Dynamic, EvalAltResult};
-use std::sync::Arc;
+use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 lazy_static::lazy_static! {
     pub static ref PYTHON_FALLBACK_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -29,11 +29,17 @@ pub struct CodeActToolbox {
 }
 
 impl CodeActToolbox {
-    pub fn new(workspace_root: PathBuf) -> Self { Self { workspace_root } }
+    pub fn new(workspace_root: PathBuf) -> Self {
+        Self { workspace_root }
+    }
 
     fn resolve(&self, path: &str) -> PathBuf {
         let p = PathBuf::from(path);
-        if p.is_absolute() { p } else { self.workspace_root.join(p) }
+        if p.is_absolute() {
+            p
+        } else {
+            self.workspace_root.join(p)
+        }
     }
 
     fn read_file(&self, path: &str) -> Result<String, Box<EvalAltResult>> {
@@ -44,9 +50,11 @@ impl CodeActToolbox {
     fn write_file(&self, path: &str, content: &str) -> Result<(), Box<EvalAltResult>> {
         let resolved = self.resolve(path);
         if let Some(parent) = resolved.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("create_dir({}): {}", parent.display(), e))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create_dir({}): {}", parent.display(), e))?;
         }
-        std::fs::write(&resolved, content).map_err(|e| format!("write_file({}): {}", path, e).into())
+        std::fs::write(&resolved, content)
+            .map_err(|e| format!("write_file({}): {}", path, e).into())
     }
 
     fn grep_files(&self, pattern: &str, dir: &str) -> Result<Vec<String>, Box<EvalAltResult>> {
@@ -56,24 +64,41 @@ impl CodeActToolbox {
         Ok(results)
     }
 
-    fn grep_recursive(&self, dir: &PathBuf, pattern: &str, results: &mut Vec<String>) -> Result<(), Box<EvalAltResult>> {
-        let re = regex::Regex::new(pattern).map_err(|e| format!("Invalid regex '{}': {}", pattern, e))?;
+    fn grep_recursive(
+        &self,
+        dir: &PathBuf,
+        pattern: &str,
+        results: &mut Vec<String>,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let re = regex::Regex::new(pattern)
+            .map_err(|e| format!("Invalid regex '{}': {}", pattern, e))?;
         if dir.is_dir() {
-            for entry in std::fs::read_dir(dir).map_err(|e| format!("read_dir({}): {}", dir.display(), e))? {
+            for entry in
+                std::fs::read_dir(dir).map_err(|e| format!("read_dir({}): {}", dir.display(), e))?
+            {
                 let entry = entry.map_err(|e| e.to_string())?;
                 let path = entry.path();
                 if path.is_dir() {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str())
-                        && (name.starts_with('.') || name == "target" || name == "node_modules") { continue; }
+                        && (name.starts_with('.') || name == "target" || name == "node_modules")
+                    {
+                        continue;
+                    }
                     self.grep_recursive(&path, pattern, results)?;
                 } else if path.is_file()
-                    && let Ok(content) = std::fs::read_to_string(&path) {
-                        for (line_no, line) in content.lines().enumerate() {
-                            if re.is_match(line) {
-                                results.push(format!("{}:{}: {}", path.display(), line_no + 1, line.trim()));
-                            }
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                {
+                    for (line_no, line) in content.lines().enumerate() {
+                        if re.is_match(line) {
+                            results.push(format!(
+                                "{}:{}: {}",
+                                path.display(),
+                                line_no + 1,
+                                line.trim()
+                            ));
                         }
                     }
+                }
             }
         }
         Ok(())
@@ -82,7 +107,9 @@ impl CodeActToolbox {
     fn list_dir(&self, path: &str) -> Result<Vec<String>, Box<EvalAltResult>> {
         let resolved = self.resolve(path);
         let mut entries = Vec::new();
-        for entry in std::fs::read_dir(&resolved).map_err(|e| format!("list_dir({}): {}", path, e))? {
+        for entry in
+            std::fs::read_dir(&resolved).map_err(|e| format!("list_dir({}): {}", path, e))?
+        {
             let entry = entry.map_err(|e| e.to_string())?;
             let name = entry.file_name().to_string_lossy().to_string();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -95,21 +122,37 @@ impl CodeActToolbox {
 
 /// Detected script language for model-adaptive routing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScriptLanguage { Python, Rhai, Ambiguous }
+pub enum ScriptLanguage {
+    Python,
+    Rhai,
+    Ambiguous,
+}
 
 /// Model family for adaptive routing preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelFamily { Gemini, OpenAI, Anthropic, Groq, Generic }
+pub enum ModelFamily {
+    Gemini,
+    OpenAI,
+    Anthropic,
+    Groq,
+    Generic,
+}
 
 impl ModelFamily {
     /// Detect model family from model ID string.
     pub fn from_model_id(id: &str) -> Self {
         let lower = id.to_lowercase();
-        if lower.contains("gemini") { ModelFamily::Gemini }
-        else if lower.contains("gpt") || lower.contains("o1") || lower.contains("o3") { ModelFamily::OpenAI }
-        else if lower.contains("claude") { ModelFamily::Anthropic }
-        else if lower.contains("groq") || lower.contains("llama") { ModelFamily::Groq }
-        else { ModelFamily::Generic }
+        if lower.contains("gemini") {
+            ModelFamily::Gemini
+        } else if lower.contains("gpt") || lower.contains("o1") || lower.contains("o3") {
+            ModelFamily::OpenAI
+        } else if lower.contains("claude") {
+            ModelFamily::Anthropic
+        } else if lower.contains("groq") || lower.contains("llama") {
+            ModelFamily::Groq
+        } else {
+            ModelFamily::Generic
+        }
     }
 
     /// Preferred execution order for this model family.
@@ -128,24 +171,33 @@ pub fn detect_language(script: &str) -> ScriptLanguage {
     let trimmed = script.trim();
     // Strong Python signals
     let python_indicators = [
-        "print(", "def ", "import ", "from ", "class ",
-        "elif ", "except ", "finally ", "with ", "yield ",
-        "lambda ", "async ", "await ",
-        "# ",  // Python comments (Rhai uses //)
+        "print(", "def ", "import ", "from ", "class ", "elif ", "except ", "finally ", "with ",
+        "yield ", "lambda ", "async ", "await ", "# ", // Python comments (Rhai uses //)
     ];
     // Strong Rhai signals
     let rhai_indicators = [
-        "let ", "const ", "fn ", "// ",
-        "loop {", "while ", "for ", "break;",
-        "continue;", "return;",
+        "let ",
+        "const ",
+        "fn ",
+        "// ",
+        "loop {",
+        "while ",
+        "for ",
+        "break;",
+        "continue;",
+        "return;",
     ];
 
     let has_python = python_indicators.iter().any(|kw| trimmed.contains(kw));
     let has_rhai = rhai_indicators.iter().any(|kw| trimmed.contains(kw));
 
-    if has_python && !has_rhai { ScriptLanguage::Python }
-    else if has_rhai && !has_python { ScriptLanguage::Rhai }
-    else { ScriptLanguage::Ambiguous }
+    if has_python && !has_rhai {
+        ScriptLanguage::Python
+    } else if has_rhai && !has_python {
+        ScriptLanguage::Rhai
+    } else {
+        ScriptLanguage::Ambiguous
+    }
 }
 
 pub struct CodeActEngine {
@@ -156,7 +208,9 @@ pub struct CodeActEngine {
 }
 
 impl CodeActEngine {
-    pub fn new(workspace_root: PathBuf) -> Self { Self::with_model_family(workspace_root, ModelFamily::Generic) }
+    pub fn new(workspace_root: PathBuf) -> Self {
+        Self::with_model_family(workspace_root, ModelFamily::Generic)
+    }
 
     /// Create engine with model-family-aware routing preference.
     pub fn with_model_family(workspace_root: PathBuf, model_family: ModelFamily) -> Self {
@@ -164,24 +218,60 @@ impl CodeActEngine {
         let toolbox = Arc::new(CodeActToolbox::new(workspace_root));
 
         let tb = toolbox.clone();
-        engine.register_fn("read_file", move |path: &str| -> Result<String, Box<EvalAltResult>> { tb.read_file(path) });
+        engine.register_fn(
+            "read_file",
+            move |path: &str| -> Result<String, Box<EvalAltResult>> { tb.read_file(path) },
+        );
         let tb = toolbox.clone();
-        engine.register_fn("write_file", move |path: &str, content: &str| -> Result<(), Box<EvalAltResult>> { tb.write_file(path, content) });
+        engine.register_fn(
+            "write_file",
+            move |path: &str, content: &str| -> Result<(), Box<EvalAltResult>> {
+                tb.write_file(path, content)
+            },
+        );
         let tb = toolbox.clone();
-        engine.register_fn("grep", move |pattern: &str, dir: &str| -> Result<Vec<String>, Box<EvalAltResult>> { tb.grep_files(pattern, dir) });
+        engine.register_fn(
+            "grep",
+            move |pattern: &str, dir: &str| -> Result<Vec<String>, Box<EvalAltResult>> {
+                tb.grep_files(pattern, dir)
+            },
+        );
         let _tb = toolbox.clone();
-        engine.register_fn("shell", move |cmd: &str| -> Result<String, Box<EvalAltResult>> {
-            use std::process::Command;
-            let output = Command::new("sh").arg("-c").arg(cmd).output().map_err(|e| format!("shell failed: {}", e))?;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Ok(format!("{}{}{}", stdout, if !stdout.is_empty() && !stderr.is_empty() { "\n" } else { "" }, stderr))
-        });
+        engine.register_fn(
+            "shell",
+            move |cmd: &str| -> Result<String, Box<EvalAltResult>> {
+                use std::process::Command;
+                let output = Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd)
+                    .output()
+                    .map_err(|e| format!("shell failed: {}", e))?;
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                Ok(format!(
+                    "{}{}{}",
+                    stdout,
+                    if !stdout.is_empty() && !stderr.is_empty() {
+                        "\n"
+                    } else {
+                        ""
+                    },
+                    stderr
+                ))
+            },
+        );
         let tb = toolbox.clone();
-        engine.register_fn("list_dir", move |path: &str| -> Result<Vec<String>, Box<EvalAltResult>> { tb.list_dir(path) });
+        engine.register_fn(
+            "list_dir",
+            move |path: &str| -> Result<Vec<String>, Box<EvalAltResult>> { tb.list_dir(path) },
+        );
 
         engine.set_max_modules(0);
-        Self { engine, toolbox, model_family }
+        Self {
+            engine,
+            toolbox,
+            model_family,
+        }
     }
 
     /// Execute a script with model-adaptive routing.
@@ -196,7 +286,14 @@ impl CodeActEngine {
         let order = match (lang, first) {
             (ScriptLanguage::Python, _) => (ScriptLanguage::Python, ScriptLanguage::Rhai),
             (ScriptLanguage::Rhai, _) => (ScriptLanguage::Rhai, ScriptLanguage::Python),
-            (ScriptLanguage::Ambiguous, pref) => (pref, if pref == ScriptLanguage::Python { ScriptLanguage::Rhai } else { ScriptLanguage::Python }),
+            (ScriptLanguage::Ambiguous, pref) => (
+                pref,
+                if pref == ScriptLanguage::Python {
+                    ScriptLanguage::Rhai
+                } else {
+                    ScriptLanguage::Python
+                },
+            ),
         };
 
         // 1st attempt
@@ -206,7 +303,9 @@ impl CodeActEngine {
             ScriptLanguage::Ambiguous => unreachable!(),
         };
 
-        if first_result.success { return first_result; }
+        if first_result.success {
+            return first_result;
+        }
 
         if order.0 == ScriptLanguage::Rhai && order.1 == ScriptLanguage::Python {
             PYTHON_FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -230,14 +329,21 @@ impl CodeActEngine {
     /// Try Rhai execution (returns error on failure, does NOT fall back).
     fn execute_rhai(&self, script: &str) -> CodeActResult {
         let mut scope = Scope::new();
-        scope.push_constant("WORKSPACE", self.toolbox.workspace_root.to_string_lossy().to_string());
+        scope.push_constant(
+            "WORKSPACE",
+            self.toolbox.workspace_root.to_string_lossy().to_string(),
+        );
 
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
             Ok(value) => {
                 let result_str = format!("{}", value);
                 CodeActResult {
                     success: true,
-                    output: if result_str.is_empty() || result_str == "()" { String::new() } else { result_str },
+                    output: if result_str.is_empty() || result_str == "()" {
+                        String::new()
+                    } else {
+                        result_str
+                    },
                     error: None,
                 }
             }
@@ -253,7 +359,7 @@ impl CodeActEngine {
     fn execute_python(&self, script: &str) -> CodeActResult {
         let ws = self.toolbox.workspace_root.to_string_lossy();
         let preamble = format!(
-r#"import subprocess as _sp, os as _os, re as _re, json, sys
+            r#"import subprocess as _sp, os as _os, re as _re, json, sys
 _WORKSPACE = r"{ws}"
 def _resolve(p):
     return p if p.startswith('/') else _os.path.join(_WORKSPACE, p)
@@ -284,26 +390,45 @@ def list_dir(path):
     return json.dumps(sorted([f"{{x}}{{'/' if _os.path.isdir(_os.path.join(d,x)) else ''}}" for x in _os.listdir(d)]))
 # --- user script ---
 {script}
-"#, ws = ws, script = script);
+"#,
+            ws = ws,
+            script = script
+        );
 
         use std::process::Command;
         match Command::new("python3").arg("-c").arg(&preamble).output() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let combined = if stderr.is_empty() { stdout.clone() } else { format!("{}\n{}", stdout, stderr) };
+                let combined = if stderr.is_empty() {
+                    stdout.clone()
+                } else {
+                    format!("{}\n{}", stdout, stderr)
+                };
                 CodeActResult {
                     success: output.status.success(),
                     output: combined.trim().to_string(),
-                    error: if output.status.success() { None } else { Some(stderr) },
+                    error: if output.status.success() {
+                        None
+                    } else {
+                        Some(stderr)
+                    },
                 }
             }
-            Err(e) => CodeActResult { success: false, output: String::new(), error: Some(format!("Python failed: {}", e)) },
+            Err(e) => CodeActResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Python failed: {}", e)),
+            },
         }
     }
 
     /// Execute with pre-bound variables (Rhai only, falls back to Python without context).
-    pub fn execute_with_context(&self, script: &str, context: Vec<(&str, Dynamic)>) -> CodeActResult {
+    pub fn execute_with_context(
+        &self,
+        script: &str,
+        context: Vec<(&str, Dynamic)>,
+    ) -> CodeActResult {
         let lang = detect_language(script);
 
         // Rhai supports context variables; Python doesn't (would need preamble injection)
@@ -314,20 +439,32 @@ def list_dir(path):
 
         // Try Rhai with context first
         let mut scope = Scope::new();
-        scope.push_constant("WORKSPACE", self.toolbox.workspace_root.to_string_lossy().to_string());
-        for (name, value) in context { scope.push_constant(name, value); }
+        scope.push_constant(
+            "WORKSPACE",
+            self.toolbox.workspace_root.to_string_lossy().to_string(),
+        );
+        for (name, value) in context {
+            scope.push_constant(name, value);
+        }
 
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
             Ok(value) => {
                 let result_str = format!("{}", value);
                 return CodeActResult {
                     success: true,
-                    output: if result_str.is_empty() || result_str == "()" { String::new() } else { result_str },
+                    output: if result_str.is_empty() || result_str == "()" {
+                        String::new()
+                    } else {
+                        result_str
+                    },
                     error: None,
                 };
             }
             Err(rhai_err) => {
-                log::debug!("CodeAct with_context: Rhai failed ({}), falling back to Python", rhai_err);
+                log::debug!(
+                    "CodeAct with_context: Rhai failed ({}), falling back to Python",
+                    rhai_err
+                );
                 PYTHON_FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -337,33 +474,55 @@ def list_dir(path):
 }
 
 #[derive(Debug, Clone)]
-pub struct CodeActResult { pub success: bool, pub output: String, pub error: Option<String> }
+pub struct CodeActResult {
+    pub success: bool,
+    pub output: String,
+    pub error: Option<String>,
+}
 
 impl std::fmt::Display for CodeActResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.success { write!(f, "{}", self.output) }
-        else { write!(f, "ERROR: {}\n\nOutput before error:\n{}", self.error.as_deref().unwrap_or("unknown"), self.output) }
+        if self.success {
+            write!(f, "{}", self.output)
+        } else {
+            write!(
+                f,
+                "ERROR: {}\n\nOutput before error:\n{}",
+                self.error.as_deref().unwrap_or("unknown"),
+                self.output
+            )
+        }
     }
 }
 
-pub struct CodeActTool { engine: Arc<CodeActEngine> }
+pub struct CodeActTool {
+    engine: Arc<CodeActEngine>,
+}
 
 impl CodeActTool {
     pub fn new(workspace_root: std::path::PathBuf) -> Self {
-        Self { engine: Arc::new(CodeActEngine::new(workspace_root)) }
+        Self {
+            engine: Arc::new(CodeActEngine::new(workspace_root)),
+        }
     }
 
     /// Create with model-family-aware routing.
     pub fn with_model_family(workspace_root: std::path::PathBuf, model_id: &str) -> Self {
         let family = ModelFamily::from_model_id(model_id);
-        Self { engine: Arc::new(CodeActEngine::with_model_family(workspace_root, family)) }
+        Self {
+            engine: Arc::new(CodeActEngine::with_model_family(workspace_root, family)),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl pharmakon_common::Tool for CodeActTool {
-    fn category(&self) -> pharmakon_common::ToolCategory { pharmakon_common::ToolCategory::Core }
-    fn name(&self) -> &str { "codeact" }
+    fn category(&self) -> pharmakon_common::ToolCategory {
+        pharmakon_common::ToolCategory::Core
+    }
+    fn name(&self) -> &str {
+        "codeact"
+    }
 
     fn description(&self) -> &str {
         "Execute a Python or Rhai script that orchestrates multiple operations in one turn. \
@@ -384,12 +543,19 @@ impl pharmakon_common::Tool for CodeActTool {
     }
 
     async fn call(&self, args: serde_json::Value) -> pharmakon_common::AgentResult<String> {
-        let script = args["script"].as_str()
+        let script = args["script"]
+            .as_str()
             .ok_or_else(|| pharmakon_common::AgentError("Missing 'script'".to_string()))?;
 
         let result = self.engine.execute(script);
-        if result.success { Ok(result.output) }
-        else { Err(pharmakon_common::AgentError(format!("Execution error: {}", result.error.as_deref().unwrap_or("unknown")))) }
+        if result.success {
+            Ok(result.output)
+        } else {
+            Err(pharmakon_common::AgentError(format!(
+                "Execution error: {}",
+                result.error.as_deref().unwrap_or("unknown")
+            )))
+        }
     }
 
     fn execution_profile(&self) -> pharmakon_common::ExecutionProfile {
@@ -415,7 +581,11 @@ mod tests {
     #[test]
     fn test_codeact_read_and_grep() {
         let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(tmp.path().join("test.rs"), "fn main() { println!(\"hello\"); }\n").unwrap();
+        std::fs::write(
+            tmp.path().join("test.rs"),
+            "fn main() { println!(\"hello\"); }\n",
+        )
+        .unwrap();
         let engine = CodeActEngine::new(tmp.path().to_path_buf());
         let result = engine.execute("let content = read_file(\"test.rs\"); content");
         assert!(result.success);

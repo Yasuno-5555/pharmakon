@@ -1,18 +1,21 @@
 //! Tool Scheduler, Budgeting, and Policy Enforcement Engine.
-//! 
+//!
 //! This module decouples high-level agentic intents from raw filesystem executions,
-//! implements automatic pre-flight redirection gates (CodeActGate), enforces rigorous 
+//! implements automatic pre-flight redirection gates (CodeActGate), enforces rigorous
 //! exploration budgets and tool policies, computes file-level attention scores, and
 //! hosts an asynchronous Virtual File System & Indexing Daemon (VFS / Living Graph)
 //! for instant project topology queries.
 
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Instant, Duration};
-use serde::{Serialize, Deserialize};
-use serde_json::{Value, json};
-use anyhow::{Result, anyhow};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::{Duration, Instant};
 
 // ═══════════════════════════════════════════════════════
 // 1. Tool Intent and Intent Routing
@@ -20,11 +23,23 @@ use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToolIntent {
-    ExploreDirectory { path: String },
-    ReadFile { path: String, start_line: Option<usize>, end_line: Option<usize> },
-    SearchSymbol { query: String },
+    ExploreDirectory {
+        path: String,
+    },
+    ReadFile {
+        path: String,
+        start_line: Option<usize>,
+        end_line: Option<usize>,
+    },
+    SearchSymbol {
+        query: String,
+    },
     CompileCheck,
-    ModifyCode { path: String, patch: String, reasoning: String },
+    ModifyCode {
+        path: String,
+        patch: String,
+        reasoning: String,
+    },
 }
 
 // ═══════════════════════════════════════════════════════
@@ -37,7 +52,7 @@ pub struct ExplorationBudget {
     pub max_depth: usize,
     pub max_tokens: usize,
     pub max_parallel_tasks: usize,
-    
+
     pub files_explored: usize,
     pub tokens_consumed: usize,
     pub current_depth: usize,
@@ -62,19 +77,22 @@ impl ExplorationBudget {
         if self.files_explored > self.max_files {
             return Err(anyhow!(
                 "Exploration budget exceeded: file count limit ({} / {}) reached. Returning to planning phase.",
-                self.files_explored, self.max_files
+                self.files_explored,
+                self.max_files
             ));
         }
         if self.tokens_consumed > self.max_tokens {
             return Err(anyhow!(
                 "Exploration budget exceeded: token consumption limit ({} / {}) reached. Returning to planning phase.",
-                self.tokens_consumed, self.max_tokens
+                self.tokens_consumed,
+                self.max_tokens
             ));
         }
         if self.current_depth > self.max_depth {
             return Err(anyhow!(
                 "Exploration budget exceeded: traversal depth ({} / {}) exceeded. Returning to planning phase.",
-                self.current_depth, self.max_depth
+                self.current_depth,
+                self.max_depth
             ));
         }
         Ok(())
@@ -120,30 +138,39 @@ impl Default for ToolPolicyEngine {
 impl ToolPolicyEngine {
     pub fn new() -> Self {
         let mut policies = HashMap::new();
-        
-        policies.insert("list_dir".to_string(), ToolPolicy {
-            cooldown: Duration::from_secs(10),
-            max_depth: 2,
-            max_matches: 100,
-            truncate_after_lines: 100,
-            require_reason: true,
-        });
 
-        policies.insert("grep_search".to_string(), ToolPolicy {
-            cooldown: Duration::from_secs(5),
-            max_depth: 0,
-            max_matches: 50,
-            truncate_after_lines: 200,
-            require_reason: true,
-        });
+        policies.insert(
+            "list_dir".to_string(),
+            ToolPolicy {
+                cooldown: Duration::from_secs(10),
+                max_depth: 2,
+                max_matches: 100,
+                truncate_after_lines: 100,
+                require_reason: true,
+            },
+        );
 
-        policies.insert("view_file".to_string(), ToolPolicy {
-            cooldown: Duration::from_secs(2),
-            max_depth: 0,
-            max_matches: 0,
-            truncate_after_lines: 300,
-            require_reason: false,
-        });
+        policies.insert(
+            "grep_search".to_string(),
+            ToolPolicy {
+                cooldown: Duration::from_secs(5),
+                max_depth: 0,
+                max_matches: 50,
+                truncate_after_lines: 200,
+                require_reason: true,
+            },
+        );
+
+        policies.insert(
+            "view_file".to_string(),
+            ToolPolicy {
+                cooldown: Duration::from_secs(2),
+                max_depth: 0,
+                max_matches: 0,
+                truncate_after_lines: 300,
+                require_reason: false,
+            },
+        );
 
         Self {
             policies,
@@ -157,20 +184,29 @@ impl ToolPolicyEngine {
         // Cooldown check — key by tool:path to avoid independent operations blocking each other
         if let Some(policy) = self.policies.get(tool) {
             let mut last_exec = self.last_executed.lock().unwrap();
-            let key = format!("{}:{}", tool, args.get("path").and_then(|p| p.as_str()).unwrap_or("*"));
+            let key = format!(
+                "{}:{}",
+                tool,
+                args.get("path").and_then(|p| p.as_str()).unwrap_or("*")
+            );
             if let Some(last) = last_exec.get(&key)
-                && now.duration_since(*last) < policy.cooldown {
-                    let wait_needed = policy.cooldown - now.duration_since(*last);
-                    return Err(anyhow!(
-                        "Tool '{}' for this path is on cooldown. Please wait {:.1}s or consolidate calls.",
-                        tool, wait_needed.as_secs_f32()
-                    ));
-                }
+                && now.duration_since(*last) < policy.cooldown
+            {
+                let wait_needed = policy.cooldown - now.duration_since(*last);
+                return Err(anyhow!(
+                    "Tool '{}' for this path is on cooldown. Please wait {:.1}s or consolidate calls.",
+                    tool,
+                    wait_needed.as_secs_f32()
+                ));
+            }
             last_exec.insert(key, now);
 
             // Require reason check
             if policy.require_reason {
-                let has_reason = args.get("reasoning").or_else(|| args.get("reason")).is_some();
+                let has_reason = args
+                    .get("reasoning")
+                    .or_else(|| args.get("reason"))
+                    .is_some();
                 if !has_reason && tool != "view_file" {
                     return Err(anyhow!(
                         "Tool '{}' requires a 'reasoning' field explaining why this action is necessary.",
@@ -217,10 +253,16 @@ impl AttentionScheduler {
     }
 
     /// Calculate and update attention scores across files
-    pub fn update_score(&self, path: &Path, relevance: f32, uncertainty_reduction: f32, token_cost: f32) -> f32 {
+    pub fn update_score(
+        &self,
+        path: &Path,
+        relevance: f32,
+        uncertainty_reduction: f32,
+        token_cost: f32,
+    ) -> f32 {
         let path_buf = path.to_path_buf();
         let history = self.touched_history.lock().unwrap();
-        
+
         // Recency calculation
         let recency = if let Some(pos) = history.iter().position(|p| p == &path_buf) {
             1.0 - (pos as f32 / history.len().max(1) as f32)
@@ -228,8 +270,9 @@ impl AttentionScheduler {
             0.1
         };
 
-        let calculated_score = (relevance * uncertainty_reduction) / (token_cost * recency).max(0.01);
-        
+        let calculated_score =
+            (relevance * uncertainty_reduction) / (token_cost * recency).max(0.01);
+
         let score_entry = AttentionScore {
             path: path_buf.clone(),
             score: calculated_score,
@@ -255,7 +298,8 @@ impl AttentionScheduler {
     /// Prune low relevance files from a planned batch read
     pub fn filter_high_attention(&self, paths: &[PathBuf], threshold: f32) -> Vec<PathBuf> {
         let scores = self.scores.lock().unwrap();
-        paths.iter()
+        paths
+            .iter()
             .filter(|p| {
                 if let Some(score) = scores.get(*p) {
                     score.score >= threshold
@@ -337,7 +381,10 @@ impl DirectoryIndexingDaemon {
                         return;
                     }
                     if let Ok(meta) = extract_metadata(&path) {
-                        local_index.insert(path.strip_prefix(&root).unwrap_or(&path).to_path_buf(), meta);
+                        local_index.insert(
+                            path.strip_prefix(&root).unwrap_or(&path).to_path_buf(),
+                            meta,
+                        );
                     }
                 }
             }
@@ -372,7 +419,7 @@ impl DirectoryIndexingDaemon {
         let index = self.index.lock().unwrap();
         let mut results = Vec::new();
         let query_lower = query.to_lowercase();
-        
+
         for (rel_path, meta) in index.iter() {
             for sym in &meta.symbols {
                 if sym.name.to_lowercase().contains(&query_lower) {
@@ -395,9 +442,10 @@ fn walk_dir(dir: &Path) -> Result<Vec<PathBuf>> {
                 continue;
             }
             if let Ok(file_type) = entry.file_type()
-                && file_type.is_symlink() {
-                    continue;
-                }
+                && file_type.is_symlink()
+            {
+                continue;
+            }
             if path.is_dir() {
                 paths.extend(walk_dir(&path)?);
             } else if path.is_file() {
@@ -414,7 +462,7 @@ fn extract_metadata(path: &Path) -> Result<FileMetadata> {
     let mut dependencies = Vec::new();
 
     let content = std::fs::read_to_string(path).unwrap_or_default();
-    
+
     // Quick symbol / import heuristic parser to avoid blocking tree-sitter issues
     if path.extension().and_then(|s| s.to_str()) == Some("rs") {
         for (line_no, line) in content.lines().enumerate() {
@@ -423,13 +471,21 @@ fn extract_metadata(path: &Path) -> Result<FileMetadata> {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() > 2 {
                     let name = parts[2].split('(').next().unwrap_or("unknown").to_string();
-                    symbols.push(SymbolDefinition { name, kind: "function".to_string(), line: line_no + 1 });
+                    symbols.push(SymbolDefinition {
+                        name,
+                        kind: "function".to_string(),
+                        line: line_no + 1,
+                    });
                 }
             } else if trimmed.starts_with("pub struct ") || trimmed.starts_with("struct ") {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() > 1 {
                     let name = parts[1].split('{').next().unwrap_or("unknown").to_string();
-                    symbols.push(SymbolDefinition { name, kind: "struct".to_string(), line: line_no + 1 });
+                    symbols.push(SymbolDefinition {
+                        name,
+                        kind: "struct".to_string(),
+                        line: line_no + 1,
+                    });
                 }
             } else if trimmed.starts_with("use ") {
                 dependencies.push(trimmed.to_string());
@@ -475,37 +531,74 @@ impl CodeActGate {
 
     pub fn should_redirect(tool: &str, args: &Value) -> Option<RedirectTarget> {
         if tool == "shell" {
-            let cmd = args.get("command").and_then(|s| s.as_str()).unwrap_or("").trim();
+            let cmd = args
+                .get("command")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .trim();
             let (base_cmd, cmd_args) = Self::parse_shell_command(cmd)?;
 
             match base_cmd {
                 "ls" | "find" | "eza" | "exa" => {
                     // Extract first non-flag argument as the path
-                    let path = cmd_args.iter().find(|a| !a.starts_with('-')).unwrap_or(&".").to_string();
+                    let path = cmd_args
+                        .iter()
+                        .find(|a| !a.starts_with('-'))
+                        .unwrap_or(&".")
+                        .to_string();
                     Some(RedirectTarget::ListDir { path })
                 }
                 "cat" | "head" | "tail" | "less" | "more" | "nl" => {
-                    let path = cmd_args.iter().find(|a| !a.starts_with('-')).unwrap_or(&"").to_string();
-                    if path.is_empty() { None } else { Some(RedirectTarget::ReadFile { path }) }
+                    let path = cmd_args
+                        .iter()
+                        .find(|a| !a.starts_with('-'))
+                        .unwrap_or(&"")
+                        .to_string();
+                    if path.is_empty() {
+                        None
+                    } else {
+                        Some(RedirectTarget::ReadFile { path })
+                    }
                 }
                 "grep" | "rg" | "ripgrep" | "ag" | "ack" => {
                     // Find the first non-flag argument as the pattern
-                    let query = cmd_args.iter().find(|a| !a.starts_with('-')).unwrap_or(&"").to_string();
-                    if query.is_empty() { None } else { Some(RedirectTarget::GrepFiles { query, path: ".".to_string() }) }
+                    let query = cmd_args
+                        .iter()
+                        .find(|a| !a.starts_with('-'))
+                        .unwrap_or(&"")
+                        .to_string();
+                    if query.is_empty() {
+                        None
+                    } else {
+                        Some(RedirectTarget::GrepFiles {
+                            query,
+                            path: ".".to_string(),
+                        })
+                    }
                 }
                 _ => None,
             }
         } else if tool == "codeact" {
-            let script = args.get("script").and_then(|s| s.as_str()).unwrap_or("").trim();
-            
+            let script = args
+                .get("script")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .trim();
+
             // Check if it's a simple single-line list_dir/read_file statement in Rhai/Python
-            if (script.contains("list_dir") || script.contains("std::fs::read_dir")) 
-               && script.lines().count() <= 2 {
-                return Some(RedirectTarget::ListDir { path: ".".to_string() });
+            if (script.contains("list_dir") || script.contains("std::fs::read_dir"))
+                && script.lines().count() <= 2
+            {
+                return Some(RedirectTarget::ListDir {
+                    path: ".".to_string(),
+                });
             }
             if (script.contains("read_file") || script.contains("std::fs::read_to_string"))
-               && script.lines().count() <= 2 {
-                return Some(RedirectTarget::ReadFile { path: ".".to_string() });
+                && script.lines().count() <= 2
+            {
+                return Some(RedirectTarget::ReadFile {
+                    path: ".".to_string(),
+                });
             }
             None
         } else {
@@ -545,7 +638,7 @@ impl ToolScheduler {
         if tool == "list_dir" || tool == "grep_search" || tool == "view_file" {
             budget.files_explored += 1;
         }
-        
+
         // Enforce strict exploration constraints
         budget.enforce_limit()?;
         Ok(())

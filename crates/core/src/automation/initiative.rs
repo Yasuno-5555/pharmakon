@@ -73,13 +73,11 @@ impl InitiativeEngineWorker {
             trajectory_context
         );
 
-        let messages = vec![
-            pharmakon_common::Message {
-                role: "user".to_string(),
-                content: Some(pharmakon_common::MessageContent::Text(user_prompt)),
-                ..Default::default()
-            },
-        ];
+        let messages = vec![pharmakon_common::Message {
+            role: "user".to_string(),
+            content: Some(pharmakon_common::MessageContent::Text(user_prompt)),
+            ..Default::default()
+        }];
 
         let request = pharmakon_common::CompletionRequest {
             messages,

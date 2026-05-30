@@ -118,11 +118,13 @@ impl ToolGovernor {
         // Per-tool rate limit
         {
             let mut stats = self.tool_stats.lock().unwrap();
-            let entry = stats.entry(tool_name.to_string()).or_insert_with(|| ToolStats {
-                call_count: 0,
-                last_call: Instant::now(),
-                consecutive_failures: 0,
-            });
+            let entry = stats
+                .entry(tool_name.to_string())
+                .or_insert_with(|| ToolStats {
+                    call_count: 0,
+                    last_call: Instant::now(),
+                    consecutive_failures: 0,
+                });
 
             let elapsed = entry.last_call.elapsed();
             if entry.call_count > 0 && elapsed < Duration::from_millis(50) {
@@ -166,7 +168,10 @@ impl ToolGovernor {
     /// Check if a tool should be circuit-broken (too many consecutive failures).
     pub fn is_circuit_broken(&self, tool_name: &str) -> bool {
         let stats = self.tool_stats.lock().unwrap();
-        stats.get(tool_name).map(|s| s.consecutive_failures >= 5).unwrap_or(false)
+        stats
+            .get(tool_name)
+            .map(|s| s.consecutive_failures >= 5)
+            .unwrap_or(false)
     }
 
     /// Get current stats for diagnostics.
@@ -176,7 +181,10 @@ impl ToolGovernor {
             in_flight: self.in_flight.load(Ordering::SeqCst),
             total_calls: self.total_calls.load(Ordering::SeqCst),
             depth: self.depth,
-            tool_counts: stats.iter().map(|(k, v)| (k.clone(), v.call_count)).collect(),
+            tool_counts: stats
+                .iter()
+                .map(|(k, v)| (k.clone(), v.call_count))
+                .collect(),
         }
     }
 }
@@ -226,12 +234,12 @@ pub struct ToolSafetyLimits {
 impl Default for ToolSafetyLimits {
     fn default() -> Self {
         Self {
-            max_read_size: 1_048_576,       // 1MB
+            max_read_size: 1_048_576, // 1MB
             max_grep_depth: 5,
             max_grep_files: 500,
-            max_shell_output: 102_400,       // 100KB
+            max_shell_output: 102_400, // 100KB
             shell_timeout_secs: 30,
-            max_write_size: 5_242_880,       // 5MB
+            max_write_size: 5_242_880, // 5MB
             codeact_timeout_ms: 5000,
             max_codeact_script_len: 10000,
         }
@@ -285,8 +293,15 @@ impl ToolSafetyLimits {
         // Block obviously dangerous patterns
         let lower = command.to_lowercase();
         let blocked = [
-            "rm -rf /", "dd if=", "mkfs.", ":(){ :|:& };:", "> /dev/sda",
-            "fork bomb", "shutdown", "reboot", "halt",
+            "rm -rf /",
+            "dd if=",
+            "mkfs.",
+            ":(){ :|:& };:",
+            "> /dev/sda",
+            "fork bomb",
+            "shutdown",
+            "reboot",
+            "halt",
         ];
         for pattern in &blocked {
             if lower.contains(pattern) {
@@ -301,7 +316,8 @@ impl ToolSafetyLimits {
         if script.len() > self.max_codeact_script_len {
             return Err(format!(
                 "CodeAct script too long: {} chars (max: {})",
-                script.len(), self.max_codeact_script_len
+                script.len(),
+                self.max_codeact_script_len
             ));
         }
         Ok(())
@@ -458,7 +474,13 @@ impl IntegratedGovernor {
     /// From objeta's DynamicLambda pattern: λ = base × entropy_factor × stall_factor.
     pub fn dynamic_budget_scale(&self, entropy: f32, stall_count: usize) -> f32 {
         let base = 1.0;
-        let entropy_factor = if entropy > 0.70 { 1.5 } else if entropy > 0.50 { 1.25 } else { 1.0 };
+        let entropy_factor = if entropy > 0.70 {
+            1.5
+        } else if entropy > 0.50 {
+            1.25
+        } else {
+            1.0
+        };
         let stall_factor = 1.0 + (stall_count as f32 * 0.2).min(1.0);
         (base * entropy_factor * stall_factor).clamp(0.5, 3.0)
     }
@@ -501,7 +523,9 @@ mod tests {
         });
         gov.check("shell").ok();
         gov.complete();
-        for _ in 0..5 { gov.record_failure("shell"); }
+        for _ in 0..5 {
+            gov.record_failure("shell");
+        }
         assert!(gov.is_circuit_broken("shell"));
         gov.record_success("shell");
         assert!(!gov.is_circuit_broken("shell"));
@@ -538,7 +562,10 @@ mod tests {
 
         // Quality > Resource: entropy escalation wins over budget pressure
         let action = gov.evaluate(0.72, 2, true, 0.90);
-        assert!(matches!(action, GovernorAction::InjectStrategyPrompt { .. }));
+        assert!(matches!(
+            action,
+            GovernorAction::InjectStrategyPrompt { .. }
+        ));
 
         // ResourceGuard when no quality escalation
         let action = gov.evaluate(0.3, 0, false, 0.85);

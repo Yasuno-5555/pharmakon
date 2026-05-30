@@ -1,6 +1,6 @@
+use crate::mcp::McpClient;
 use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool};
-use crate::mcp::McpClient;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -46,15 +46,16 @@ impl Tool for McpTool {
         // Context Injection: Add background info if it's an object
         let mut final_args = args.clone();
         if let Some(obj) = final_args.as_object_mut()
-            && !obj.contains_key("_pharmakon_context") {
-                obj.insert(
-                    "_pharmakon_context".to_string(),
-                    serde_json::json!({
-                        "tool_name": &self.name,
-                        "timestamp": chrono::Utc::now().to_rfc3339()
-                    }),
-                );
-            }
+            && !obj.contains_key("_pharmakon_context")
+        {
+            obj.insert(
+                "_pharmakon_context".to_string(),
+                serde_json::json!({
+                    "tool_name": &self.name,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }),
+            );
+        }
 
         let result: Value = self
             .client
@@ -79,7 +80,8 @@ impl Tool for McpTool {
             }
             Ok(output)
         } else {
-            Ok(serde_json::to_string(&result).map_err(|e: serde_json::Error| AgentError(e.to_string()))?)
+            Ok(serde_json::to_string(&result)
+                .map_err(|e: serde_json::Error| AgentError(e.to_string()))?)
         }
     }
 }

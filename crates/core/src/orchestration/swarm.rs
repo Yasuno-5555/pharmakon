@@ -1,7 +1,7 @@
 use crate::agent::Agent;
-use crate::orchestration::swarm_economy::SwarmEconomy;
 use crate::orchestration::cognitive_economics::AgentSpecialization;
 use crate::orchestration::dsge_integration::AgentEconomy;
+use crate::orchestration::swarm_economy::SwarmEconomy;
 use async_trait::async_trait;
 use pharmakon_common::AgentSpawner;
 use std::sync::Arc;
@@ -37,10 +37,7 @@ pub enum SpawnDecision {
 ///   - parallelism_gain: tokens saved by running tasks in parallel (vs sequential)
 ///   - spawn_overhead: tokens burned to set up each sub-agent (~500 tokens)
 ///   - context_dependency_cost: tokens needed to share state between agents
-pub fn analyze_spawn_decision(
-    sub_tasks: &[String],
-    shared_context_size: usize,
-) -> SpawnDecision {
+pub fn analyze_spawn_decision(sub_tasks: &[String], shared_context_size: usize) -> SpawnDecision {
     const SPAWN_OVERHEAD_PER_AGENT: usize = 500; // ~500 tokens to set up a sub-agent
     const MIN_TASK_SIZE_FOR_SPAWN: usize = 200; // Don't spawn for trivial tasks
 
@@ -208,7 +205,9 @@ impl AgentSpawner for SwarmManager {
     /// Return a SpawnHandle that resolves when the sub-agent completes.
     async fn spawn_with_handle(
         &self,
-        task: &str, soul: Option<String>, depth: u8,
+        task: &str,
+        soul: Option<String>,
+        depth: u8,
     ) -> anyhow::Result<pharmakon_common::SpawnHandle> {
         if depth > 2 {
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -242,18 +241,41 @@ async fn run_swarm_sub_agent(
     depth: u8,
 ) -> anyhow::Result<String> {
     let role_str = role.unwrap_or_else(|| "researcher".to_string());
-    let (model, session_store, _registry, knowledge_nexus, semantic_search, fact_memory, territory_manager) = {
+    let (
+        model,
+        session_store,
+        _registry,
+        knowledge_nexus,
+        semantic_search,
+        fact_memory,
+        territory_manager,
+    ) = {
         let parent_lock = parent.lock().await;
-        (parent_lock.model.clone(), parent_lock.session_store.clone(), parent_lock.registry.clone(),
-         parent_lock.knowledge_nexus.clone(), parent_lock.semantic_search.clone(),
-         parent_lock.fact_memory.clone(), parent_lock.territory_manager.clone())
+        (
+            parent_lock.model.clone(),
+            parent_lock.session_store.clone(),
+            parent_lock.registry.clone(),
+            parent_lock.knowledge_nexus.clone(),
+            parent_lock.semantic_search.clone(),
+            parent_lock.fact_memory.clone(),
+            parent_lock.territory_manager.clone(),
+        )
     };
     let session_id = format!("swarm-depth{}-{}", depth, rand::random::<u32>());
-    let inner = { let m = model.lock().await; m.clone() };
+    let inner = {
+        let m = model.lock().await;
+        m.clone()
+    };
     let mut sub = Agent::new(inner, session_id.clone());
-    if let Some(s) = session_store { sub = sub.with_store(s); }
-    if let Some(n) = knowledge_nexus { sub = sub.with_knowledge_nexus(n).with_isolated_knowledge(); }
-    if let Some(s) = semantic_search { sub = sub.with_semantic_search(s); }
+    if let Some(s) = session_store {
+        sub = sub.with_store(s);
+    }
+    if let Some(n) = knowledge_nexus {
+        sub = sub.with_knowledge_nexus(n).with_isolated_knowledge();
+    }
+    if let Some(s) = semantic_search {
+        sub = sub.with_semantic_search(s);
+    }
     sub.fact_memory = fact_memory;
     sub.territory_manager = territory_manager;
     sub.set_soul(crate::soul::Soul::expert(&role_str)).await;
@@ -309,10 +331,15 @@ pub struct FractalSwarmTool {
 
 impl FractalSwarmTool {
     pub fn new(spawner: Arc<dyn AgentSpawner>, depth: u8) -> Self {
-        Self { spawner, depth, parent_economy: None }
+        Self {
+            spawner,
+            depth,
+            parent_economy: None,
+        }
     }
     pub fn with_economy(mut self, economy: Arc<std::sync::Mutex<AgentEconomy>>) -> Self {
-        self.parent_economy = Some(economy); self
+        self.parent_economy = Some(economy);
+        self
     }
 }
 
@@ -351,7 +378,9 @@ impl pharmakon_common::Tool for FractalSwarmTool {
 
     async fn call(&self, args: serde_json::Value) -> pharmakon_common::AgentResult<String> {
         let goal = args["goal"].as_str().unwrap_or_default();
-        let sub_tasks = args["sub_tasks"].as_array().ok_or_else(|| pharmakon_common::AgentError("Missing sub_tasks".to_string()))?;
+        let sub_tasks = args["sub_tasks"]
+            .as_array()
+            .ok_or_else(|| pharmakon_common::AgentError("Missing sub_tasks".to_string()))?;
 
         // ── DSGE: Market-based token allocation ──
         let (allocations, model_assignments) = if let Some(ref economy) = self.parent_economy {
@@ -361,10 +390,10 @@ impl pharmakon_common::Tool for FractalSwarmTool {
                 let task = task_val["task"].as_str().unwrap_or_default();
                 let role = task_val["role"].as_str().unwrap_or("fast");
                 let spec = match role {
-                    "researcher"|"analyst" => AgentSpecialization::Researcher,
-                    "coder"|"engineer" => AgentSpecialization::Deep,
-                    "verifier"|"reviewer" => AgentSpecialization::Verifier,
-                    "planner"|"architect" => AgentSpecialization::Planner,
+                    "researcher" | "analyst" => AgentSpecialization::Researcher,
+                    "coder" | "engineer" => AgentSpecialization::Deep,
+                    "verifier" | "reviewer" => AgentSpecialization::Verifier,
+                    "planner" | "architect" => AgentSpecialization::Planner,
                     _ => AgentSpecialization::Fast,
                 };
                 swarm.register_task(&format!("swarm-{}", i), task, spec);
@@ -375,10 +404,10 @@ impl pharmakon_common::Tool for FractalSwarmTool {
                 let task = task_val["task"].as_str().unwrap_or_default();
                 let role = task_val["role"].as_str().unwrap_or("fast");
                 let spec = match role {
-                    "researcher"|"analyst" => AgentSpecialization::Researcher,
-                    "coder"|"engineer" => AgentSpecialization::Deep,
-                    "verifier"|"reviewer" => AgentSpecialization::Verifier,
-                    "planner"|"architect" => AgentSpecialization::Planner,
+                    "researcher" | "analyst" => AgentSpecialization::Researcher,
+                    "coder" | "engineer" => AgentSpecialization::Deep,
+                    "verifier" | "reviewer" => AgentSpecialization::Verifier,
+                    "planner" | "architect" => AgentSpecialization::Planner,
                     _ => AgentSpecialization::Fast,
                 };
                 let budget = *budgets.get(&format!("swarm-{}", i)).unwrap_or(&5000);
@@ -388,10 +417,17 @@ impl pharmakon_common::Tool for FractalSwarmTool {
             }
             (budgets, models)
         } else {
-            (std::collections::HashMap::new(), std::collections::HashMap::new())
+            (
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+            )
         };
 
-        log::info!("FractalSwarm: Processing goal '{}' with {} sub-tasks", goal, sub_tasks.len());
+        log::info!(
+            "FractalSwarm: Processing goal '{}' with {} sub-tasks",
+            goal,
+            sub_tasks.len()
+        );
 
         let mut handles = Vec::new();
         for (i, task_val) in sub_tasks.iter().enumerate() {
@@ -405,7 +441,10 @@ impl pharmakon_common::Tool for FractalSwarmTool {
             let task_with_budget = format!("{} [BUDGET: {} tokens]", task, budget);
 
             handles.push(async move {
-                match spawner.spawn_with_handle(&task_with_budget, role, depth + 1).await {
+                match spawner
+                    .spawn_with_handle(&task_with_budget, role, depth + 1)
+                    .await
+                {
                     Ok(handle) => match handle.await_result().await {
                         Ok(result) => Ok((task_id, result)),
                         Err(e) => Err((task_id, e)),
@@ -415,13 +454,15 @@ impl pharmakon_common::Tool for FractalSwarmTool {
             });
         }
 
-        let results_raw: Vec<(String, Result<String, anyhow::Error>)> = futures::future::join_all(handles).await
-            .into_iter()
-            .map(|r| match r {
-                Ok((id, output)) => (id, Ok(output)),
-                Err((id, e)) => (id, Err(e)),
-            })
-            .collect();
+        let results_raw: Vec<(String, Result<String, anyhow::Error>)> =
+            futures::future::join_all(handles)
+                .await
+                .into_iter()
+                .map(|r| match r {
+                    Ok((id, output)) => (id, Ok(output)),
+                    Err((id, e)) => (id, Err(e)),
+                })
+                .collect();
 
         if let Some(ref economy) = self.parent_economy {
             let parent = economy.lock().unwrap();

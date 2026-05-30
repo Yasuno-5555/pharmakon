@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   Clock, Zap, Layout, Terminal,
   BarChart3, Settings, Package, MessageSquare, BookOpen
@@ -17,130 +17,115 @@ import SystemView from './views/SystemView';
 import SettingsView from './views/SettingsView';
 import ResearchView from './views/ResearchView';
 import DatabaseView from './views/DatabaseView';
-
-// Types
-type Role = 'user' | 'agent' | 'assistant' | 'system' | 'tool';
-
-interface Message {
-  id: string;
-  role: Role;
-  content?: string;
-  thought?: string;
-  images?: string[];
-  toolCall?: { name: string; args: any };
-  toolResult?: { result: string };
-  interactive?: { id: string; components: any[] };
-}
-
-interface CronJobInfo {
-  id: string;
-  schedule_type: string;
-  expr: string;
-  message: string;
-}
+import type {
+  AppSettings,
+  CronJobInfo,
+  HealthStats,
+  McpStatEntry,
+  Message,
+  ResearchNotebook,
+  ServerEvent,
+  SwarmStatus,
+  ToolInfo,
+  UsageEntry,
+} from './types';
 
 type Tab = 'chat' | 'dashboard' | 'automation' | 'skills' | 'research' | 'database' | 'system' | 'settings';
 
-export interface HealthStats {
-  failure_rate?: number;
-  last_latency?: string;
-  is_healthy?: boolean;
-  uptime?: number;
-  connected_clients?: number;
-  memory_usage?: number;
-  total_tokens?: number;
-  total_cost?: number;
-  [key: string]: any;
+interface ContentPart {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: {
+    url: string;
+  };
 }
+
+interface HistoryMessage {
+  role: string;
+  content?: string | { Text?: string };
+  thought?: string;
+}
+
+interface EventPayloadMap {
+  AgentThought: { content: string | ContentPart[] };
+  AgentResponse: { content: string | ContentPart[] };
+  ToolCall: { name: string; args: Record<string, unknown> };
+  ToolResult: { result: string };
+  CronJobList: { jobs: CronJobInfo[] };
+  TokenUsageUpdate: { total_tokens: number; total_cost: number };
+  GatewayStatus: HealthStats;
+  SystemLog: { level: string; message: string };
+  McpStats: { stats: McpStatEntry[] };
+  OrchestrationState: { sub_agents: SwarmStatus[] };
+  AgentInsight: { insight: string };
+  ModelList: { models: string[] };
+  ModelSwitched: { model_id: string };
+  SessionList: { sessions: string[] };
+  ToolList: { tools: ToolInfo[] };
+  UsageHistory: { history: UsageEntry[] };
+  SettingsUpdate: { settings: AppSettings };
+  ResearchNotebookUpdate: { notebook: ResearchNotebook };
+  GraphUpdate: { relations: string[] };
+  ForensicLog: { action: string; hypothesis: string; observation?: string };
+  HistoryList: { messages: HistoryMessage[] };
+  Error: { message: string };
+}
+
+type EventType = keyof EventPayloadMap;
+type TypedServerEvent<K extends EventType> = {
+  type: K;
+  data: EventPayloadMap[K];
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('chat');
-  const [socket, setSocket] = useState<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [cronJobs, setCronJobs] = useState<CronJobInfo[]>([]);
   const [insights, setInsights] = useState<string[]>([]);
   const [healthStats, setHealthStats] = useState<HealthStats | null>(null);
-  const [activeSwarms, setActiveSwarms] = useState<{id: string, role: string, status: string}[]>([]);
+  const [activeSwarms, setActiveSwarms] = useState<SwarmStatus[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [currentModel, setCurrentModel] = useState<string>('');
   const [sessions, setSessions] = useState<string[]>([]);
   const [currentSession, setCurrentSession] = useState<string>('gateway');
-  const [mcpStats, setMcpStats] = useState<any[]>([]);
-  const [tools, setTools] = useState<any[]>([]);
-  const [usageHistory, setUsageHistory] = useState<any[]>([]);
-  const [settings, setSettings] = useState<any>(null);
-  const [notebook, setNotebook] = useState<any>(null);
+  const [mcpStats, setMcpStats] = useState<McpStatEntry[]>([]);
+  const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [usageHistory, setUsageHistory] = useState<UsageEntry[]>([]);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [notebook, setNotebook] = useState<ResearchNotebook | null>(null);
   const [graphData, setGraphData] = useState<string[]>([]);
 
+  const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const handleServerEventRef = useRef<((event: any) => void) | null>(null);
+  const sendWs = (payload: object) => {
+    socketRef.current?.send(JSON.stringify(payload));
+  };
 
-  // Initialize WebSocket
-  useEffect(() => {
-    const ws = new WebSocket('ws://localhost:19999/ws');
-
-    ws.onopen = () => {
-      setConnected(true);
-      ws.send(JSON.stringify({ type: "GetCronJobs" }));
-      ws.send(JSON.stringify({ type: "GetModels" }));
-      ws.send(JSON.stringify({ type: "GetOrchestration" }));
-      ws.send(JSON.stringify({ type: "GetMcpStats" }));
-      ws.send(JSON.stringify({ type: "GetGatewayStatus" }));
-      ws.send(JSON.stringify({ type: "GetSessions" }));
-      ws.send(JSON.stringify({ type: "GetTools" }));
-      ws.send(JSON.stringify({ type: "GetUsageHistory" }));
-      ws.send(JSON.stringify({ type: "GetSettings" }));
-      ws.send(JSON.stringify({ type: "GetResearchNotebook" }));
-      ws.send(JSON.stringify({ type: "GetGraphMemory", data: { query: "" } }));
-    };
-
-    ws.onclose = () => setConnected(false);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (handleServerEventRef.current) {
-          handleServerEventRef.current(data);
-        }
-      } catch (e) {
-        console.error("Error parsing WS message:", e);
-      }
-    };
-
-    setSocket(ws);
-    return () => ws.close();
-  }, []);
-
-  const parseContent = (content: any): { text: string; images: string[] } => {
+  const parseContent = (content: string | ContentPart[] | undefined): { text: string; images: string[] } => {
     if (typeof content === 'string') return { text: content, images: [] };
     if (Array.isArray(content)) {
       let text = '';
       const images: string[] = [];
-      content.forEach(part => {
-        if (part.type === 'text') text += part.text;
-        if (part.type === 'image_url') images.push(part.image_url.url);
+      content.forEach((part) => {
+        if (part.type === 'text' && part.text) text += part.text;
+        if (part.type === 'image_url' && part.image_url?.url) images.push(part.image_url.url);
       });
       return { text, images };
     }
     return { text: '', images: [] };
   };
 
-  // useEffect(() => {
-  //   if (activeTab === 'chat') {
-  //     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  //   }
-  // }, [messages, activeTab]);
-
-  handleServerEventRef.current = (event: any) => {
-    const { type, data: payload } = event;
+  const handleServerEvent = useEffectEvent((event: ServerEvent) => {
+    const type = event.type as EventType;
+    const payload = event.data as EventPayloadMap[EventType];
 
     switch (type) {
       case 'AgentThought':
         setMessages(prev => {
-          const { text } = parseContent(payload.content);
+          const { text } = parseContent((payload as TypedServerEvent<'AgentThought'>['data']).content);
           const lastMsg = prev[prev.length - 1];
           if (lastMsg && lastMsg.role === 'agent' && !lastMsg.content) {
             return [...prev.slice(0, -1), { ...lastMsg, thought: (lastMsg.thought || '') + text }];
@@ -151,7 +136,7 @@ function App() {
 
       case 'AgentResponse':
         setMessages(prev => {
-          const { text, images } = parseContent(payload.content);
+          const { text, images } = parseContent((payload as TypedServerEvent<'AgentResponse'>['data']).content);
           const lastMsg = prev[prev.length - 1];
           if (lastMsg && lastMsg.role === 'agent') {
             return [...prev.slice(0, -1), {
@@ -165,62 +150,118 @@ function App() {
         break;
 
       case 'ToolCall':
-        setMessages(prev => [...prev, { id: Math.random().toString(), role: 'agent', toolCall: { name: payload.name, args: payload.args } }]);
+        setMessages(prev => [...prev, {
+          id: Math.random().toString(),
+          role: 'agent',
+          toolCall: {
+            name: (payload as TypedServerEvent<'ToolCall'>['data']).name,
+            args: (payload as TypedServerEvent<'ToolCall'>['data']).args,
+          },
+        }]);
         break;
 
       case 'ToolResult':
-        setMessages(prev => [...prev, { id: Math.random().toString(), role: 'tool', toolResult: { result: payload.result } }]);
+        setMessages(prev => [...prev, {
+          id: Math.random().toString(),
+          role: 'tool',
+          toolResult: { result: (payload as TypedServerEvent<'ToolResult'>['data']).result },
+        }]);
         break;
 
-      case 'CronJobList': setCronJobs(payload.jobs); break;
+      case 'CronJobList': setCronJobs((payload as TypedServerEvent<'CronJobList'>['data']).jobs); break;
       case 'TokenUsageUpdate':
-        setHealthStats(prev => ({ ...prev, total_tokens: payload.total_tokens, total_cost: payload.total_cost }));
+        setHealthStats(prev => ({
+          ...(prev ?? {}),
+          total_tokens: (payload as TypedServerEvent<'TokenUsageUpdate'>['data']).total_tokens,
+          total_cost: (payload as TypedServerEvent<'TokenUsageUpdate'>['data']).total_cost,
+        }));
         break;
-      case 'GatewayStatus':
-        setHealthStats(prev => ({ ...prev, ...payload }));
-        break;
+      case 'GatewayStatus': setHealthStats(prev => ({ ...(prev ?? {}), ...(payload as HealthStats) })); break;
       case 'SystemLog':
-        setInsights(prev => [...prev.slice(-20), `[${payload.level}] ${payload.message}`]);
+        setInsights(prev => [...prev.slice(-20), `[${(payload as TypedServerEvent<'SystemLog'>['data']).level}] ${(payload as TypedServerEvent<'SystemLog'>['data']).message}`]);
         break;
-      case 'McpStats': setMcpStats(payload.stats); break;
-      case 'OrchestrationState': setActiveSwarms(payload.sub_agents); break;
-      case 'AgentInsight': setInsights(prev => [...prev.slice(-10), payload.insight]); break;
-      case 'ModelList': setAvailableModels(payload.models); break;
-      case 'ModelSwitched': setCurrentModel(payload.model_id); break;
-      case 'SessionList': setSessions(payload.sessions); break;
-      case 'ToolList': setTools(payload.tools); break;
-      case 'UsageHistory': setUsageHistory(payload.history); break;
-      case 'SettingsUpdate': setSettings(payload.settings); break;
-      case 'ResearchNotebookUpdate': setNotebook(payload.notebook); break;
-      case 'GraphUpdate': setGraphData(payload.relations); break;
+      case 'McpStats': setMcpStats((payload as TypedServerEvent<'McpStats'>['data']).stats); break;
+      case 'OrchestrationState': setActiveSwarms((payload as TypedServerEvent<'OrchestrationState'>['data']).sub_agents); break;
+      case 'AgentInsight': setInsights(prev => [...prev.slice(-10), (payload as TypedServerEvent<'AgentInsight'>['data']).insight]); break;
+      case 'ModelList': setAvailableModels((payload as TypedServerEvent<'ModelList'>['data']).models); break;
+      case 'ModelSwitched': setCurrentModel((payload as TypedServerEvent<'ModelSwitched'>['data']).model_id); break;
+      case 'SessionList': setSessions((payload as TypedServerEvent<'SessionList'>['data']).sessions); break;
+      case 'ToolList': setTools((payload as TypedServerEvent<'ToolList'>['data']).tools); break;
+      case 'UsageHistory': setUsageHistory((payload as TypedServerEvent<'UsageHistory'>['data']).history); break;
+      case 'SettingsUpdate': setSettings((payload as TypedServerEvent<'SettingsUpdate'>['data']).settings); break;
+      case 'ResearchNotebookUpdate': setNotebook((payload as TypedServerEvent<'ResearchNotebookUpdate'>['data']).notebook); break;
+      case 'GraphUpdate': setGraphData((payload as TypedServerEvent<'GraphUpdate'>['data']).relations); break;
       case 'ForensicLog':
-        setInsights(prev => [...prev.slice(-30), `[FORENSIC] ${payload.action}: ${payload.hypothesis} ${payload.observation ? `-> ${payload.observation}` : ''}`]);
+        setInsights(prev => {
+          const forensic = payload as TypedServerEvent<'ForensicLog'>['data'];
+          return [...prev.slice(-30), `[FORENSIC] ${forensic.action}: ${forensic.hypothesis} ${forensic.observation ? `-> ${forensic.observation}` : ''}`];
+        });
         break;
       case 'HistoryList':
-        setMessages(payload.messages.map((m: any) => ({
+        setMessages((payload as TypedServerEvent<'HistoryList'>['data']).messages.map((m) => ({
           id: Math.random().toString(),
-          role: m.role as Role,
-          content: m.content?.Text || m.content || "",
-          thought: m.thought
+          role: m.role as Message['role'],
+          content: typeof m.content === 'string' ? m.content : m.content?.Text || '',
+          thought: m.thought,
         })));
         break;
       case 'Error':
-        setMessages(prev => [...prev, { id: Math.random().toString(), role: 'system', content: `Error: ${payload.message}` }]);
+        setMessages(prev => [...prev, {
+          id: Math.random().toString(),
+          role: 'system',
+          content: `Error: ${(payload as TypedServerEvent<'Error'>['data']).message}`,
+        }]);
         break;
     }
-  };
+  });
+
+  useEffect(() => {
+    const ws = new WebSocket('ws://localhost:19999/ws');
+    socketRef.current = ws;
+
+    ws.onopen = () => {
+      setConnected(true);
+      [
+        { type: 'GetCronJobs' },
+        { type: 'GetModels' },
+        { type: 'GetOrchestration' },
+        { type: 'GetMcpStats' },
+        { type: 'GetGatewayStatus' },
+        { type: 'GetSessions' },
+        { type: 'GetTools' },
+        { type: 'GetUsageHistory' },
+        { type: 'GetSettings' },
+        { type: 'GetResearchNotebook' },
+        { type: 'GetGraphMemory', data: { query: '' } },
+      ].forEach((request) => ws.send(JSON.stringify(request)));
+    };
+
+    ws.onclose = () => setConnected(false);
+    ws.onmessage = (event) => {
+      try {
+        handleServerEvent(JSON.parse(event.data) as ServerEvent);
+      } catch (error) {
+        console.error('Error parsing WS message:', error);
+      }
+    };
+
+    return () => {
+      socketRef.current = null;
+      ws.close();
+    };
+  }, []);
 
   const sendMessage = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || !socket || !connected) return;
+    if (!input.trim() || !socketRef.current || !connected) return;
     setMessages(prev => [...prev, { id: Math.random().toString(), role: 'user', content: input }]);
-    socket.send(JSON.stringify({ type: "SendMessage", data: { message: input } }));
+    sendWs({ type: 'SendMessage', data: { message: input } });
     setInput('');
   };
 
   const switchSession = (id: string) => {
     setCurrentSession(id);
-    socket?.send(JSON.stringify({ type: "SwitchSession", data: { id } }));
+    sendWs({ type: 'SwitchSession', data: { id } });
   };
 
   return (
@@ -304,7 +345,15 @@ function App() {
               </div>
             </div>
             <HealthMonitor stats={healthStats} />
-            <SoulConfigurator socket={socket} />
+            <SoulConfigurator
+              onSync={(traits, systemPrompt) => sendWs({
+                type: 'UpdateSoul',
+                payload: {
+                  traits,
+                  system_prompt: systemPrompt,
+                },
+              })}
+            />
           </>
         ) : (
           <div className="sidebar-section">
@@ -338,20 +387,21 @@ function App() {
                 sendMessage={sendMessage} handleKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                 handleInput={(e) => setInput(e.target.value)} connected={connected}
                 clearMessages={() => setMessages([])} currentModel={currentModel}
-                availableModels={availableModels} switchModel={(id) => socket?.send(JSON.stringify({type: "SwitchModel", data: {model_id: id}}))}
+                availableModels={availableModels} switchModel={(id) => sendWs({ type: 'SwitchModel', data: { model_id: id } })}
                 textareaRef={textareaRef} messagesEndRef={messagesEndRef}
+                onInteractiveResponse={(elementId, action) => sendWs({ type: 'InteractiveResponse', data: { element_id: elementId, action, value: null } })}
               />
             )}
             {activeTab === 'dashboard' && <DashboardView stats={healthStats} mcpStats={mcpStats} usageHistory={usageHistory} />}
-            {activeTab === 'automation' && <AutomationView cronJobs={cronJobs} onCancel={(id) => socket?.send(JSON.stringify({type: "CancelCronJob", data: {id}}))} onRefresh={() => socket?.send(JSON.stringify({type: "GetCronJobs"}))} />}
+            {activeTab === 'automation' && <AutomationView cronJobs={cronJobs} onCancel={(id) => sendWs({ type: 'CancelCronJob', data: { id } })} onRefresh={() => sendWs({ type: 'GetCronJobs' })} />}
             {activeTab === 'skills' && <SkillsView tools={tools} />}
             {activeTab === 'research' && <ResearchView notebook={notebook} />}
-            {activeTab === 'database' && <DatabaseView relations={graphData} onSearch={(q) => socket?.send(JSON.stringify({type: "GetGraphMemory", data: {query: q}}))} />}
+            {activeTab === 'database' && <DatabaseView relations={graphData} onSearch={(q) => sendWs({ type: 'GetGraphMemory', data: { query: q } })} />}
             {activeTab === 'system' && <SystemView insights={insights} />}
             {activeTab === 'settings' && (
               <SettingsView
                 settings={settings}
-                onUpdate={(s) => socket?.send(JSON.stringify({type: "UpdateSettings", data: {settings: s}}))}
+                onUpdate={(s) => sendWs({ type: 'UpdateSettings', data: { settings: s } })}
               />
             )}
           </motion.div>

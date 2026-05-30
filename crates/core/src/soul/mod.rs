@@ -28,7 +28,8 @@ impl Soul {
             Ok(soul) => Ok(soul),
             Err(yaml_err) => {
                 // Fallback: treat entire file as system_prompt for plain-text soul files
-                let file_name = path.as_ref()
+                let file_name = path
+                    .as_ref()
                     .file_stem()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| "Custom".to_string());

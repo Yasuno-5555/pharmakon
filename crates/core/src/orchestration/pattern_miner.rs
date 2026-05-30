@@ -5,17 +5,17 @@
 //! for future matching tasks.
 
 use anyhow::Result;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use regex::Regex;
 
-use crate::orchestration::world::{CandidatePlan, PlanNode, PlanCache};
+use crate::orchestration::world::{CandidatePlan, PlanCache, PlanNode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternTemplate {
     pub id: String,
-    pub template_key: String,       // e.g. "add logging to {param_0}"
-    pub task_regex: String,         // e.g. r"^add logging to (?P<param_0>[a-zA-Z0-9_\-\.]+)$"
+    pub template_key: String,        // e.g. "add logging to {param_0}"
+    pub task_regex: String,          // e.g. r"^add logging to (?P<param_0>[a-zA-Z0-9_\-\.]+)$"
     pub parameter_keys: Vec<String>, // e.g. ["param_0"]
     pub root_node: PlanNode,         // AST node structure with "{param_0}" placeholders
     pub frequency: u32,
@@ -30,17 +30,22 @@ pub struct PatternLibrary {
 
 impl PatternLibrary {
     pub fn load() -> Self {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/pattern_library.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/pattern_library.json");
         if path.exists()
             && let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(lib) = serde_json::from_str(&content) {
-                    return lib;
-                }
+            && let Ok(lib) = serde_json::from_str(&content)
+        {
+            return lib;
+        }
         Self::default()
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/pattern_library.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/pattern_library.json");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -53,25 +58,26 @@ impl PatternLibrary {
     pub fn instantiate_match(&self, task: &str) -> Option<CandidatePlan> {
         for template in &self.templates {
             if let Ok(re) = Regex::new(&template.task_regex)
-                && let Some(captures) = re.captures(task) {
-                    let mut params = HashMap::new();
-                    for key in &template.parameter_keys {
-                        if let Some(m) = captures.name(key) {
-                            params.insert(key.clone(), m.as_str().to_string());
-                        }
+                && let Some(captures) = re.captures(task)
+            {
+                let mut params = HashMap::new();
+                for key in &template.parameter_keys {
+                    if let Some(m) = captures.name(key) {
+                        params.insert(key.clone(), m.as_str().to_string());
                     }
-
-                    // Perform parameter substitution on the root node
-                    let instantiated_root = substitute_node(&template.root_node, &params);
-
-                    return Some(CandidatePlan {
-                        id: format!("instantiated-{}", &uuid::Uuid::new_v4().to_string()[..8]),
-                        description: format!("Instantiated template for: {}", task),
-                        estimated_tokens: 100, // Pre-optimized templated path
-                        steps: Vec::new(),
-                        root: Some(instantiated_root),
-                    });
                 }
+
+                // Perform parameter substitution on the root node
+                let instantiated_root = substitute_node(&template.root_node, &params);
+
+                return Some(CandidatePlan {
+                    id: format!("instantiated-{}", &uuid::Uuid::new_v4().to_string()[..8]),
+                    description: format!("Instantiated template for: {}", task),
+                    estimated_tokens: 100, // Pre-optimized templated path
+                    steps: Vec::new(),
+                    root: Some(instantiated_root),
+                });
+            }
         }
         None
     }
@@ -80,7 +86,11 @@ impl PatternLibrary {
 /// Recursively substitute parameter placeholders (e.g. "{param_0}") in a PlanNode.
 fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNode {
     match node {
-        PlanNode::Script { language, code, timeout_secs } => {
+        PlanNode::Script {
+            language,
+            code,
+            timeout_secs,
+        } => {
             let substituted_code = substitute_string(code, params);
             PlanNode::Script {
                 language: *language,
@@ -88,7 +98,11 @@ fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                 timeout_secs: *timeout_secs,
             }
         }
-        PlanNode::Step { tool, args, dry_run_first } => {
+        PlanNode::Step {
+            tool,
+            args,
+            dry_run_first,
+        } => {
             let substituted_args = substitute_json_value(args, params);
             PlanNode::Step {
                 tool: tool.clone(),
@@ -104,11 +118,17 @@ fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
             let substituted = nodes.iter().map(|n| substitute_node(n, params)).collect();
             PlanNode::Parallel { nodes: substituted }
         }
-        PlanNode::Conditional { condition, then_branch, else_branch } => {
+        PlanNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let sub_condition = match condition {
                 crate::orchestration::world::Condition::FileExists { path } => {
                     let path_str = substitute_string(&path.to_string_lossy(), params);
-                    crate::orchestration::world::Condition::FileExists { path: std::path::PathBuf::from(path_str) }
+                    crate::orchestration::world::Condition::FileExists {
+                        path: std::path::PathBuf::from(path_str),
+                    }
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     crate::orchestration::world::Condition::CargoCheckSuccess
@@ -116,11 +136,15 @@ fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                 crate::orchestration::world::Condition::VerifySuccess { strategy } => {
                     let sub_strategy = strategy.as_ref().map(|s| match s {
                         crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
-                            crate::orchestration::world::VerifyStrategy::Shell(substitute_string(cmd, params))
+                            crate::orchestration::world::VerifyStrategy::Shell(substitute_string(
+                                cmd, params,
+                            ))
                         }
                         _ => s.clone(),
                     });
-                    crate::orchestration::world::Condition::VerifySuccess { strategy: sub_strategy }
+                    crate::orchestration::world::Condition::VerifySuccess {
+                        strategy: sub_strategy,
+                    }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     crate::orchestration::world::Condition::Script {
@@ -128,33 +152,34 @@ fn substitute_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                     }
                 }
                 crate::orchestration::world::Condition::Legacy(script) => {
-                    crate::orchestration::world::Condition::Legacy(substitute_string(script, params))
+                    crate::orchestration::world::Condition::Legacy(substitute_string(
+                        script, params,
+                    ))
                 }
             };
             PlanNode::Conditional {
                 condition: sub_condition,
                 then_branch: Box::new(substitute_node(then_branch, params)),
-                else_branch: else_branch.as_ref().map(|b| Box::new(substitute_node(b, params))),
+                else_branch: else_branch
+                    .as_ref()
+                    .map(|b| Box::new(substitute_node(b, params))),
             }
         }
-        PlanNode::Retry { node, max_attempts } => {
-            PlanNode::Retry {
-                node: Box::new(substitute_node(node, params)),
-                max_attempts: *max_attempts,
-            }
-        }
-        PlanNode::Verify { node, assertion_script } => {
-            PlanNode::Verify {
-                node: Box::new(substitute_node(node, params)),
-                assertion_script: substitute_string(assertion_script, params),
-            }
-        }
-        PlanNode::Gate { gate_name, node } => {
-            PlanNode::Gate {
-                gate_name: substitute_string(gate_name, params),
-                node: Box::new(substitute_node(node, params)),
-            }
-        }
+        PlanNode::Retry { node, max_attempts } => PlanNode::Retry {
+            node: Box::new(substitute_node(node, params)),
+            max_attempts: *max_attempts,
+        },
+        PlanNode::Verify {
+            node,
+            assertion_script,
+        } => PlanNode::Verify {
+            node: Box::new(substitute_node(node, params)),
+            assertion_script: substitute_string(assertion_script, params),
+        },
+        PlanNode::Gate { gate_name, node } => PlanNode::Gate {
+            gate_name: substitute_string(gate_name, params),
+            node: Box::new(substitute_node(node, params)),
+        },
     }
 }
 
@@ -167,12 +192,17 @@ fn substitute_string(text: &str, params: &HashMap<String, String>) -> String {
     result
 }
 
-fn substitute_json_value(val: &serde_json::Value, params: &HashMap<String, String>) -> serde_json::Value {
+fn substitute_json_value(
+    val: &serde_json::Value,
+    params: &HashMap<String, String>,
+) -> serde_json::Value {
     match val {
         serde_json::Value::String(s) => serde_json::Value::String(substitute_string(s, params)),
-        serde_json::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(|v| substitute_json_value(v, params)).collect())
-        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|v| substitute_json_value(v, params))
+                .collect(),
+        ),
         serde_json::Value::Object(obj) => {
             let mut new_obj = serde_json::Map::new();
             for (k, v) in obj {
@@ -202,7 +232,9 @@ impl PatternMiner {
         let mut library = PatternLibrary::default();
 
         // Filter successful plans
-        let successful_plans: Vec<_> = plan_cache.entries.iter()
+        let successful_plans: Vec<_> = plan_cache
+            .entries
+            .iter()
             .filter(|e| e.success_count > 0 && e.plan.root.is_some())
             .collect();
 
@@ -223,7 +255,9 @@ impl PatternMiner {
                     continue;
                 }
 
-                if let Some((template_key, regex_pattern, param_map)) = abstract_task_descriptions(&plan_a.task, &plan_b.task) {
+                if let Some((template_key, regex_pattern, param_map)) =
+                    abstract_task_descriptions(&plan_a.task, &plan_b.task)
+                {
                     let root_node = plan_a.plan.root.as_ref().unwrap();
 
                     // Generalize string arguments in the AST node
@@ -253,7 +287,9 @@ impl PatternMiner {
 
         library.templates = discovered.into_values().collect();
         // Sort by score descending
-        library.templates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        library
+            .templates
+            .sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
         library
     }
 }
@@ -261,31 +297,41 @@ impl PatternMiner {
 /// Abstract AST node values containing the specific word with a dynamic placeholder
 fn generalize_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNode {
     match node {
-        PlanNode::Script { language, code, timeout_secs } => {
-            PlanNode::Script {
-                language: *language,
-                code: generalize_string(code, params),
-                timeout_secs: *timeout_secs,
-            }
-        }
-        PlanNode::Step { tool, args, dry_run_first } => {
-            PlanNode::Step {
-                tool: tool.clone(),
-                args: generalize_json_value(args, params),
-                dry_run_first: *dry_run_first,
-            }
-        }
-        PlanNode::Sequence { nodes } => {
-            PlanNode::Sequence { nodes: nodes.iter().map(|n| generalize_node(n, params)).collect() }
-        }
-        PlanNode::Parallel { nodes } => {
-            PlanNode::Parallel { nodes: nodes.iter().map(|n| generalize_node(n, params)).collect() }
-        }
-        PlanNode::Conditional { condition, then_branch, else_branch } => {
+        PlanNode::Script {
+            language,
+            code,
+            timeout_secs,
+        } => PlanNode::Script {
+            language: *language,
+            code: generalize_string(code, params),
+            timeout_secs: *timeout_secs,
+        },
+        PlanNode::Step {
+            tool,
+            args,
+            dry_run_first,
+        } => PlanNode::Step {
+            tool: tool.clone(),
+            args: generalize_json_value(args, params),
+            dry_run_first: *dry_run_first,
+        },
+        PlanNode::Sequence { nodes } => PlanNode::Sequence {
+            nodes: nodes.iter().map(|n| generalize_node(n, params)).collect(),
+        },
+        PlanNode::Parallel { nodes } => PlanNode::Parallel {
+            nodes: nodes.iter().map(|n| generalize_node(n, params)).collect(),
+        },
+        PlanNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let gen_condition = match condition {
                 crate::orchestration::world::Condition::FileExists { path } => {
                     let path_str = generalize_string(&path.to_string_lossy(), params);
-                    crate::orchestration::world::Condition::FileExists { path: std::path::PathBuf::from(path_str) }
+                    crate::orchestration::world::Condition::FileExists {
+                        path: std::path::PathBuf::from(path_str),
+                    }
                 }
                 crate::orchestration::world::Condition::CargoCheckSuccess => {
                     crate::orchestration::world::Condition::CargoCheckSuccess
@@ -293,11 +339,15 @@ fn generalize_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                 crate::orchestration::world::Condition::VerifySuccess { strategy } => {
                     let gen_strategy = strategy.as_ref().map(|s| match s {
                         crate::orchestration::world::VerifyStrategy::Shell(cmd) => {
-                            crate::orchestration::world::VerifyStrategy::Shell(generalize_string(cmd, params))
+                            crate::orchestration::world::VerifyStrategy::Shell(generalize_string(
+                                cmd, params,
+                            ))
                         }
                         _ => s.clone(),
                     });
-                    crate::orchestration::world::Condition::VerifySuccess { strategy: gen_strategy }
+                    crate::orchestration::world::Condition::VerifySuccess {
+                        strategy: gen_strategy,
+                    }
                 }
                 crate::orchestration::world::Condition::Script { script } => {
                     crate::orchestration::world::Condition::Script {
@@ -305,33 +355,34 @@ fn generalize_node(node: &PlanNode, params: &HashMap<String, String>) -> PlanNod
                     }
                 }
                 crate::orchestration::world::Condition::Legacy(script) => {
-                    crate::orchestration::world::Condition::Legacy(generalize_string(script, params))
+                    crate::orchestration::world::Condition::Legacy(generalize_string(
+                        script, params,
+                    ))
                 }
             };
             PlanNode::Conditional {
                 condition: gen_condition,
                 then_branch: Box::new(generalize_node(then_branch, params)),
-                else_branch: else_branch.as_ref().map(|b| Box::new(generalize_node(b, params))),
+                else_branch: else_branch
+                    .as_ref()
+                    .map(|b| Box::new(generalize_node(b, params))),
             }
         }
-        PlanNode::Retry { node, max_attempts } => {
-            PlanNode::Retry {
-                node: Box::new(generalize_node(node, params)),
-                max_attempts: *max_attempts,
-            }
-        }
-        PlanNode::Verify { node, assertion_script } => {
-            PlanNode::Verify {
-                node: Box::new(generalize_node(node, params)),
-                assertion_script: generalize_string(assertion_script, params),
-            }
-        }
-        PlanNode::Gate { gate_name, node } => {
-            PlanNode::Gate {
-                gate_name: generalize_string(gate_name, params),
-                node: Box::new(generalize_node(node, params)),
-            }
-        }
+        PlanNode::Retry { node, max_attempts } => PlanNode::Retry {
+            node: Box::new(generalize_node(node, params)),
+            max_attempts: *max_attempts,
+        },
+        PlanNode::Verify {
+            node,
+            assertion_script,
+        } => PlanNode::Verify {
+            node: Box::new(generalize_node(node, params)),
+            assertion_script: generalize_string(assertion_script, params),
+        },
+        PlanNode::Gate { gate_name, node } => PlanNode::Gate {
+            gate_name: generalize_string(gate_name, params),
+            node: Box::new(generalize_node(node, params)),
+        },
     }
 }
 
@@ -343,12 +394,17 @@ fn generalize_string(text: &str, params: &HashMap<String, String>) -> String {
     result
 }
 
-fn generalize_json_value(val: &serde_json::Value, params: &HashMap<String, String>) -> serde_json::Value {
+fn generalize_json_value(
+    val: &serde_json::Value,
+    params: &HashMap<String, String>,
+) -> serde_json::Value {
     match val {
         serde_json::Value::String(s) => serde_json::Value::String(generalize_string(s, params)),
-        serde_json::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(|v| generalize_json_value(v, params)).collect())
-        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|v| generalize_json_value(v, params))
+                .collect(),
+        ),
         serde_json::Value::Object(obj) => {
             let mut new_obj = serde_json::Map::new();
             for (k, v) in obj {
@@ -364,20 +420,45 @@ fn generalize_json_value(val: &serde_json::Value, params: &HashMap<String, Strin
 fn is_structurally_equal(a: Option<&PlanNode>, b: Option<&PlanNode>) -> bool {
     match (a, b) {
         (None, None) => true,
-        (Some(PlanNode::Script { language: l_a, .. }), Some(PlanNode::Script { language: l_b, .. })) => l_a == l_b,
-        (Some(PlanNode::Step { tool: t_a, .. }), Some(PlanNode::Step { tool: t_b, .. })) => t_a == t_b,
+        (
+            Some(PlanNode::Script { language: l_a, .. }),
+            Some(PlanNode::Script { language: l_b, .. }),
+        ) => l_a == l_b,
+        (Some(PlanNode::Step { tool: t_a, .. }), Some(PlanNode::Step { tool: t_b, .. })) => {
+            t_a == t_b
+        }
         (Some(PlanNode::Sequence { nodes: n_a }), Some(PlanNode::Sequence { nodes: n_b })) => {
-            n_a.len() == n_b.len() && n_a.iter().zip(n_b).all(|(x, y)| is_structurally_equal(Some(x), Some(y)))
+            n_a.len() == n_b.len()
+                && n_a
+                    .iter()
+                    .zip(n_b)
+                    .all(|(x, y)| is_structurally_equal(Some(x), Some(y)))
         }
         (Some(PlanNode::Parallel { nodes: n_a }), Some(PlanNode::Parallel { nodes: n_b })) => {
-            n_a.len() == n_b.len() && n_a.iter().zip(n_b).all(|(x, y)| is_structurally_equal(Some(x), Some(y)))
+            n_a.len() == n_b.len()
+                && n_a
+                    .iter()
+                    .zip(n_b)
+                    .all(|(x, y)| is_structurally_equal(Some(x), Some(y)))
         }
-        (Some(PlanNode::Conditional { then_branch: t_a, else_branch: e_a, .. }), Some(PlanNode::Conditional { then_branch: t_b, else_branch: e_b, .. })) => {
-            is_structurally_equal(Some(t_a), Some(t_b)) && match (e_a, e_b) {
-                (None, None) => true,
-                (Some(x), Some(y)) => is_structurally_equal(Some(x), Some(y)),
-                _ => false
-            }
+        (
+            Some(PlanNode::Conditional {
+                then_branch: t_a,
+                else_branch: e_a,
+                ..
+            }),
+            Some(PlanNode::Conditional {
+                then_branch: t_b,
+                else_branch: e_b,
+                ..
+            }),
+        ) => {
+            is_structurally_equal(Some(t_a), Some(t_b))
+                && match (e_a, e_b) {
+                    (None, None) => true,
+                    (Some(x), Some(y)) => is_structurally_equal(Some(x), Some(y)),
+                    _ => false,
+                }
         }
         (Some(PlanNode::Retry { node: n_a, .. }), Some(PlanNode::Retry { node: n_b, .. })) => {
             is_structurally_equal(Some(n_a), Some(n_b))
@@ -395,7 +476,10 @@ fn is_structurally_equal(a: Option<&PlanNode>, b: Option<&PlanNode>) -> bool {
 /// Compares two task sentences. If they are identical except for exactly one word position,
 /// abstract that word into "{param_0}" and construct regex matching.
 /// Returns (template_key, regex_pattern, value_to_placeholder_map).
-fn abstract_task_descriptions(a: &str, b: &str) -> Option<(String, String, HashMap<String, String>)> {
+fn abstract_task_descriptions(
+    a: &str,
+    b: &str,
+) -> Option<(String, String, HashMap<String, String>)> {
     let tokens_a: Vec<&str> = a.split_whitespace().collect();
     let tokens_b: Vec<&str> = b.split_whitespace().collect();
 
@@ -418,7 +502,10 @@ fn abstract_task_descriptions(a: &str, b: &str) -> Option<(String, String, HashM
         let word_b = tokens_b[idx];
 
         // Ensure both look like variables/filenames (alphanumeric with dots/dashes/underscores)
-        let is_valid_var = |w: &str| w.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_');
+        let is_valid_var = |w: &str| {
+            w.chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+        };
         if !is_valid_var(word_a) || !is_valid_var(word_b) {
             return None;
         }
@@ -454,9 +541,13 @@ mod tests {
 
     #[test]
     fn test_abstract_task_descriptions() {
-        let res = abstract_task_descriptions("add logging to auth.rs", "add logging to main.rs").unwrap();
+        let res =
+            abstract_task_descriptions("add logging to auth.rs", "add logging to main.rs").unwrap();
         assert_eq!(res.0, "add logging to {param_0}");
-        assert_eq!(res.1, r"^add\s+logging\s+to\s+(?P<param_0>[a-zA-Z0-9_\-\.]+)$");
+        assert_eq!(
+            res.1,
+            r"^add\s+logging\s+to\s+(?P<param_0>[a-zA-Z0-9_\-\.]+)$"
+        );
         assert_eq!(res.2.get("auth.rs").unwrap(), "{param_0}");
     }
 

@@ -187,27 +187,24 @@ impl AgentModel for OpenAIModel {
                         tool_call_id: None,
                     });
                 }
-                msgs.extend(request
-                    .messages
-                    .into_iter()
-                    .map(|m| OpenAIMessage {
-                        role: m.role,
-                        content: m.content.as_ref().map(map_to_openai_content),
-                        tool_calls: m.tool_calls.map(|calls| {
-                            calls
-                                .into_iter()
-                                .map(|c| OpenAIToolCall {
-                                    id: c.id,
-                                    r#type: c.r#type,
-                                    function: OpenAIFunctionCall {
-                                        name: c.function.name,
-                                        arguments: c.function.arguments,
-                                    },
-                                })
-                                .collect()
-                        }),
-                        tool_call_id: m.tool_call_id,
-                    }));
+                msgs.extend(request.messages.into_iter().map(|m| OpenAIMessage {
+                    role: m.role,
+                    content: m.content.as_ref().map(map_to_openai_content),
+                    tool_calls: m.tool_calls.map(|calls| {
+                        calls
+                            .into_iter()
+                            .map(|c| OpenAIToolCall {
+                                id: c.id,
+                                r#type: c.r#type,
+                                function: OpenAIFunctionCall {
+                                    name: c.function.name,
+                                    arguments: c.function.arguments,
+                                },
+                            })
+                            .collect()
+                    }),
+                    tool_call_id: m.tool_call_id,
+                }));
                 msgs
             },
             temperature: request.temperature,
@@ -248,13 +245,16 @@ impl AgentModel for OpenAIModel {
             .await
             .map_err(|e| AgentError(e.to_string()))?;
         let choice = openai_resp
-            .choices.first()
+            .choices
+            .first()
             .ok_or_else(|| AgentError("No choices returned from OpenAI".to_string()))?;
 
         Ok(CompletionResponse {
-            content: choice.message.content.as_ref().and_then(|v| {
-                v.as_str().map(|t| MessageContent::Text(t.to_string()))
-            }),
+            content: choice
+                .message
+                .content
+                .as_ref()
+                .and_then(|v| v.as_str().map(|t| MessageContent::Text(t.to_string()))),
             tool_calls: choice.message.tool_calls.as_ref().map(|calls| {
                 calls
                     .iter()
@@ -297,27 +297,24 @@ impl AgentModel for OpenAIModel {
                         tool_call_id: None,
                     });
                 }
-                msgs.extend(request
-                    .messages
-                    .into_iter()
-                    .map(|m| OpenAIMessage {
-                        role: m.role,
-                        content: m.content.as_ref().map(map_to_openai_content),
-                        tool_calls: m.tool_calls.map(|calls| {
-                            calls
-                                .into_iter()
-                                .map(|c| OpenAIToolCall {
-                                    id: c.id,
-                                    r#type: c.r#type,
-                                    function: OpenAIFunctionCall {
-                                        name: c.function.name,
-                                        arguments: c.function.arguments,
-                                    },
-                                })
-                                .collect()
-                        }),
-                        tool_call_id: m.tool_call_id,
-                    }));
+                msgs.extend(request.messages.into_iter().map(|m| OpenAIMessage {
+                    role: m.role,
+                    content: m.content.as_ref().map(map_to_openai_content),
+                    tool_calls: m.tool_calls.map(|calls| {
+                        calls
+                            .into_iter()
+                            .map(|c| OpenAIToolCall {
+                                id: c.id,
+                                r#type: c.r#type,
+                                function: OpenAIFunctionCall {
+                                    name: c.function.name,
+                                    arguments: c.function.arguments,
+                                },
+                            })
+                            .collect()
+                    }),
+                    tool_call_id: m.tool_call_id,
+                }));
                 msgs
             },
             temperature: request.temperature,
@@ -379,14 +376,11 @@ impl AgentModel for OpenAIModel {
                         }
                         if let Some(data) = line.strip_prefix("data: ")
                             && let Ok(json) = serde_json::from_str::<serde_json::Value>(data)
-                                && let Some(content) =
-                                    json["choices"][0]["delta"]["content"].as_str()
-                                    && !content.is_empty() {
-                                        return Some((
-                                            Ok(content.to_string()),
-                                            (byte_stream, buffer),
-                                        ));
-                                    }
+                            && let Some(content) = json["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            return Some((Ok(content.to_string()), (byte_stream, buffer)));
+                        }
                         continue;
                     }
 

@@ -10,11 +10,12 @@
 //! Blobs are stored gzip-compressed on disk to reduce storage footprint.
 //! A size quota prevents unbounded growth; old snapshots are evicted on
 //! write when the store exceeds the configured limit.
+#![allow(clippy::len_without_is_empty)]
 
 use anyhow::Result;
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -168,7 +169,9 @@ impl SnapshotStore {
                 entries.sort_by_key(|s| s.timestamp);
                 let mut ids = Vec::new();
                 for entry in &entries {
-                    if freed >= excess { break; }
+                    if freed >= excess {
+                        break;
+                    }
                     freed += entry.compressed_len;
                     ids.push(entry.id.clone());
                 }
@@ -176,7 +179,9 @@ impl SnapshotStore {
             } else {
                 // Index empty (fresh process, old snapshots on disk) — sort by mtime
                 let mut dir_entries: Vec<_> = std::fs::read_dir(&self.store_dir)
-                    .ok().into_iter().flatten()
+                    .ok()
+                    .into_iter()
+                    .flatten()
                     .filter_map(|e| e.ok())
                     .filter(|e| e.path().is_file())
                     .map(|e| {
@@ -188,7 +193,9 @@ impl SnapshotStore {
                 dir_entries.sort_by_key(|(_, mtime, _)| *mtime);
                 let mut ids = Vec::new();
                 for (path, _, len) in &dir_entries {
-                    if freed >= excess { break; }
+                    if freed >= excess {
+                        break;
+                    }
                     freed += len;
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                         ids.push(name.to_string());
@@ -236,7 +243,10 @@ impl SnapshotStore {
                 path.display(),
                 MAX_FILE_SIZE as f64 / (1024.0 * 1024.0)
             );
-            let hash = format!("skipped_large_{}", content_hash(path.to_string_lossy().as_bytes()));
+            let hash = format!(
+                "skipped_large_{}",
+                content_hash(path.to_string_lossy().as_bytes())
+            );
             return Ok(hash);
         }
 
@@ -408,9 +418,7 @@ impl SnapshotStore {
             self.len().await
         );
         // Use a shorter retention at startup to aggressively clean any accumulated cruft
-        let pruned = self
-            .prune_older_than(chrono::Duration::hours(24))
-            .await?;
+        let pruned = self.prune_older_than(chrono::Duration::hours(24)).await?;
         let quota_pruned = self.enforce_quota().await?;
         Ok(pruned + quota_pruned)
     }
@@ -469,9 +477,10 @@ impl SnapshotStore {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             if let Ok(file_type) = entry.file_type().await
-                && file_type.is_symlink() {
-                    continue;
-                }
+                && file_type.is_symlink()
+            {
+                continue;
+            }
             if path.is_dir() {
                 if skip_dirs.contains(&name_str.as_ref()) {
                     continue;
@@ -486,9 +495,10 @@ impl SnapshotStore {
                 }
                 *file_count += 1;
                 if let Ok(rel) = path.strip_prefix(root)
-                    && let Ok(id) = self.snapshot_file(&path).await {
-                        snapshots.insert(rel.to_path_buf(), id);
-                    }
+                    && let Ok(id) = self.snapshot_file(&path).await
+                {
+                    snapshots.insert(rel.to_path_buf(), id);
+                }
             }
         }
         Ok(())
@@ -602,7 +612,9 @@ mod tests {
 
         // Verify restoration
         assert_eq!(
-            tokio::fs::read_to_string(root.join("main.rs")).await.unwrap(),
+            tokio::fs::read_to_string(root.join("main.rs"))
+                .await
+                .unwrap(),
             "main contents"
         );
         assert_eq!(

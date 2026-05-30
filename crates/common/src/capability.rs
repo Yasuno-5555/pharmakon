@@ -77,9 +77,17 @@ impl Capability {
             Self::Orchestrate => &["fractal_swarm", "subagent", "route_tools"],
             Self::Reflect => &["cognitive_mirror", "reflect", "regret_minimization"],
             Self::Validate => &["rlfc", "diff_security_auditor", "dry_run"],
-            Self::Learn => &["ingest_ast_knowledge", "memory_management", "hydrate_context"],
+            Self::Learn => &[
+                "ingest_ast_knowledge",
+                "memory_management",
+                "hydrate_context",
+            ],
             Self::Coordinate => &["browser", "web_task", "media_understanding"],
-            Self::Simulate => &["counterfactual_simulator", "failure_prediction", "mcts_simulator"],
+            Self::Simulate => &[
+                "counterfactual_simulator",
+                "failure_prediction",
+                "mcts_simulator",
+            ],
         }
     }
 
@@ -103,55 +111,96 @@ impl Capability {
     pub fn from_tool_name(name: &str) -> Option<Self> {
         match name {
             // Search
-            "search" | "brave_search" | "duckduckgo_search" | "google_search" | "gemini_search" | "web_fetch"
-            | "grep_files" | "file_search" | "semantic_grep" | "custom_scout"
+            "search" | "brave_search" | "duckduckgo_search" | "google_search" | "gemini_search"
+            | "web_fetch" | "grep_files" | "file_search" | "semantic_grep" | "custom_scout"
             | "read_file" | "link_understanding" => Some(Self::Search),
 
             // Modify
-            "write_file" | "apply_patch" | "mutate_ast" | "semantic_conflict_resolution"
-            | "spec_first_test" | "replace_content" | "git_add" | "git_commit"
-            | "git_branch" | "python_interpreter" => Some(Self::Modify),
+            "write_file"
+            | "apply_patch"
+            | "mutate_ast"
+            | "semantic_conflict_resolution"
+            | "spec_first_test"
+            | "replace_content"
+            | "git_add"
+            | "git_commit"
+            | "git_branch"
+            | "python_interpreter" => Some(Self::Modify),
 
             // Execute
             "shell" | "terminal" | "run_background" | "get_process_status"
             | "send_command_input" | "node_repl" | "rlfc" => Some(Self::Execute),
 
             // Investigate
-            "lsp" | "ast_lsp_bridge" | "repomap" | "workspace_perception"
-            | "workspace_snapshot" | "soft_dependency_graph" | "nexus_visualizer"
-            | "execution_trace" | "deterministic_replay" | "view_file" | "list_dir"
-            | "find_definition" | "git_status" | "git_diff" | "git_log" => Some(Self::Investigate),
+            "lsp"
+            | "ast_lsp_bridge"
+            | "repomap"
+            | "workspace_perception"
+            | "workspace_snapshot"
+            | "soft_dependency_graph"
+            | "nexus_visualizer"
+            | "execution_trace"
+            | "deterministic_replay"
+            | "view_file"
+            | "list_dir"
+            | "find_definition"
+            | "git_status"
+            | "git_diff"
+            | "git_log" => Some(Self::Investigate),
 
             // Orchestrate
             "fractal_swarm" | "subagent" | "mcts_simulator" | "route_tools"
-            | "skill_composition" | "ephemeral_red_team" | "attention_router"
-            | "playbook" | "task_tracker" | "checkpoint" => Some(Self::Orchestrate),
+            | "skill_composition" | "ephemeral_red_team" | "attention_router" | "playbook"
+            | "task_tracker" | "checkpoint" => Some(Self::Orchestrate),
 
             // Reflect
-            "cognitive_mirror" | "reflect" | "regret_minimization" | "self_diagnostic"
-            | "intent_compiler" | "autonomy_dial" | "proactive_intervention"
-            | "proactive_self_optimization" | "temporal_awareness" | "context_budget_optimizer"
-            => Some(Self::Reflect),
+            "cognitive_mirror"
+            | "reflect"
+            | "regret_minimization"
+            | "self_diagnostic"
+            | "intent_compiler"
+            | "autonomy_dial"
+            | "proactive_intervention"
+            | "proactive_self_optimization"
+            | "temporal_awareness"
+            | "context_budget_optimizer" => Some(Self::Reflect),
 
             // Validate
-            "diff_security_auditor" | "dry_run" | "tool_reliability"
-            | "failure_memory" | "failure_prediction" => Some(Self::Validate),
+            "diff_security_auditor"
+            | "dry_run"
+            | "tool_reliability"
+            | "failure_memory"
+            | "failure_prediction" => Some(Self::Validate),
 
             // Learn
-            "ingest_ast_knowledge" | "memory_management" | "hydrate_context"
-            | "graph_prefetch" | "memory_actor_status" | "commitment"
-            | "context_connector" | "soul_manager" => Some(Self::Learn),
+            "ingest_ast_knowledge"
+            | "memory_management"
+            | "hydrate_context"
+            | "graph_prefetch"
+            | "memory_actor_status"
+            | "commitment"
+            | "context_connector"
+            | "soul_manager" => Some(Self::Learn),
 
             // Coordinate
-            "browser" | "web_task" | "media_understanding" | "canvas"
-            | "screenshot" | "camera" | "local_model_router"
-            | "automation" | "weather_lookup" | "finance_lookup" | "sports_lookup"
-            => Some(Self::Coordinate),
+            "browser"
+            | "web_task"
+            | "media_understanding"
+            | "canvas"
+            | "screenshot"
+            | "camera"
+            | "local_model_router"
+            | "automation"
+            | "weather_lookup"
+            | "finance_lookup"
+            | "sports_lookup" => Some(Self::Coordinate),
 
             // Simulate
-            "counterfactual_simulator" | "time_travel_debugger"
-            | "codex_tool_catalog" | "discover_tools" | "current_time"
-            => Some(Self::Simulate),
+            "counterfactual_simulator"
+            | "time_travel_debugger"
+            | "codex_tool_catalog"
+            | "discover_tools"
+            | "current_time" => Some(Self::Simulate),
 
             // Routing / internal tools — not exposed as capabilities
             _ => None,
@@ -186,22 +235,56 @@ mod tests {
     #[test]
     fn test_all_tools_have_capability_mapping() {
         // Verify that the major tools are mapped
-        assert_eq!(Capability::from_tool_name("brave_search"), Some(Capability::Search));
-        assert_eq!(Capability::from_tool_name("write_file"), Some(Capability::Modify));
-        assert_eq!(Capability::from_tool_name("shell"), Some(Capability::Execute));
-        assert_eq!(Capability::from_tool_name("lsp"), Some(Capability::Investigate));
-        assert_eq!(Capability::from_tool_name("fractal_swarm"), Some(Capability::Orchestrate));
-        assert_eq!(Capability::from_tool_name("cognitive_mirror"), Some(Capability::Reflect));
-        assert_eq!(Capability::from_tool_name("dry_run"), Some(Capability::Validate));
-        assert_eq!(Capability::from_tool_name("ingest_ast_knowledge"), Some(Capability::Learn));
-        assert_eq!(Capability::from_tool_name("browser"), Some(Capability::Coordinate));
-        assert_eq!(Capability::from_tool_name("counterfactual_simulator"), Some(Capability::Simulate));
+        assert_eq!(
+            Capability::from_tool_name("brave_search"),
+            Some(Capability::Search)
+        );
+        assert_eq!(
+            Capability::from_tool_name("write_file"),
+            Some(Capability::Modify)
+        );
+        assert_eq!(
+            Capability::from_tool_name("shell"),
+            Some(Capability::Execute)
+        );
+        assert_eq!(
+            Capability::from_tool_name("lsp"),
+            Some(Capability::Investigate)
+        );
+        assert_eq!(
+            Capability::from_tool_name("fractal_swarm"),
+            Some(Capability::Orchestrate)
+        );
+        assert_eq!(
+            Capability::from_tool_name("cognitive_mirror"),
+            Some(Capability::Reflect)
+        );
+        assert_eq!(
+            Capability::from_tool_name("dry_run"),
+            Some(Capability::Validate)
+        );
+        assert_eq!(
+            Capability::from_tool_name("ingest_ast_knowledge"),
+            Some(Capability::Learn)
+        );
+        assert_eq!(
+            Capability::from_tool_name("browser"),
+            Some(Capability::Coordinate)
+        );
+        assert_eq!(
+            Capability::from_tool_name("counterfactual_simulator"),
+            Some(Capability::Simulate)
+        );
     }
 
     #[test]
     fn test_capability_summary_is_compact() {
         let summary = capability_catalog_summary();
-        assert!(summary.len() < 2000, "Summary too large: {} chars", summary.len());
+        assert!(
+            summary.len() < 2000,
+            "Summary too large: {} chars",
+            summary.len()
+        );
         assert!(summary.contains("**search**"));
         assert!(summary.contains("**modify**"));
     }

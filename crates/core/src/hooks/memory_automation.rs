@@ -64,7 +64,10 @@ impl Hook for AutoIndexHook {
                 log::info!("Auto-indexing background task started for: {}", url);
                 // Tool call logic removed for now to break dependency.
                 // This needs to be re-introduced by getting the tool from the agent's registry.
-                log::info!("URL discovered, will be auto-indexed on next context hydration cycle: {}", url);
+                log::info!(
+                    "URL discovered, will be auto-indexed on next context hydration cycle: {}",
+                    url
+                );
             });
         }
 

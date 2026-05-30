@@ -176,23 +176,17 @@ impl DbSessionStore {
         .await?;
 
         // Migration: add name column if missing (pre-existing DBs)
-        let _ = sqlx::query(
-            "ALTER TABLE messages ADD COLUMN name TEXT",
-        )
-        .execute(&pool)
-        .await;
+        let _ = sqlx::query("ALTER TABLE messages ADD COLUMN name TEXT")
+            .execute(&pool)
+            .await;
 
-        let _ = sqlx::query(
-            "ALTER TABLE messages ADD COLUMN archived BOOLEAN DEFAULT 0",
-        )
-        .execute(&pool)
-        .await;
+        let _ = sqlx::query("ALTER TABLE messages ADD COLUMN archived BOOLEAN DEFAULT 0")
+            .execute(&pool)
+            .await;
 
-        let _ = sqlx::query(
-            "ALTER TABLE messages ADD COLUMN session_title TEXT",
-        )
-        .execute(&pool)
-        .await;
+        let _ = sqlx::query("ALTER TABLE messages ADD COLUMN session_title TEXT")
+            .execute(&pool)
+            .await;
 
         Ok(Self { pool })
     }
@@ -277,12 +271,11 @@ impl DbSessionStore {
     /// Delete messages from active sessions older than N days.
     /// Keeps the session metadata but drops old message history to bound DB size.
     pub async fn cleanup_old_messages(&self, max_age_days: i32) -> Result<usize> {
-        let result = sqlx::query(
-            "DELETE FROM messages WHERE created_at < datetime('now', ? || ' days')",
-        )
-        .bind(format!("-{}", max_age_days))
-        .execute(&self.pool)
-        .await?;
+        let result =
+            sqlx::query("DELETE FROM messages WHERE created_at < datetime('now', ? || ' days')")
+                .bind(format!("-{}", max_age_days))
+                .execute(&self.pool)
+                .await?;
         Ok(result.rows_affected() as usize)
     }
 
@@ -293,20 +286,18 @@ impl DbSessionStore {
         let mut total = 0usize;
 
         // tool_metrics: keep 30 days
-        total += sqlx::query(
-            "DELETE FROM tool_metrics WHERE timestamp < datetime('now', '-30 days')",
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected() as usize;
+        total +=
+            sqlx::query("DELETE FROM tool_metrics WHERE timestamp < datetime('now', '-30 days')")
+                .execute(&self.pool)
+                .await?
+                .rows_affected() as usize;
 
         // usage_stats: keep 30 days
-        total += sqlx::query(
-            "DELETE FROM usage_stats WHERE timestamp < datetime('now', '-30 days')",
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected() as usize;
+        total +=
+            sqlx::query("DELETE FROM usage_stats WHERE timestamp < datetime('now', '-30 days')")
+                .execute(&self.pool)
+                .await?
+                .rows_affected() as usize;
 
         // trajectory_events: keep 14 days
         total += sqlx::query(
@@ -317,28 +308,24 @@ impl DbSessionStore {
         .rows_affected() as usize;
 
         // traffic_capture: keep 7 days (shortest — forensic data)
-        total += sqlx::query(
-            "DELETE FROM traffic_capture WHERE timestamp < datetime('now', '-7 days')",
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected() as usize;
+        total +=
+            sqlx::query("DELETE FROM traffic_capture WHERE timestamp < datetime('now', '-7 days')")
+                .execute(&self.pool)
+                .await?
+                .rows_affected() as usize;
 
         // trajectories: keep 30 days
-        total += sqlx::query(
-            "DELETE FROM trajectories WHERE created_at < datetime('now', '-30 days')",
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected() as usize;
+        total +=
+            sqlx::query("DELETE FROM trajectories WHERE created_at < datetime('now', '-30 days')")
+                .execute(&self.pool)
+                .await?
+                .rows_affected() as usize;
 
         // facts: keep 60 days (longer-lived knowledge)
-        total += sqlx::query(
-            "DELETE FROM facts WHERE created_at < datetime('now', '-60 days')",
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected() as usize;
+        total += sqlx::query("DELETE FROM facts WHERE created_at < datetime('now', '-60 days')")
+            .execute(&self.pool)
+            .await?
+            .rows_affected() as usize;
 
         if total > 0 {
             log::info!(
@@ -359,7 +346,10 @@ impl DbSessionStore {
         if total > 0 {
             log::info!(
                 "DbSessionStore maintenance: {} rows cleaned ({} orphans, {} old msgs, {} stale records)",
-                total, orphans, old_msgs, stale
+                total,
+                orphans,
+                old_msgs,
+                stale
             );
         }
         Ok(total)
@@ -450,13 +440,23 @@ impl DbSessionStore {
         let req_body = if req.len() <= 256 {
             req
         } else {
-            let end = req.char_indices().take_while(|(i, _)| *i <= 256).last().map(|(i, _)| i).unwrap_or(0);
+            let end = req
+                .char_indices()
+                .take_while(|(i, _)| *i <= 256)
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
             &req[..end]
         };
         let res_body = if res.len() <= 256 {
             res
         } else {
-            let end = res.char_indices().take_while(|(i, _)| *i <= 256).last().map(|(i, _)| i).unwrap_or(0);
+            let end = res
+                .char_indices()
+                .take_while(|(i, _)| *i <= 256)
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
             &res[..end]
         };
         sqlx::query(
@@ -670,7 +670,7 @@ impl DbSessionStore {
                     SUM(CASE WHEN success THEN 1 ELSE 0 END) as successes,
                     AVG(latency_ms) as avg_latency
              FROM tool_metrics
-             GROUP BY tool_name"
+             GROUP BY tool_name",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -686,7 +686,6 @@ impl DbSessionStore {
         }
         Ok(stats)
     }
-
 
     pub async fn load_trajectory_events(
         &self,
@@ -780,7 +779,9 @@ impl DbSessionStore {
 
         let mut trajectories = Vec::new();
         for r in rows {
-            if let Ok(steps) = serde_json::from_str::<Vec<crate::trajectory::TrajectoryStep>>(&r.steps_json) {
+            if let Ok(steps) =
+                serde_json::from_str::<Vec<crate::trajectory::TrajectoryStep>>(&r.steps_json)
+            {
                 trajectories.push(Trajectory {
                     session_id: r.session_id,
                     steps,
@@ -871,7 +872,7 @@ impl DbSessionStore {
              FROM messages 
              WHERE archived = 0 OR archived IS NULL
              GROUP BY session_id 
-             ORDER BY last_at DESC"
+             ORDER BY last_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -927,7 +928,7 @@ impl DbSessionStore {
                  SELECT session_id FROM (
                      SELECT session_id, MAX(created_at) as max_at FROM messages GROUP BY session_id
                  ) WHERE max_at < datetime('now', ? || ' days')
-             )"
+             )",
         )
         .bind(format!("-{}", days))
         .execute(&self.pool)
@@ -942,7 +943,7 @@ impl DbSessionStore {
                  SELECT session_id FROM (
                      SELECT session_id, MAX(created_at) as max_at FROM messages GROUP BY session_id
                  ) WHERE max_at < datetime('now', ? || ' days')
-             )"
+             )",
         )
         .bind(format!("-{}", days))
         .execute(&self.pool)

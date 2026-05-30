@@ -1,9 +1,11 @@
+#![allow(clippy::collapsible_if)]
+
+use pharmakon_common::Event;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use sysinfo::{System, Disks};
-use pharmakon_common::Event;
+use sysinfo::{Disks, System};
 use tokio::sync::broadcast;
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Severity {
@@ -166,11 +168,23 @@ impl HealthMonitor {
         };
 
         let (ok, severity, msg) = if pct < 8.0 {
-            (false, Severity::Critical, format!("Disk space critical: {:.1}% free", pct))
+            (
+                false,
+                Severity::Critical,
+                format!("Disk space critical: {:.1}% free", pct),
+            )
         } else if pct < 15.0 {
-            (false, Severity::Warning, format!("Disk space low: {:.1}% free", pct))
+            (
+                false,
+                Severity::Warning,
+                format!("Disk space low: {:.1}% free", pct),
+            )
         } else {
-            (true, Severity::Info, format!("Disk space ok: {:.1}% free", pct))
+            (
+                true,
+                Severity::Info,
+                format!("Disk space ok: {:.1}% free", pct),
+            )
         };
 
         ProbeResult {
@@ -207,11 +221,23 @@ impl HealthMonitor {
         let rss_mb = rss_bytes as f64 / (1024.0 * 1024.0);
 
         let (ok, severity, msg) = if rss_mb > 500.0 {
-            (false, Severity::Critical, format!("Memory pressure critical: {:.1} MB RSS", rss_mb))
+            (
+                false,
+                Severity::Critical,
+                format!("Memory pressure critical: {:.1} MB RSS", rss_mb),
+            )
         } else if rss_mb > 200.0 {
-            (false, Severity::Warning, format!("Memory pressure warning: {:.1} MB RSS", rss_mb))
+            (
+                false,
+                Severity::Warning,
+                format!("Memory pressure warning: {:.1} MB RSS", rss_mb),
+            )
         } else {
-            (true, Severity::Info, format!("Memory pressure ok: {:.1} MB RSS", rss_mb))
+            (
+                true,
+                Severity::Info,
+                format!("Memory pressure ok: {:.1} MB RSS", rss_mb),
+            )
         };
 
         ProbeResult {
@@ -227,11 +253,23 @@ impl HealthMonitor {
     pub fn check_task_queue_lag(&self, active_tasks: usize) -> ProbeResult {
         let val = active_tasks as f64;
         let (ok, severity, msg) = if val > 50.0 {
-            (false, Severity::Critical, format!("Task queue lag critical: {} active tasks", active_tasks))
+            (
+                false,
+                Severity::Critical,
+                format!("Task queue lag critical: {} active tasks", active_tasks),
+            )
         } else if val > 10.0 {
-            (false, Severity::Warning, format!("Task queue lag warning: {} active tasks", active_tasks))
+            (
+                false,
+                Severity::Warning,
+                format!("Task queue lag warning: {} active tasks", active_tasks),
+            )
         } else {
-            (true, Severity::Info, format!("Task queue lag ok: {} active tasks", active_tasks))
+            (
+                true,
+                Severity::Info,
+                format!("Task queue lag ok: {} active tasks", active_tasks),
+            )
         };
 
         ProbeResult {
@@ -273,11 +311,23 @@ impl HealthMonitor {
         let pct = (total_size as f64 / quota_bytes as f64) * 100.0;
 
         let (ok, severity, msg) = if pct > 85.0 {
-            (false, Severity::Critical, format!("Snapshot quota critical: {:.1}%", pct))
+            (
+                false,
+                Severity::Critical,
+                format!("Snapshot quota critical: {:.1}%", pct),
+            )
         } else if pct > 60.0 {
-            (false, Severity::Warning, format!("Snapshot quota warning: {:.1}%", pct))
+            (
+                false,
+                Severity::Warning,
+                format!("Snapshot quota warning: {:.1}%", pct),
+            )
         } else {
-            (true, Severity::Info, format!("Snapshot quota ok: {:.1}%", pct))
+            (
+                true,
+                Severity::Info,
+                format!("Snapshot quota ok: {:.1}%", pct),
+            )
         };
 
         ProbeResult {
@@ -310,11 +360,23 @@ impl HealthMonitor {
         };
 
         let (ok, severity, msg) = if rate < 50.0 && stats.total_calls >= 5 {
-            (false, Severity::Critical, format!("LLM success rate critical: {:.1}%", rate))
+            (
+                false,
+                Severity::Critical,
+                format!("LLM success rate critical: {:.1}%", rate),
+            )
         } else if rate < 80.0 && stats.total_calls >= 5 {
-            (false, Severity::Warning, format!("LLM success rate warning: {:.1}%", rate))
+            (
+                false,
+                Severity::Warning,
+                format!("LLM success rate warning: {:.1}%", rate),
+            )
         } else {
-            (true, Severity::Info, format!("LLM success rate ok: {:.1}%", rate))
+            (
+                true,
+                Severity::Info,
+                format!("LLM success rate ok: {:.1}%", rate),
+            )
         };
 
         ProbeResult {
@@ -343,11 +405,32 @@ impl HealthMonitor {
         let minutes = elapsed.as_secs() as f64 / 60.0;
 
         let (ok, severity, msg) = if minutes > 120.0 {
-            (false, Severity::Critical, format!("Cargo check stale critical: {:.1} minutes since last check", minutes))
+            (
+                false,
+                Severity::Critical,
+                format!(
+                    "Cargo check stale critical: {:.1} minutes since last check",
+                    minutes
+                ),
+            )
         } else if minutes > 30.0 {
-            (false, Severity::Warning, format!("Cargo check stale warning: {:.1} minutes since last check", minutes))
+            (
+                false,
+                Severity::Warning,
+                format!(
+                    "Cargo check stale warning: {:.1} minutes since last check",
+                    minutes
+                ),
+            )
         } else {
-            (true, Severity::Info, format!("Cargo check stale ok: {:.1} minutes since last check", minutes))
+            (
+                true,
+                Severity::Info,
+                format!(
+                    "Cargo check stale ok: {:.1} minutes since last check",
+                    minutes
+                ),
+            )
         };
 
         ProbeResult {
@@ -376,7 +459,9 @@ impl HealthMonitor {
         for probe in &probes {
             match probe.severity {
                 Severity::Critical => max_severity = Severity::Critical,
-                Severity::Warning if max_severity != Severity::Critical => max_severity = Severity::Warning,
+                Severity::Warning if max_severity != Severity::Critical => {
+                    max_severity = Severity::Warning
+                }
                 _ => {}
             }
         }
@@ -396,19 +481,17 @@ impl HealthMonitor {
                     _ => HealthState::Degraded,
                 }
             }
-            Severity::Info => {
-                match prev_state {
-                    HealthState::Healthy => HealthState::Healthy,
-                    _ => {
-                        stats.consecutive_healthy += 1;
-                        if stats.consecutive_healthy >= 3 {
-                            HealthState::Healthy
-                        } else {
-                            HealthState::Recovering
-                        }
+            Severity::Info => match prev_state {
+                HealthState::Healthy => HealthState::Healthy,
+                _ => {
+                    stats.consecutive_healthy += 1;
+                    if stats.consecutive_healthy >= 3 {
+                        HealthState::Healthy
+                    } else {
+                        HealthState::Recovering
                     }
                 }
-            }
+            },
         };
 
         if next_state != prev_state {
@@ -455,7 +538,9 @@ impl HealthMonitor {
                         for f in files.iter().take(5) {
                             let _ = std::fs::remove_file(f.path());
                         }
-                        log::info!("HealthMonitor Auto-Remedy: Pruned 5 oldest snapshots to free space.");
+                        log::info!(
+                            "HealthMonitor Auto-Remedy: Pruned 5 oldest snapshots to free space."
+                        );
                     }
                 }
             });
@@ -472,11 +557,17 @@ mod tests {
         let mut monitor = HealthMonitor::new(0.3);
         monitor.test_mode = true;
         assert_eq!(monitor.check_disk_usage().probe_name, "disk_usage");
-        assert_eq!(monitor.check_memory_pressure().probe_name, "memory_pressure");
+        assert_eq!(
+            monitor.check_memory_pressure().probe_name,
+            "memory_pressure"
+        );
         assert_eq!(monitor.check_task_queue_lag(5).probe_name, "task_queue_lag");
         assert_eq!(monitor.check_snapshot_quota().probe_name, "snapshot_quota");
         assert_eq!(monitor.check_llm_success().probe_name, "last_llm_success");
-        assert_eq!(monitor.check_cargo_check_stale().probe_name, "cargo_check_stale");
+        assert_eq!(
+            monitor.check_cargo_check_stale().probe_name,
+            "cargo_check_stale"
+        );
     }
 
     #[test]

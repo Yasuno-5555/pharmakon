@@ -162,15 +162,21 @@ impl Tool for LspTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let action = args["action"].as_str()
+        let action = args["action"]
+            .as_str()
             .ok_or_else(|| AgentError("Missing or invalid 'action' parameter".into()))?;
-        let file_path = args["file"].as_str()
+        let file_path = args["file"]
+            .as_str()
             .ok_or_else(|| AgentError("Missing or invalid 'file' parameter".into()))?;
-        let line = args["line"].as_u64()
-            .ok_or_else(|| AgentError("Missing or invalid 'line' parameter".into()))? as u32;
+        let line = args["line"]
+            .as_u64()
+            .ok_or_else(|| AgentError("Missing or invalid 'line' parameter".into()))?
+            as u32;
         let line = line.saturating_sub(1); // 0-indexed for LSP
-        let col = args["column"].as_u64()
-            .ok_or_else(|| AgentError("Missing or invalid 'column' parameter".into()))? as u32;
+        let col = args["column"]
+            .as_u64()
+            .ok_or_else(|| AgentError("Missing or invalid 'column' parameter".into()))?
+            as u32;
         let col = col.saturating_sub(1);
 
         let client = self.get_client().await?;

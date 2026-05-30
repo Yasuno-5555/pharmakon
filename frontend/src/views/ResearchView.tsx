@@ -1,22 +1,7 @@
 import React from 'react';
 import { Search, BookOpen, CircleHelp, Link2, Ghost } from 'lucide-react';
 import { motion } from 'framer-motion';
-
-interface Fact {
-  content: String;
-  source_url: String;
-  confidence: number;
-  timestamp: string;
-}
-
-interface ResearchNotebook {
-  current_goal: string;
-  verified_facts: Fact[];
-  pending_questions: string[];
-  visited_urls: Record<string, string>;
-  dead_ends: string[];
-  research_tree: Record<string, string[]>;
-}
+import type { ResearchNotebook } from '../types';
 
 interface ResearchViewProps {
   notebook: ResearchNotebook | null;

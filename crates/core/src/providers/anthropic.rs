@@ -198,7 +198,11 @@ impl AgentModel for AnthropicModel {
         let stream = futures::stream::once(async move {
             match result {
                 Ok(resp) => {
-                    let text = resp.content.as_ref().map(|c| c.to_string()).unwrap_or_default();
+                    let text = resp
+                        .content
+                        .as_ref()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
                     Ok(text)
                 }
                 Err(e) => Err(e),

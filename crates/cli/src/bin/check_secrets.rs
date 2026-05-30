@@ -2,7 +2,14 @@ use pharmakon_common::SecretStore;
 
 fn main() {
     let store = SecretStore::new();
-    let providers = vec!["GEMINI", "OPENAI", "ANTHROPIC", "GROQ", "PERPLEXITY", "DEEPSEEK"];
+    let providers = vec![
+        "GEMINI",
+        "OPENAI",
+        "ANTHROPIC",
+        "GROQ",
+        "PERPLEXITY",
+        "DEEPSEEK",
+    ];
 
     println!("=== Pharmakon Secret Check ===");
     for p in providers {

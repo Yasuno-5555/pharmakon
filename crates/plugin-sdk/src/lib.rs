@@ -45,21 +45,36 @@ impl AgentError {
     }
 
     pub fn code(&self) -> AgentErrorCode {
-        if self.0.starts_with("[RateLimit]") { AgentErrorCode::RateLimit }
-        else if self.0.starts_with("[InvalidRequest]") { AgentErrorCode::InvalidRequest }
-        else if self.0.starts_with("[AuthenticationFailed]") { AgentErrorCode::AuthenticationFailed }
-        else if self.0.starts_with("[ContextExceeded]") { AgentErrorCode::ContextExceeded }
-        else if self.0.starts_with("[ModelError]") { AgentErrorCode::ModelError }
-        else if self.0.starts_with("[ToolNotFound]") { AgentErrorCode::ToolNotFound }
-        else if self.0.starts_with("[ToolExecutionFailed]") { AgentErrorCode::ToolExecutionFailed }
-        else if self.0.starts_with("[HangDetected]") { AgentErrorCode::HangDetected }
-        else if self.0.starts_with("[NetworkError]") { AgentErrorCode::NetworkError }
-        else if self.0.starts_with("[EnvironmentError]") { AgentErrorCode::EnvironmentError }
-        else if self.0.contains("429") || self.0.to_lowercase().contains("rate limit") { AgentErrorCode::RateLimit }
-        else { AgentErrorCode::InternalError }
+        if self.0.starts_with("[RateLimit]") {
+            AgentErrorCode::RateLimit
+        } else if self.0.starts_with("[InvalidRequest]") {
+            AgentErrorCode::InvalidRequest
+        } else if self.0.starts_with("[AuthenticationFailed]") {
+            AgentErrorCode::AuthenticationFailed
+        } else if self.0.starts_with("[ContextExceeded]") {
+            AgentErrorCode::ContextExceeded
+        } else if self.0.starts_with("[ModelError]") {
+            AgentErrorCode::ModelError
+        } else if self.0.starts_with("[ToolNotFound]") {
+            AgentErrorCode::ToolNotFound
+        } else if self.0.starts_with("[ToolExecutionFailed]") {
+            AgentErrorCode::ToolExecutionFailed
+        } else if self.0.starts_with("[HangDetected]") {
+            AgentErrorCode::HangDetected
+        } else if self.0.starts_with("[NetworkError]") {
+            AgentErrorCode::NetworkError
+        } else if self.0.starts_with("[EnvironmentError]") {
+            AgentErrorCode::EnvironmentError
+        } else if self.0.contains("429") || self.0.to_lowercase().contains("rate limit") {
+            AgentErrorCode::RateLimit
+        } else {
+            AgentErrorCode::InternalError
+        }
     }
 
-    pub fn is_rate_limit(&self) -> bool { self.code() == AgentErrorCode::RateLimit }
+    pub fn is_rate_limit(&self) -> bool {
+        self.code() == AgentErrorCode::RateLimit
+    }
 }
 
 pub type AgentResult<T> = std::result::Result<T, AgentError>;
@@ -82,39 +97,68 @@ pub enum ToolCategory {
 impl ToolCategory {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Core => "core", Self::FileSystem => "filesystem",
-            Self::Network => "network", Self::Media => "media",
-            Self::Autonomous => "autonomous", Self::System => "system",
-            Self::Orchestration => "orchestration", Self::Coding => "coding",
+            Self::Core => "core",
+            Self::FileSystem => "filesystem",
+            Self::Network => "network",
+            Self::Media => "media",
+            Self::Autonomous => "autonomous",
+            Self::System => "system",
+            Self::Orchestration => "orchestration",
+            Self::Coding => "coding",
             Self::Custom(s) => s,
         }
     }
 
     pub fn from_str_tag(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "core" => Self::Core, "filesystem" => Self::FileSystem,
-            "network" => Self::Network, "media" => Self::Media,
-            "autonomous" => Self::Autonomous, "system" => Self::System,
-            "orchestration" => Self::Orchestration, "coding" => Self::Coding,
+            "core" => Self::Core,
+            "filesystem" => Self::FileSystem,
+            "network" => Self::Network,
+            "media" => Self::Media,
+            "autonomous" => Self::Autonomous,
+            "system" => Self::System,
+            "orchestration" => Self::Orchestration,
+            "coding" => Self::Coding,
             _ => Self::Custom(s.to_string()),
         }
     }
 
     pub fn all_categories() -> Vec<&'static str> {
-        vec!["core", "filesystem", "network", "media", "autonomous", "system", "orchestration", "coding"]
+        vec![
+            "core",
+            "filesystem",
+            "network",
+            "media",
+            "autonomous",
+            "system",
+            "orchestration",
+            "coding",
+        ]
     }
 }
 
 // ─── Execution Profile ───
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum SideEffectLevel { None, Local, Irreversible }
+pub enum SideEffectLevel {
+    None,
+    Local,
+    Irreversible,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum FilesystemScope { None, Confined, Unrestricted }
+pub enum FilesystemScope {
+    None,
+    Confined,
+    Unrestricted,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum Reversibility { Trivial, Possible, Impractical }
+pub enum Reversibility {
+    Trivial,
+    Possible,
+    Impractical,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ExecutionProfile {
@@ -128,8 +172,10 @@ pub struct ExecutionProfile {
 impl Default for ExecutionProfile {
     fn default() -> Self {
         Self {
-            side_effect_level: SideEffectLevel::None, network_access: false,
-            filesystem_scope: FilesystemScope::None, reversibility: Reversibility::Trivial,
+            side_effect_level: SideEffectLevel::None,
+            network_access: false,
+            filesystem_scope: FilesystemScope::None,
+            reversibility: Reversibility::Trivial,
             requires_human_approval: false,
         }
     }
@@ -154,15 +200,29 @@ pub trait Tool: Send + Sync {
     fn parameters(&self) -> serde_json::Value;
     async fn call(&self, args: serde_json::Value) -> AgentResult<String>;
 
-    fn category(&self) -> ToolCategory { ToolCategory::Custom("generic".to_string()) }
-    fn execution_profile(&self) -> ExecutionProfile { ExecutionProfile::default() }
-    fn metadata(&self) -> HashMap<String, String> { HashMap::new() }
-    fn requires_approval(&self, _args: &Value) -> bool { false }
-    fn approval_description(&self, _args: &Value) -> String { String::new() }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Custom("generic".to_string())
+    }
+    fn execution_profile(&self) -> ExecutionProfile {
+        ExecutionProfile::default()
+    }
+    fn metadata(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
+    fn requires_approval(&self, _args: &Value) -> bool {
+        false
+    }
+    fn approval_description(&self, _args: &Value) -> String {
+        String::new()
+    }
 
     fn to_meta(&self) -> ToolMeta {
-        ToolMeta { name: self.name().to_string(), description: self.description().to_string(),
-                   category: self.category(), profile: self.execution_profile() }
+        ToolMeta {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            category: self.category(),
+            profile: self.execution_profile(),
+        }
     }
 }
 
@@ -171,24 +231,33 @@ pub trait Tool: Send + Sync {
 #[async_trait]
 pub trait Plugin: Send + Sync {
     /// Called once when the plugin is loaded by Pharmakon.
-    fn initialize(&self) -> AgentResult<()> { Ok(()) }
+    fn initialize(&self) -> AgentResult<()> {
+        Ok(())
+    }
 
     /// Return all tools provided by this plugin.
     fn tools(&self) -> Vec<Arc<dyn Tool>>;
 
     /// Optional: clean shutdown.
-    fn shutdown(&self) -> AgentResult<()> { Ok(()) }
+    fn shutdown(&self) -> AgentResult<()> {
+        Ok(())
+    }
 
     /// Optional: health check for monitoring.
     fn health_check(&self) -> AgentResult<PluginHealth> {
-        Ok(PluginHealth { is_healthy: true, details: HashMap::new() })
+        Ok(PluginHealth {
+            is_healthy: true,
+            details: HashMap::new(),
+        })
     }
 
     /// Plugin identifier (e.g. "pharmakon-plugin-filesystem").
     fn plugin_id(&self) -> &str;
 
     /// Semantic version.
-    fn plugin_version(&self) -> &str { "0.1.0" }
+    fn plugin_version(&self) -> &str {
+        "0.1.0"
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,4 +302,3 @@ pub trait PluginHost: Send + Sync {
     fn unregister_plugin(&self, plugin_id: &str) -> AgentResult<()>;
     fn registered_plugins(&self) -> Vec<String>;
 }
-

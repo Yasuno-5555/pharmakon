@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use pharmakon_common::{AgentResult, Tool, ToolCategory};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use std::collections::HashSet;
 
 pub struct ToolRouterTool;
 
@@ -107,7 +107,9 @@ impl Tool for LoadToolsTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let cat_str = args["category"].as_str().ok_or_else(|| pharmakon_common::AgentError("Missing category".to_string()))?;
+        let cat_str = args["category"]
+            .as_str()
+            .ok_or_else(|| pharmakon_common::AgentError("Missing category".to_string()))?;
         let category = ToolCategory::from_str_tag(cat_str);
 
         let mut active = self.active_categories.lock().await;
@@ -116,24 +118,31 @@ impl Tool for LoadToolsTool {
         }
 
         active.insert(category);
-        Ok(format!("Successfully loaded category '{}'. You now have access to its tools.", cat_str))
+        Ok(format!(
+            "Successfully loaded category '{}'. You now have access to its tools.",
+            cat_str
+        ))
     }
 }
 
-use std::process::Command;
-use tokio::task;
+use pharmakon_common::AgentError;
 use std::fs;
 use std::path::PathBuf;
-use pharmakon_common::AgentError;
+use std::process::Command;
+use tokio::task;
 
 pub struct EphemeralRedTeamTool;
 
 impl Default for EphemeralRedTeamTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EphemeralRedTeamTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
@@ -148,9 +157,9 @@ impl Tool for EphemeralRedTeamTool {
         json!({
             "type": "object",
             "properties": {
-                "test_code": { 
-                    "type": "string", 
-                    "description": "The complete code for the test file. For Rust, must include #[test] functions. For Python/Shell, raw script." 
+                "test_code": {
+                    "type": "string",
+                    "description": "The complete code for the test file. For Rust, must include #[test] functions. For Python/Shell, raw script."
                 },
                 "language": {
                     "type": "string",
@@ -166,22 +175,26 @@ impl Tool for EphemeralRedTeamTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let test_code = args["test_code"].as_str().ok_or_else(|| AgentError("Missing test_code".into()))?;
+        let test_code = args["test_code"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing test_code".into()))?;
         let language = args["language"].as_str().unwrap_or("rust");
 
         let id = uuid::Uuid::new_v4().to_string();
-        
+
         match language {
             "rust" => {
                 let tests_dir = PathBuf::from("tests");
                 if !tests_dir.exists() {
-                    fs::create_dir_all(&tests_dir).map_err(|e| AgentError(format!("Failed to create tests dir: {}", e)))?;
+                    fs::create_dir_all(&tests_dir)
+                        .map_err(|e| AgentError(format!("Failed to create tests dir: {}", e)))?;
                 }
 
                 let test_name = format!("ephemeral_{}", &id[0..8]);
                 let file_path = tests_dir.join(format!("{}.rs", test_name));
 
-                fs::write(&file_path, test_code).map_err(|e| AgentError(format!("Failed to write test file: {}", e)))?;
+                fs::write(&file_path, test_code)
+                    .map_err(|e| AgentError(format!("Failed to write test file: {}", e)))?;
 
                 let cmd_output = Command::new("cargo")
                     .args(["test", "--test", &test_name])
@@ -189,28 +202,35 @@ impl Tool for EphemeralRedTeamTool {
 
                 let _ = fs::remove_file(&file_path);
 
-                let output = cmd_output.map_err(|e| AgentError(format!("Cargo test execution failed: {}", e)))?;
-                
+                let output = cmd_output
+                    .map_err(|e| AgentError(format!("Cargo test execution failed: {}", e)))?;
+
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
                 if output.status.success() {
-                    Ok(format!("Red Team Test PASSED (Defended successfully):\n{}", stdout))
+                    Ok(format!(
+                        "Red Team Test PASSED (Defended successfully):\n{}",
+                        stdout
+                    ))
                 } else {
-                    Ok(format!("Red Team Test FAILED (Vulnerability confirmed / Test broken):\n{}\n{}", stdout, stderr))
+                    Ok(format!(
+                        "Red Team Test FAILED (Vulnerability confirmed / Test broken):\n{}\n{}",
+                        stdout, stderr
+                    ))
                 }
-            },
+            }
             "python" => {
                 let file_path = PathBuf::from(format!("/tmp/ephemeral_test_{}.py", &id[0..8]));
-                fs::write(&file_path, test_code).map_err(|e| AgentError(format!("Failed to write python file: {}", e)))?;
+                fs::write(&file_path, test_code)
+                    .map_err(|e| AgentError(format!("Failed to write python file: {}", e)))?;
 
-                let cmd_output = Command::new("python3")
-                    .arg(&file_path)
-                    .output();
+                let cmd_output = Command::new("python3").arg(&file_path).output();
 
                 let _ = fs::remove_file(&file_path);
 
-                let output = cmd_output.map_err(|e| AgentError(format!("Python execution failed: {}", e)))?;
+                let output = cmd_output
+                    .map_err(|e| AgentError(format!("Python execution failed: {}", e)))?;
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -219,18 +239,18 @@ impl Tool for EphemeralRedTeamTool {
                 } else {
                     Ok(format!("Python Test FAILED:\n{}\n{}", stdout, stderr))
                 }
-            },
+            }
             "shell" => {
                 let file_path = PathBuf::from(format!("/tmp/ephemeral_test_{}.sh", &id[0..8]));
-                fs::write(&file_path, test_code).map_err(|e| AgentError(format!("Failed to write shell file: {}", e)))?;
+                fs::write(&file_path, test_code)
+                    .map_err(|e| AgentError(format!("Failed to write shell file: {}", e)))?;
 
-                let cmd_output = Command::new("bash")
-                    .arg(&file_path)
-                    .output();
+                let cmd_output = Command::new("bash").arg(&file_path).output();
 
                 let _ = fs::remove_file(&file_path);
 
-                let output = cmd_output.map_err(|e| AgentError(format!("Shell execution failed: {}", e)))?;
+                let output =
+                    cmd_output.map_err(|e| AgentError(format!("Shell execution failed: {}", e)))?;
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -239,8 +259,8 @@ impl Tool for EphemeralRedTeamTool {
                 } else {
                     Ok(format!("Shell Test FAILED:\n{}\n{}", stdout, stderr))
                 }
-            },
-            _ => Err(AgentError(format!("Unsupported language: {}", language)))
+            }
+            _ => Err(AgentError(format!("Unsupported language: {}", language))),
         }
     }
 }
@@ -248,11 +268,15 @@ impl Tool for EphemeralRedTeamTool {
 pub struct FractalSwarmTool;
 
 impl Default for FractalSwarmTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FractalSwarmTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
@@ -288,7 +312,9 @@ impl Tool for FractalSwarmTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let tasks = args["tasks"].as_array().ok_or_else(|| AgentError("Missing 'tasks' array".into()))?;
+        let tasks = args["tasks"]
+            .as_array()
+            .ok_or_else(|| AgentError("Missing 'tasks' array".into()))?;
 
         if tasks.is_empty() {
             return Ok("No tasks provided to the swarm.".into());
@@ -305,11 +331,8 @@ impl Tool for FractalSwarmTool {
             }
 
             let handle = task::spawn_blocking(move || {
-                let output = Command::new("bash")
-                    .arg("-c")
-                    .arg(&command)
-                    .output();
-                
+                let output = Command::new("bash").arg("-c").arg(&command).output();
+
                 (id, command, output)
             });
 
@@ -324,7 +347,11 @@ impl Tool for FractalSwarmTool {
                 Ok((id, cmd, Ok(output))) => {
                     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    let status = if output.status.success() { "SUCCESS" } else { "FAILED" };
+                    let status = if output.status.success() {
+                        "SUCCESS"
+                    } else {
+                        "FAILED"
+                    };
                     if !output.status.success() {
                         all_success = false;
                     }
@@ -346,7 +373,10 @@ impl Tool for FractalSwarmTool {
                 }
                 Err(e) => {
                     all_success = false;
-                    results.push_str(&format!("#### Subtask: [PANIC]\nThread panicked: {}\n\n", e));
+                    results.push_str(&format!(
+                        "#### Subtask: [PANIC]\nThread panicked: {}\n\n",
+                        e
+                    ));
                 }
             }
         }
@@ -391,22 +421,32 @@ impl Tool for PharmakonTaskTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let message = args["message"].as_str().ok_or_else(|| AgentError("Missing 'message' argument".into()))?;
-        
+        let message = args["message"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing 'message' argument".into()))?;
+
         // Post to the gateway API (simulated/actual post)
         let client = reqwest::Client::new();
-        match client.post("http://localhost:19999/api/v1/agent/chat")
+        match client
+            .post("http://localhost:19999/api/v1/agent/chat")
             .json(&json!({ "message": message }))
             .send()
-            .await {
-                Ok(resp) => {
-                    let text = resp.text().await.unwrap_or_else(|_| "Failed to decode response".to_string());
-                    Ok(text)
-                }
-                Err(_) => {
-                    // Fallback to direct thread run to make tests fully standalone & independent of whether the server is running or not.
-                    Ok(format!("Recursive simulation: task '{}' accepted and completed by internal fallback scheduler.", message))
-                }
+            .await
+        {
+            Ok(resp) => {
+                let text = resp
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Failed to decode response".to_string());
+                Ok(text)
             }
+            Err(_) => {
+                // Fallback to direct thread run to make tests fully standalone & independent of whether the server is running or not.
+                Ok(format!(
+                    "Recursive simulation: task '{}' accepted and completed by internal fallback scheduler.",
+                    message
+                ))
+            }
+        }
     }
 }

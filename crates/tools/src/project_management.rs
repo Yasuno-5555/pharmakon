@@ -100,14 +100,15 @@ impl Tool for TaskTrackerTool {
 
                 let mut task_line = format!("- [ ] {}", task_name);
                 if let Some(deps) = dependencies
-                    && !deps.is_empty() {
-                        let dep_list = deps
-                            .iter()
-                            .map(|v| v.as_str().unwrap_or_default())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        task_line.push_str(&format!(" (depends on: {})", dep_list));
-                    }
+                    && !deps.is_empty()
+                {
+                    let dep_list = deps
+                        .iter()
+                        .map(|v| v.as_str().unwrap_or_default())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    task_line.push_str(&format!(" (depends on: {})", dep_list));
+                }
                 content.push_str(&format!("{}\n", task_line));
                 fs::write(&path, content).map_err(|e| AgentError(e.to_string()))?;
                 Ok(format!("✅ Added task: {}", task_name))

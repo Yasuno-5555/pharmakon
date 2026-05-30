@@ -1,12 +1,12 @@
 use crate::persistence::DbSessionStore;
 use crate::trajectory::{Trajectory, TrajectoryStep};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log;
-use serde_json::{json, Value};
+use reqwest::Client;
+use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use reqwest::Client;
 
 pub struct OllamaDistiller {
     store: Arc<DbSessionStore>,
@@ -29,23 +29,33 @@ impl OllamaDistiller {
         match self.client.get(&tags_url).send().await {
             Ok(resp) => {
                 if let Ok(json) = resp.json::<Value>().await
-                    && let Some(models) = json["models"].as_array() {
-                        // Check if the requested default base is available
-                        for m in models {
-                            if let Some(name) = m["name"].as_str()
-                                && name.contains(default_base) {
-                                    return default_base.to_string();
-                                }
-                        }
-                        // Fall back to the first available model if default is not found
-                        if let Some(first_model) = models.first().and_then(|m| m["name"].as_str()) {
-                            log::info!("Base model '{}' not found in Ollama. Using first available: '{}'", default_base, first_model);
-                            return first_model.to_string();
+                    && let Some(models) = json["models"].as_array()
+                {
+                    // Check if the requested default base is available
+                    for m in models {
+                        if let Some(name) = m["name"].as_str()
+                            && name.contains(default_base)
+                        {
+                            return default_base.to_string();
                         }
                     }
+                    // Fall back to the first available model if default is not found
+                    if let Some(first_model) = models.first().and_then(|m| m["name"].as_str()) {
+                        log::info!(
+                            "Base model '{}' not found in Ollama. Using first available: '{}'",
+                            default_base,
+                            first_model
+                        );
+                        return first_model.to_string();
+                    }
+                }
             }
             Err(e) => {
-                log::warn!("Could not connect to Ollama to resolve base models: {}. Defaulting to '{}'", e, default_base);
+                log::warn!(
+                    "Could not connect to Ollama to resolve base models: {}. Defaulting to '{}'",
+                    e,
+                    default_base
+                );
             }
         }
         default_base.to_string()
@@ -65,36 +75,42 @@ impl OllamaDistiller {
         // 2a. Append PHARMAKON.md Mandates
         let mandates_path = PathBuf::from("PHARMAKON.md");
         if mandates_path.exists()
-            && let Ok(mandates) = fs::read_to_string(&mandates_path) {
-                system_prompt.push_str("\n\n--- ARCHITECTURAL & ENGINEERING MANDATES ---\n");
-                // Take relevant snippet or first 2000 chars to avoid prompt pollution
-                system_prompt.push_str(&mandates.chars().take(2000).collect::<String>());
-            }
+            && let Ok(mandates) = fs::read_to_string(&mandates_path)
+        {
+            system_prompt.push_str("\n\n--- ARCHITECTURAL & ENGINEERING MANDATES ---\n");
+            // Take relevant snippet or first 2000 chars to avoid prompt pollution
+            system_prompt.push_str(&mandates.chars().take(2000).collect::<String>());
+        }
 
         // 2b. Append Lessons Learned
         let lessons_path = PathBuf::from(".pharmakon/knowledge/lessons_learned.md");
         if lessons_path.exists()
-            && let Ok(lessons) = fs::read_to_string(&lessons_path) {
-                system_prompt.push_str("\n\n--- LESSONS LEARNED & EXPERIENCES ---\n");
-                system_prompt.push_str(&lessons.chars().take(2000).collect::<String>());
-            }
+            && let Ok(lessons) = fs::read_to_string(&lessons_path)
+        {
+            system_prompt.push_str("\n\n--- LESSONS LEARNED & EXPERIENCES ---\n");
+            system_prompt.push_str(&lessons.chars().take(2000).collect::<String>());
+        }
 
         // 2c. Append top workspace facts
         if let Ok(facts) = self.store.search_facts("").await
-            && !facts.is_empty() {
-                system_prompt.push_str("\n\n--- SPECIFIC WORKSPACE FACTS ---\n");
-                for f in facts.iter().take(10) {
-                    if let Some(content) = f["content"].as_str() {
-                        system_prompt.push_str(&format!("- {}\n", content));
-                    }
+            && !facts.is_empty()
+        {
+            system_prompt.push_str("\n\n--- SPECIFIC WORKSPACE FACTS ---\n");
+            for f in facts.iter().take(10) {
+                if let Some(content) = f["content"].as_str() {
+                    system_prompt.push_str(&format!("- {}\n", content));
                 }
             }
+        }
 
         // 3. Generate the Modelfile headers
         let mut modelfile = format!("FROM {}\n\n", base_model);
         modelfile.push_str("PARAMETER temperature 0.2\n");
         modelfile.push_str("PARAMETER num_ctx 8192\n\n");
-        modelfile.push_str(&format!("SYSTEM \"\"\"{}\"\"\"\n\n", system_prompt.replace("\"", "\\\"")));
+        modelfile.push_str(&format!(
+            "SYSTEM \"\"\"{}\"\"\"\n\n",
+            system_prompt.replace("\"", "\\\"")
+        ));
 
         // 4. Extract trajectories and convert to MESSAGE commands (few-shot training)
         log::info!("Extracting historical trajectories for agentic sequence alignment...");
@@ -104,12 +120,21 @@ impl OllamaDistiller {
                 let (user_query, assistant_response) = self.format_trajectory_to_dialogue(&t);
                 if !user_query.is_empty() && !assistant_response.is_empty() {
                     // Inject dialogue into Modelfile
-                    modelfile.push_str(&format!("MESSAGE user \"\"\"{}\"\"\"\n", user_query.replace("\"", "\\\"")));
-                    modelfile.push_str(&format!("MESSAGE assistant \"\"\"{}\"\"\"\n\n", assistant_response.replace("\"", "\\\"")));
+                    modelfile.push_str(&format!(
+                        "MESSAGE user \"\"\"{}\"\"\"\n",
+                        user_query.replace("\"", "\\\"")
+                    ));
+                    modelfile.push_str(&format!(
+                        "MESSAGE assistant \"\"\"{}\"\"\"\n\n",
+                        assistant_response.replace("\"", "\\\"")
+                    ));
                     sample_count += 1;
                 }
             }
-            log::info!("Compiled {} high-fidelity agentic trajectories into the training Modelfile.", sample_count);
+            log::info!(
+                "Compiled {} high-fidelity agentic trajectories into the training Modelfile.",
+                sample_count
+            );
         }
 
         // 5. Save the compiled Modelfile locally for debuggability
@@ -120,9 +145,14 @@ impl OllamaDistiller {
         log::info!("Modelfile saved to: {}", modelfile_path.display());
 
         // 6. Request Ollama to create the custom model
-        log::info!("Submitting build request to Ollama daemon (target: {})...", target_model_name);
+        log::info!(
+            "Submitting build request to Ollama daemon (target: {})...",
+            target_model_name
+        );
         let create_url = format!("{}/api/create", self.host);
-        let response = self.client.post(&create_url)
+        let response = self
+            .client
+            .post(&create_url)
             .json(&json!({
                 "name": target_model_name,
                 "modelfile": modelfile,
@@ -138,10 +168,16 @@ impl OllamaDistiller {
 
         let result_json: Value = response.json().await?;
         if result_json["status"].as_str() == Some("success") {
-            log::info!("🎉 Ollama background distillation completed successfully! Target model '{}' is now compiled and ready.", target_model_name);
+            log::info!(
+                "🎉 Ollama background distillation completed successfully! Target model '{}' is now compiled and ready.",
+                target_model_name
+            );
             Ok(target_model_name.to_string())
         } else {
-            Err(anyhow!("Ollama build reported unexpected status: {:?}", result_json))
+            Err(anyhow!(
+                "Ollama build reported unexpected status: {:?}",
+                result_json
+            ))
         }
     }
 

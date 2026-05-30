@@ -82,7 +82,10 @@ async fn test_dynamic_agent_loading() {
         !gemini_tools.is_empty(),
         "Gemini agent should have tool metadata in its registry"
     );
-    println!("'gemini_researcher' agent loaded with {} tool metadata entries.", gemini_tools.len());
+    println!(
+        "'gemini_researcher' agent loaded with {} tool metadata entries.",
+        gemini_tools.len()
+    );
 
     // Test the OpenAI agent — should fall back to the default model
     let openai_agent_handle = router

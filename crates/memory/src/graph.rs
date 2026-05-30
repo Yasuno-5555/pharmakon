@@ -254,7 +254,7 @@ impl GraphStore {
 
     pub async fn delete_by_session(&self, session_id: &str) -> Result<()> {
         let pattern = format!("%\"session_id\":\"{}\"%", session_id);
-        
+
         sqlx::query(
             "DELETE FROM graph_edges WHERE from_id IN (SELECT id FROM graph_nodes WHERE properties LIKE ?) OR to_id IN (SELECT id FROM graph_nodes WHERE properties LIKE ?)"
         )
@@ -263,12 +263,10 @@ impl GraphStore {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "DELETE FROM graph_nodes WHERE properties LIKE ?"
-        )
-        .bind(&pattern)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("DELETE FROM graph_nodes WHERE properties LIKE ?")
+            .bind(&pattern)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

@@ -1,7 +1,7 @@
+use crate::orchestration::health_monitor::HealthMonitor;
 use anyhow::Result;
 use std::env;
 use std::fs;
-use crate::orchestration::health_monitor::HealthMonitor;
 
 pub struct Doctor;
 

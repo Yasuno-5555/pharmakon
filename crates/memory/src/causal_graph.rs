@@ -47,17 +47,22 @@ pub struct CausalGraph {
 
 impl CausalGraph {
     pub fn load() -> Self {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/causal_memory.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/causal_memory.json");
         if path.exists()
             && let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(graph) = serde_json::from_str(&content) {
-                    return graph;
-                }
+            && let Ok(graph) = serde_json::from_str(&content)
+        {
+            return graph;
+        }
         Self::default()
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/causal_memory.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/causal_memory.json");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -71,11 +76,29 @@ impl CausalGraph {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.nodes.insert(id.clone(), CausalNode { id, node_type, timestamp });
+        self.nodes.insert(
+            id.clone(),
+            CausalNode {
+                id,
+                node_type,
+                timestamp,
+            },
+        );
     }
 
-    pub fn add_edge(&mut self, source: String, target: String, edge_type: CausalEdgeType, probability: f64) {
-        self.edges.push(CausalEdge { source, target, edge_type, probability });
+    pub fn add_edge(
+        &mut self,
+        source: String,
+        target: String,
+        edge_type: CausalEdgeType,
+        probability: f64,
+    ) {
+        self.edges.push(CausalEdge {
+            source,
+            target,
+            edge_type,
+            probability,
+        });
     }
 
     /// Performs backward walk Root Cause Analysis (RCA) starting from a failed node.
@@ -123,7 +146,9 @@ impl CausalGraph {
     /// Estimates conditional success probability P(Success | Alternative Choice)
     /// based on historical probabilities of alternate routing decisions.
     pub fn counterfactual_probability(&self, task: &str, alternative_path_action: &str) -> f64 {
-        let matching_planning_nodes: Vec<_> = self.nodes.values()
+        let matching_planning_nodes: Vec<_> = self
+            .nodes
+            .values()
             .filter(|n| match &n.node_type {
                 CausalNodeType::Planning { task: t } => t.contains(task),
                 _ => false,
@@ -142,11 +167,16 @@ impl CausalGraph {
             for edge in &self.edges {
                 if edge.source == node.id
                     && let Some(target_node) = self.nodes.get(&edge.target)
-                        && let CausalNodeType::Execution { tool, success } = &target_node.node_type
-                            && tool.contains(alternative_path_action) {
-                                cumulative_prob += if *success { edge.probability } else { 1.0 - edge.probability };
-                                match_count += 1;
-                            }
+                    && let CausalNodeType::Execution { tool, success } = &target_node.node_type
+                    && tool.contains(alternative_path_action)
+                {
+                    cumulative_prob += if *success {
+                        edge.probability
+                    } else {
+                        1.0 - edge.probability
+                    };
+                    match_count += 1;
+                }
             }
         }
 
@@ -183,17 +213,52 @@ mod tests {
         let mut graph = CausalGraph::default();
 
         // Task Planning node
-        graph.add_node("node-1".to_string(), CausalNodeType::Planning { task: "fix build errors".to_string() });
+        graph.add_node(
+            "node-1".to_string(),
+            CausalNodeType::Planning {
+                task: "fix build errors".to_string(),
+            },
+        );
         // Execution nodes
-        graph.add_node("node-2".to_string(), CausalNodeType::Execution { tool: "write_file".to_string(), success: true });
-        graph.add_node("node-3".to_string(), CausalNodeType::Execution { tool: "run_command".to_string(), success: false });
+        graph.add_node(
+            "node-2".to_string(),
+            CausalNodeType::Execution {
+                tool: "write_file".to_string(),
+                success: true,
+            },
+        );
+        graph.add_node(
+            "node-3".to_string(),
+            CausalNodeType::Execution {
+                tool: "run_command".to_string(),
+                success: false,
+            },
+        );
         // Outcome node
-        graph.add_node("node-4".to_string(), CausalNodeType::Outcome { success: false });
+        graph.add_node(
+            "node-4".to_string(),
+            CausalNodeType::Outcome { success: false },
+        );
 
         // Connect nodes to build a causal graph
-        graph.add_edge("node-1".to_string(), "node-2".to_string(), CausalEdgeType::Triggers, 0.95);
-        graph.add_edge("node-2".to_string(), "node-3".to_string(), CausalEdgeType::LeadsTo, 0.90);
-        graph.add_edge("node-3".to_string(), "node-4".to_string(), CausalEdgeType::FailsDueTo, 0.99);
+        graph.add_edge(
+            "node-1".to_string(),
+            "node-2".to_string(),
+            CausalEdgeType::Triggers,
+            0.95,
+        );
+        graph.add_edge(
+            "node-2".to_string(),
+            "node-3".to_string(),
+            CausalEdgeType::LeadsTo,
+            0.90,
+        );
+        graph.add_edge(
+            "node-3".to_string(),
+            "node-4".to_string(),
+            CausalEdgeType::FailsDueTo,
+            0.99,
+        );
 
         // Perform Root Cause Analysis starting from the failed Outcome node-4
         let rca = graph.root_cause_analysis("node-4");
@@ -207,13 +272,45 @@ mod tests {
     fn test_counterfactual_reasoning() {
         let mut graph = CausalGraph::default();
 
-        graph.add_node("p1".to_string(), CausalNodeType::Planning { task: "update library dependencies".to_string() });
-        graph.add_node("e1".to_string(), CausalNodeType::Execution { tool: "cargo upgrade".to_string(), success: true });
-        graph.add_node("p2".to_string(), CausalNodeType::Planning { task: "update library dependencies".to_string() });
-        graph.add_node("e2".to_string(), CausalNodeType::Execution { tool: "manual edit".to_string(), success: false });
+        graph.add_node(
+            "p1".to_string(),
+            CausalNodeType::Planning {
+                task: "update library dependencies".to_string(),
+            },
+        );
+        graph.add_node(
+            "e1".to_string(),
+            CausalNodeType::Execution {
+                tool: "cargo upgrade".to_string(),
+                success: true,
+            },
+        );
+        graph.add_node(
+            "p2".to_string(),
+            CausalNodeType::Planning {
+                task: "update library dependencies".to_string(),
+            },
+        );
+        graph.add_node(
+            "e2".to_string(),
+            CausalNodeType::Execution {
+                tool: "manual edit".to_string(),
+                success: false,
+            },
+        );
 
-        graph.add_edge("p1".to_string(), "e1".to_string(), CausalEdgeType::Triggers, 0.95);
-        graph.add_edge("p2".to_string(), "e2".to_string(), CausalEdgeType::Triggers, 0.80);
+        graph.add_edge(
+            "p1".to_string(),
+            "e1".to_string(),
+            CausalEdgeType::Triggers,
+            0.95,
+        );
+        graph.add_edge(
+            "p2".to_string(),
+            "e2".to_string(),
+            CausalEdgeType::Triggers,
+            0.80,
+        );
 
         // Counterfactual queries: "What if we use cargo upgrade vs manual edit?"
         let prob_upgrade = graph.counterfactual_probability("dependencies", "cargo upgrade");
@@ -222,7 +319,8 @@ mod tests {
         assert!(prob_upgrade > prob_manual);
 
         // Recommend the policy based on weights
-        let recommendation = graph.recommend_policy("dependencies", &["cargo upgrade", "manual edit"]);
+        let recommendation =
+            graph.recommend_policy("dependencies", &["cargo upgrade", "manual edit"]);
         assert_eq!(recommendation, Some("cargo upgrade".to_string()));
     }
 }

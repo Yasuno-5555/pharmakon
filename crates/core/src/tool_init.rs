@@ -4,42 +4,54 @@ use tokio::sync::Mutex;
 
 /// Initialize all available tools on an Agent.
 /// Shared between CLI and Gateway so both have access to the full tool suite.
-pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
-    use pharmakon_tools::terminal::{ShellTool, TerminalTool, BackgroundRunTool, ProcessStatusTool};
-    use pharmakon_tools::code::{ViewFileTool, ListDirTool, StrictReplaceContentTool, GrepSearchTool, FindDefinitionTool, PythonInterpreterTool};
-    use pharmakon_tools::files::{ApplyPatchTool, FileReadTool, FileWriteTool};
-    use pharmakon_tools::repomap::RepoMapTool;
-    use pharmakon_tools::git::{GitAddTool, GitBranchTool, GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool};
-    use pharmakon_tools::browser::BrowserTool;
-    use pharmakon_tools::web_fetch::WebFetchTool;
-    use pharmakon_tools::web_search::{DuckDuckGoSearchTool, GoogleSearchTool, BraveSearchTool as WebSearchBraveSearchTool, SearchDispatcherTool};
-    use pharmakon_tools::memory_hydration::HydrateContextTool;
-    use pharmakon_tools::playbook::PlaybookTool;
-    use pharmakon_tools::project_management::TaskTrackerTool;
-    use pharmakon_tools::workspace::WorkspacePerceptionTool;
-    use pharmakon_tools::probe::EnvironmentProbeTool;
-    use pharmakon_tools::link_understanding::LinkUnderstandingTool;
-    use pharmakon_tools::quality::CargoQualityTool;
-    use pharmakon_tools::tool_market::ToolMarketTool;
-    use pharmakon_tools::checkpoint::CheckpointTool;
-    use pharmakon_tools::reflection::ReflectionTool;
-    use pharmakon_tools::orchestration::{ToolRouterTool, LoadToolsTool};
-    use pharmakon_tools::memory_mgmt::MemoryManagementTool;
-    use pharmakon_tools::context_mgmt::UpdateContextTool;
-    use pharmakon_tools::cognitive::{
-        TemporalAwarenessTool, FailurePredictionTool, ProactiveSelfOptimizationTool, RegretMinimizationTool,
-    };
-    use pharmakon_tools::orchestration::EphemeralRedTeamTool;
-    use pharmakon_tools::media::ImageGenTool;
+pub async fn init_all_agent_tools(agent: &Arc<Agent>) -> anyhow::Result<()> {
     use pharmakon_tools::NativeGuiEmulatorTool;
+    use pharmakon_tools::browser::BrowserTool;
+    use pharmakon_tools::checkpoint::CheckpointTool;
+    use pharmakon_tools::code::{
+        FindDefinitionTool, GrepSearchTool, ListDirTool, PythonInterpreterTool,
+        StrictReplaceContentTool, ViewFileTool,
+    };
+    use pharmakon_tools::cognitive::{
+        FailurePredictionTool, ProactiveSelfOptimizationTool, RegretMinimizationTool,
+        TemporalAwarenessTool,
+    };
+    use pharmakon_tools::context_mgmt::UpdateContextTool;
+    use pharmakon_tools::files::{ApplyPatchTool, FileReadTool, FileWriteTool};
+    use pharmakon_tools::git::{
+        GitAddTool, GitBranchTool, GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool,
+    };
+    use pharmakon_tools::link_understanding::LinkUnderstandingTool;
+    use pharmakon_tools::media::ImageGenTool;
+    use pharmakon_tools::memory_hydration::HydrateContextTool;
+    use pharmakon_tools::memory_mgmt::MemoryManagementTool;
+    use pharmakon_tools::orchestration::EphemeralRedTeamTool;
+    use pharmakon_tools::orchestration::{LoadToolsTool, ToolRouterTool};
+    use pharmakon_tools::playbook::PlaybookTool;
+    use pharmakon_tools::probe::EnvironmentProbeTool;
+    use pharmakon_tools::project_management::TaskTrackerTool;
+    use pharmakon_tools::quality::CargoQualityTool;
+    use pharmakon_tools::reflection::ReflectionTool;
+    use pharmakon_tools::repomap::RepoMapTool;
+    use pharmakon_tools::terminal::{
+        BackgroundRunTool, ProcessStatusTool, ShellTool, TerminalTool,
+    };
     use pharmakon_tools::tool_discovery::DiscoverToolsTool;
-
+    use pharmakon_tools::tool_market::ToolMarketTool;
+    use pharmakon_tools::web_fetch::WebFetchTool;
+    use pharmakon_tools::web_search::{
+        BraveSearchTool as WebSearchBraveSearchTool, DuckDuckGoSearchTool, GoogleSearchTool,
+        SearchDispatcherTool,
+    };
+    use pharmakon_tools::workspace::WorkspacePerceptionTool;
 
     // --- Core System Tools ---
     agent.add_tool(Arc::new(DiscoverToolsTool::default())).await;
-    agent.add_tool(Arc::new(LoadToolsTool {
-        active_categories: agent.active_categories.clone(),
-    })).await;
+    agent
+        .add_tool(Arc::new(LoadToolsTool {
+            active_categories: agent.active_categories.clone(),
+        }))
+        .await;
     agent.add_tool(Arc::new(UpdateContextTool)).await;
 
     // --- Shell & Terminal ---
@@ -72,20 +84,28 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     agent.add_tool(Arc::new(BrowserTool::new(None))).await;
     agent.add_tool(Arc::new(NativeGuiEmulatorTool::new())).await;
     agent.add_tool(Arc::new(WebFetchTool::new())).await;
-    if let Ok(key) = std::env::var("BRAVE_API_KEY") {
-        if !key.trim().is_empty() {
-            agent.add_tool(Arc::new(WebSearchBraveSearchTool::new(key))).await;
-        }
+    if let Ok(key) = std::env::var("BRAVE_API_KEY")
+        && !key.trim().is_empty()
+    {
+        agent
+            .add_tool(Arc::new(WebSearchBraveSearchTool::new(key)))
+            .await;
     }
     agent.add_tool(Arc::new(GoogleSearchTool)).await;
     agent.add_tool(Arc::new(DuckDuckGoSearchTool::new())).await;
     agent.add_tool(Arc::new(SearchDispatcherTool::new())).await;
-    agent.add_tool(Arc::new(pharmakon_tools::search::custom_scout::CustomScoutTool)).await;
+    agent
+        .add_tool(Arc::new(
+            pharmakon_tools::search::custom_scout::CustomScoutTool,
+        ))
+        .await;
 
     // --- Knowledge & Context ---
     agent.add_tool(Arc::new(HydrateContextTool::new())).await;
     agent.add_tool(Arc::new(PlaybookTool::new())).await;
-    agent.add_tool(Arc::new(WorkspacePerceptionTool::new())).await;
+    agent
+        .add_tool(Arc::new(WorkspacePerceptionTool::new()))
+        .await;
     agent.add_tool(Arc::new(EnvironmentProbeTool::new())).await;
     agent.add_tool(Arc::new(LinkUnderstandingTool::new())).await;
     agent.add_tool(Arc::new(TaskTrackerTool::new())).await;
@@ -95,43 +115,85 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
     agent.add_tool(Arc::new(ToolMarketTool)).await;
 
     // --- Trajectory & Intelligence ---
-    let agent_weak = Arc::downgrade(&Arc::new(agent.clone()));
-    agent.add_tool(Arc::new(crate::trajectory::tool::ExecutionTraceTool::new(agent_weak.clone()))).await;
-    agent.add_tool(Arc::new(crate::trajectory::tool::ToolReliabilityTool::new(agent_weak.clone()))).await;
-    agent.add_tool(Arc::new(crate::trajectory::tool::InsightTool::new(agent_weak.clone()))).await;
-    agent.add_tool(Arc::new(crate::trajectory::tool::SemanticGrepTool::new(agent_weak.clone()))).await;
-    agent.add_tool(Arc::new(crate::orchestration::mcts::MctsSimulatorTool::new(agent_weak.clone()))).await;
-    agent.add_tool(Arc::new(crate::orchestration::rlfc::RlfcTool::new(agent_weak.clone()))).await;
+    let agent_weak = Arc::downgrade(agent);
+    agent
+        .add_tool(Arc::new(crate::trajectory::tool::ExecutionTraceTool::new(
+            agent_weak.clone(),
+        )))
+        .await;
+    agent
+        .add_tool(Arc::new(crate::trajectory::tool::ToolReliabilityTool::new(
+            agent_weak.clone(),
+        )))
+        .await;
+    agent
+        .add_tool(Arc::new(crate::trajectory::tool::InsightTool::new(
+            agent_weak.clone(),
+        )))
+        .await;
+    agent
+        .add_tool(Arc::new(crate::trajectory::tool::SemanticGrepTool::new(
+            agent_weak.clone(),
+        )))
+        .await;
+    agent
+        .add_tool(Arc::new(
+            crate::orchestration::mcts::MctsSimulatorTool::new(agent_weak.clone()),
+        ))
+        .await;
+    agent
+        .add_tool(Arc::new(crate::orchestration::rlfc::RlfcTool::new(
+            agent_weak.clone(),
+        )))
+        .await;
 
     // --- CodeAct (model-adaptive routing) ---
     let model_name = {
         let m = agent.model.lock().await;
         m.name().to_string()
     };
-    agent.add_tool(Arc::new(crate::orchestration::codeact::CodeActTool::with_model_family(
-        std::env::current_dir().unwrap_or_default(),
-        &model_name,
-    ))).await;
+    agent
+        .add_tool(Arc::new(
+            crate::orchestration::codeact::CodeActTool::with_model_family(
+                std::env::current_dir().unwrap_or_default(),
+                &model_name,
+            ),
+        ))
+        .await;
 
     // --- Swarm ---
-    let swarm_manager = Arc::new(crate::orchestration::swarm::SwarmManager::new(
-        Arc::new(Mutex::new(agent.clone())),
-    ));
-    agent.add_tool(Arc::new(crate::orchestration::swarm::SwarmTool::new(swarm_manager.clone(), 0))).await;
-    agent.add_tool(Arc::new(crate::orchestration::swarm::FractalSwarmTool::new(swarm_manager, 0).with_economy(agent.economy.clone()))).await;
+    let swarm_manager = Arc::new(crate::orchestration::swarm::SwarmManager::new(Arc::new(
+        Mutex::new(agent.as_ref().clone()),
+    )));
+    agent
+        .add_tool(Arc::new(crate::orchestration::swarm::SwarmTool::new(
+            swarm_manager.clone(),
+            0,
+        )))
+        .await;
+    agent
+        .add_tool(Arc::new(
+            crate::orchestration::swarm::FractalSwarmTool::new(swarm_manager, 0)
+                .with_economy(agent.economy.clone()),
+        ))
+        .await;
 
     // --- Unified Cognitive & Orchestration Suite ---
     agent.add_tool(Arc::new(TemporalAwarenessTool)).await;
     agent.add_tool(Arc::new(FailurePredictionTool)).await;
-    agent.add_tool(Arc::new(ProactiveSelfOptimizationTool)).await;
+    agent
+        .add_tool(Arc::new(ProactiveSelfOptimizationTool))
+        .await;
     agent.add_tool(Arc::new(RegretMinimizationTool)).await;
     agent.add_tool(Arc::new(EphemeralRedTeamTool)).await;
     agent.add_tool(Arc::new(ImageGenTool::new())).await;
 
     // --- MCP ---
-    agent.add_tool(Arc::new(crate::mcp_tool::ConnectMcpServerTool {
-        registry: agent.registry.clone(),
-    })).await;
+    agent
+        .add_tool(Arc::new(crate::mcp_tool::ConnectMcpServerTool {
+            registry: agent.registry.clone(),
+        }))
+        .await;
 
     // --- Phase 3 / Reflection ---
     agent.add_tool(Arc::new(CheckpointTool)).await;
@@ -145,11 +207,13 @@ pub async fn init_all_agent_tools(agent: &Agent) -> anyhow::Result<()> {
 
     // --- Cron / Automation ---
     let cron_mgr = Arc::new(crate::automation::cron::CronManager::new().await?);
-    let agent_weak = Arc::downgrade(&Arc::new(Mutex::new(agent.clone())));
-    agent.add_tool(Arc::new(crate::automation::cron_tool::CronTool::new(
-        cron_mgr.clone(),
-        agent_weak,
-    ))).await;
+    let agent_weak = Arc::downgrade(agent);
+    agent
+        .add_tool(Arc::new(crate::automation::cron_tool::CronTool::new(
+            cron_mgr.clone(),
+            agent_weak,
+        )))
+        .await;
     *agent.cron_manager.lock().unwrap() = Some(cron_mgr);
 
     log::info!("All agent tools initialized.");

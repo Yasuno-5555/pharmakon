@@ -1,7 +1,7 @@
+use crate::codex_utils::now;
 use async_trait::async_trait;
 use pharmakon_common::{AgentResult, Tool, ToolCategory};
-use serde_json::{json, Value};
-use crate::codex_utils::now;
+use serde_json::{Value, json};
 
 pub struct CodexAutomationTool;
 
@@ -59,7 +59,10 @@ impl Tool for CodexCatalogTool {
     async fn call(&self, _args: Value) -> AgentResult<String> {
         // This tool should ideally query the ToolMetaRegistry to provide the list
         // For now, return a placeholder
-        Ok("Not yet implemented. This tool would list all available tools from the registry.".to_string())
+        Ok(
+            "Not yet implemented. This tool would list all available tools from the registry."
+                .to_string(),
+        )
     }
 }
 
@@ -119,12 +122,12 @@ impl Tool for WeatherLookupTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let location = args["location"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let location = args["location"].as_str().unwrap_or_default().to_string();
         // Placeholder: In a real implementation, this would call a weather API.
-        Ok(format!("Weather for {}: Sunny, 25C (placeholder)", location))
+        Ok(format!(
+            "Weather for {}: Sunny, 25C (placeholder)",
+            location
+        ))
     }
 }
 
@@ -155,10 +158,7 @@ impl Tool for FinanceLookupTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let symbol = args["symbol"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let symbol = args["symbol"].as_str().unwrap_or_default().to_string();
         // Placeholder: In a real implementation, this would call a financial API.
         Ok(format!(
             "Financial data for {}: Stock price $150.00 (placeholder)",
@@ -194,11 +194,11 @@ impl Tool for SportsLookupTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let query = args["query"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let query = args["query"].as_str().unwrap_or_default().to_string();
         // Placeholder: In a real implementation, this would call a sports API.
-        Ok(format!("Sports results for {}: Team A wins (placeholder)", query))
+        Ok(format!(
+            "Sports results for {}: Team A wins (placeholder)",
+            query
+        ))
     }
 }

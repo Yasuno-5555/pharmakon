@@ -10,7 +10,7 @@ use std::collections::HashMap;
 pub struct BenchmarkRun {
     pub run_id: String,
     pub timestamp: u64,
-    pub success_rate: f64,      // Range: 0.0 to 1.0
+    pub success_rate: f64, // Range: 0.0 to 1.0
     pub avg_latency_ms: u64,
     pub avg_tokens_used: usize,
 }
@@ -61,8 +61,11 @@ impl AbTestConfig {
         // Z-test calculation
         let pooled_p = ((self.variant_a_successes + self.variant_b_successes) as f64)
             / ((self.variant_a_runs + self.variant_b_runs) as f64);
-        
-        let standard_error = (pooled_p * (1.0 - pooled_p) * (1.0 / (self.variant_a_runs as f64) + 1.0 / (self.variant_b_runs as f64))).sqrt();
+
+        let standard_error = (pooled_p
+            * (1.0 - pooled_p)
+            * (1.0 / (self.variant_a_runs as f64) + 1.0 / (self.variant_b_runs as f64)))
+            .sqrt();
         if standard_error == 0.0 {
             return Some(false);
         }
@@ -86,17 +89,22 @@ pub struct BenchmarkHarness {
 
 impl BenchmarkHarness {
     pub fn load() -> Self {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/benchmarks.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/benchmarks.json");
         if path.exists()
             && let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(harness) = serde_json::from_str(&content) {
-                    return harness;
-                }
+            && let Ok(harness) = serde_json::from_str(&content)
+        {
+            return harness;
+        }
         Self::default()
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/benchmarks.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/benchmarks.json");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -189,13 +197,11 @@ mod tests {
     #[test]
     fn test_benchmark_harness_and_regression() {
         let mut harness = BenchmarkHarness::default();
-        let tasks = vec![
-            BenchmarkTask {
-                task_id: "t1".to_string(),
-                task_description: "verify project build".to_string(),
-                complexity: 1.0,
-            },
-        ];
+        let tasks = vec![BenchmarkTask {
+            task_id: "t1".to_string(),
+            task_description: "verify project build".to_string(),
+            complexity: 1.0,
+        }];
 
         // 1. First run: stable
         let run1 = harness.execute_suite(&tasks);

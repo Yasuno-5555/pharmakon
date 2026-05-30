@@ -24,15 +24,18 @@ pub async fn auth_middleware(
                 .and_then(|h: &HeaderValue| h.to_str().ok());
 
             if let Some(req_key) = auth_header
-                && req_key == key {
-                    return Ok(next.run(req).await);
-                }
+                && req_key == key
+            {
+                return Ok(next.run(req).await);
+            }
             log::error!("Unauthorized API access attempt from {:?}", req.uri());
             Err(StatusCode::UNAUTHORIZED)
         }
         _ => {
             // PHARMAKON_CONTROL_API_KEY is not set or empty, bypass authentication for dev environment
-            log::warn!("PHARMAKON_CONTROL_API_KEY is not set or empty. Bypassing API key authentication.");
+            log::warn!(
+                "PHARMAKON_CONTROL_API_KEY is not set or empty. Bypassing API key authentication."
+            );
             Ok(next.run(req).await)
         }
     }

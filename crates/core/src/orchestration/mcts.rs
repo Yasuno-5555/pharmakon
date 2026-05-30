@@ -28,17 +28,24 @@ impl MctsSimulatorTool {
         let temp_dir = tempfile::tempdir()?;
         let simulation_path = temp_dir.path();
 
-        log::info!("Starting MCTS simulation for option '{}' in {:?}", name, simulation_path);
+        log::info!(
+            "Starting MCTS simulation for option '{}' in {:?}",
+            name,
+            simulation_path
+        );
 
         // 1. Copy minimal workspace (only necessary files to run cargo check)
         // For simplicity in this implementation, we copy everything except heavy dirs
-        self.copy_dir_recursive(workspace_root, simulation_path).await?;
+        self.copy_dir_recursive(workspace_root, simulation_path)
+            .await?;
 
         // 2. Apply patch
         let target_file = simulation_path.join(path);
         let original = fs::read_to_string(&target_file).await?;
-        let patch_obj = diffy::Patch::from_str(patch).map_err(|e| anyhow!("Invalid patch: {}", e))?;
-        let patched = diffy::apply(&original, &patch_obj).map_err(|e| anyhow!("Patch apply failed: {}", e))?;
+        let patch_obj =
+            diffy::Patch::from_str(patch).map_err(|e| anyhow!("Invalid patch: {}", e))?;
+        let patched = diffy::apply(&original, &patch_obj)
+            .map_err(|e| anyhow!("Patch apply failed: {}", e))?;
         fs::write(&target_file, patched).await?;
 
         // 3. Run Verification
@@ -68,7 +75,11 @@ impl MctsSimulatorTool {
             let dest = to.join(entry.file_name());
             if path.is_dir() {
                 let name = entry.file_name();
-                if name == "target" || name == ".git" || name == ".pharmakon" || name == "node_modules" {
+                if name == "target"
+                    || name == ".git"
+                    || name == ".pharmakon"
+                    || name == "node_modules"
+                {
                     continue;
                 }
                 fs::create_dir_all(&dest).await?;
@@ -127,7 +138,10 @@ impl Tool for MctsSimulatorTool {
             let path = opt["path"].as_str().unwrap_or("");
             let patch = opt["patch"].as_str().unwrap_or("");
 
-            match self.simulate_option(name, patch, path, &workspace_root).await {
+            match self
+                .simulate_option(name, patch, path, &workspace_root)
+                .await
+            {
                 Ok(res) => results.push(res),
                 Err(e) => results.push(json!({
                     "option": name,
@@ -147,6 +161,7 @@ impl Tool for MctsSimulatorTool {
         Ok(serde_json::to_string_pretty(&json!({
             "simulations": results,
             "recommendation": results.first().and_then(|r| r["option"].as_str())
-        })).unwrap())
+        }))
+        .unwrap())
     }
 }

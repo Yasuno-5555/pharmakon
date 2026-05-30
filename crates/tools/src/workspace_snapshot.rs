@@ -1,10 +1,12 @@
+use crate::codex_utils::{
+    is_probably_binary, metadata_modified_secs, now, read_json, state_dir, write_json,
+};
 use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
-use crate::codex_utils::{state_dir, read_json, write_json, now, is_probably_binary, metadata_modified_secs};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct SnapshotFile {
@@ -56,7 +58,7 @@ impl Tool for WorkspaceSnapshotTool {
         let dir = state_dir("snapshots")?;
         match args["action"].as_str().unwrap_or("list") {
             "create" => {
-                let root = args["root"].  as_str().unwrap_or(".");
+                let root = args["root"].as_str().unwrap_or(".");
                 let root_path = Path::new(root)
                     .canonicalize()
                     .map_err(|e| AgentError(format!("Invalid root {}: {}", root, e)))?;

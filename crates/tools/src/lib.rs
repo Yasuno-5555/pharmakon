@@ -1,20 +1,20 @@
-pub mod context_mgmt;
 pub mod anchors;
 pub mod ast_ingest;
 pub mod browser;
 pub mod canvas;
-pub mod gui;
 pub mod checkpoint;
 pub mod code;
 pub mod cognitive;
 pub mod commitment_tool;
 pub mod config_tool;
 pub mod connectors;
+pub mod context_mgmt;
 pub mod diagnostic;
 pub mod docker_sandbox;
 pub mod fact_tool;
 pub mod files;
 pub mod git;
+pub mod gui;
 pub mod host_script;
 pub mod link_understanding;
 pub mod lsp;
@@ -82,17 +82,19 @@ pub use crate::anchors::{ListAnchorsTool, SetAnchorTool};
 pub use crate::ast_ingest::ASTKnowledgeIngestTool;
 pub use crate::browser::BrowserTool;
 pub use crate::canvas::CanvasTool;
-pub use crate::gui::NativeGuiEmulatorTool;
 pub use crate::checkpoint::CheckpointTool;
 pub use crate::code::{
-    FindDefinitionTool, GrepSearchTool, ListDirTool,
-    PythonInterpreterTool, StrictReplaceContentTool, ViewFileTool,
+    FindDefinitionTool, GrepSearchTool, ListDirTool, PythonInterpreterTool,
+    StrictReplaceContentTool, ViewFileTool,
 };
 pub use crate::commitment_tool::CommitmentTool;
 pub use crate::connectors::ContextConnectorTool;
 pub use crate::diagnostic::DiagnosticTool;
 pub use crate::files::{ApplyPatchTool, FileReadTool, FileWriteTool};
-pub use crate::git::{GitAddTool, GitBranchTool, GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool};
+pub use crate::git::{
+    GitAddTool, GitBranchTool, GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool,
+};
+pub use crate::gui::NativeGuiEmulatorTool;
 pub use crate::host_script::HostScriptTool;
 pub use crate::link_understanding::LinkUnderstandingTool;
 pub use crate::lsp::LspTool;
@@ -110,10 +112,14 @@ pub use crate::search::custom_scout::CustomScoutTool;
 pub use crate::skill_factory::SkillFactoryTool;
 pub use crate::soul_tool::SoulTool;
 pub use crate::subagent::{ParallelSwarmTool, SubAgentTool};
-pub use crate::terminal::{BackgroundRunTool, ProcessStatusTool, ShellTool, TerminalTool, SendCommandInputTool};
+pub use crate::terminal::{
+    BackgroundRunTool, ProcessStatusTool, SendCommandInputTool, ShellTool, TerminalTool,
+};
 pub use crate::token_economy_tool::TokenEconomyControlTool;
 pub use crate::tool_discovery::DiscoverToolsTool;
 pub use crate::web_fetch::WebFetchTool;
-pub use crate::web_search::{BraveSearchTool, DuckDuckGoSearchTool, GoogleSearchTool, SearchDispatcherTool};
+pub use crate::web_search::{
+    BraveSearchTool, DuckDuckGoSearchTool, GoogleSearchTool, SearchDispatcherTool,
+};
 pub use crate::workspace::WorkspacePerceptionTool;
 pub use pharmakon_common::Tool;

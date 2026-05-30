@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, ExecutionProfile, Reversibility, SideEffectLevel, SecretStore, Tool, ToolCategory};
+use pharmakon_common::{
+    AgentError, AgentResult, ExecutionProfile, Reversibility, SecretStore, SideEffectLevel, Tool,
+    ToolCategory,
+};
 use serde_json::{Value, json};
 
 // ═══════════════════════════════════════════════════════════
@@ -88,13 +91,19 @@ impl Tool for BraveSearchTool {
                 let snippet = res["description"].as_str().unwrap_or("");
                 results.push(format!(
                     "{}. **{}**\n   URL: {}\n   {}\n",
-                    i + 1, title, url, snippet
+                    i + 1,
+                    title,
+                    url,
+                    snippet
                 ));
             }
         }
 
         if results.is_empty() {
-            Ok(format!("No results found for '{}'. Try a different query.", query))
+            Ok(format!(
+                "No results found for '{}'. Try a different query.",
+                query
+            ))
         } else {
             let joined = results.join("\n");
             Ok(format!("Search results for '{}':\n\n{}", query, joined))
@@ -149,7 +158,9 @@ impl Tool for GoogleSearchTool {
         let api_key = secret_store
             .get_secret("GOOGLE_SEARCH_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_SEARCH_API_KEY"))
-            .map_err(|_| AgentError("GOOGLE_SEARCH_API_KEY not set in secrets or env".to_string()))?;
+            .map_err(|_| {
+                AgentError("GOOGLE_SEARCH_API_KEY not set in secrets or env".to_string())
+            })?;
         let cx = secret_store
             .get_secret("GOOGLE_SEARCH_CX")
             .or_else(|_| std::env::var("GOOGLE_SEARCH_CX"))
@@ -166,10 +177,16 @@ impl Tool for GoogleSearchTool {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(AgentError(format!("Google API error: HTTP {} - {}", status, body)));
+            return Err(AgentError(format!(
+                "Google API error: HTTP {} - {}",
+                status, body
+            )));
         }
 
-        let body: Value = response.json().await.map_err(|e| AgentError(e.to_string()))?;
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|e| AgentError(e.to_string()))?;
         let mut results = Vec::new();
 
         if let Some(items) = body.get("items").and_then(|i| i.as_array()) {
@@ -179,7 +196,10 @@ impl Tool for GoogleSearchTool {
                 let snippet = item["snippet"].as_str().unwrap_or("");
                 results.push(format!(
                     "{}. **{}**\n   URL: {}\n   {}\n",
-                    i + 1, title, link, snippet
+                    i + 1,
+                    title,
+                    link,
+                    snippet
                 ));
             }
         }
@@ -187,7 +207,11 @@ impl Tool for GoogleSearchTool {
         if results.is_empty() {
             Ok(format!("No results found for '{}'.", query))
         } else {
-            Ok(format!("Google results for '{}':\n\n{}", query, results.join("\n")))
+            Ok(format!(
+                "Google results for '{}':\n\n{}",
+                query,
+                results.join("\n")
+            ))
         }
     }
 }
@@ -301,10 +325,11 @@ fn decode_html_entities(s: &str) -> String {
                     // Try numeric
                     if let Some(num) = entity.strip_prefix('#')
                         && let Ok(n) = num.parse::<u32>()
-                            && let Some(ch) = char::from_u32(n) {
-                                out.push(ch);
-                                continue;
-                            }
+                        && let Some(ch) = char::from_u32(n)
+                    {
+                        out.push(ch);
+                        continue;
+                    }
                     // Fallback: keep entity as-is
                     out.push('&');
                     out.push_str(&entity);
@@ -358,7 +383,8 @@ impl Tool for DuckDuckGoSearchTool {
         let count = args["count"].as_u64().unwrap_or(8).min(20) as usize;
 
         let url = "https://lite.duckduckgo.com/lite";
-        let response = self.client
+        let response = self
+            .client
             .get(url)
             .query(&[("q", query)])
             .send()
@@ -372,15 +398,24 @@ impl Tool for DuckDuckGoSearchTool {
             )));
         }
 
-        let html = response.text().await
+        let html = response
+            .text()
+            .await
             .map_err(|e| AgentError(format!("Failed to read response: {}", e)))?;
 
         let results = Self::parse_lite_results(&html, count);
 
         if results.is_empty() {
-            Ok(format!("No results found for '{}'. Try a different query.", query))
+            Ok(format!(
+                "No results found for '{}'. Try a different query.",
+                query
+            ))
         } else {
-            Ok(format!("DuckDuckGo results for '{}':\n\n{}", query, results.join("\n\n")))
+            Ok(format!(
+                "DuckDuckGo results for '{}':\n\n{}",
+                query,
+                results.join("\n\n")
+            ))
         }
     }
 }

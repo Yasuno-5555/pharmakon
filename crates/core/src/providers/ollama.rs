@@ -55,15 +55,12 @@ impl AgentModel for OllamaModel {
                 "content": sys
             }));
         }
-        ollama_messages.extend(request
-            .messages
-            .iter()
-            .map(|m| {
-                json!({
-                    "role": m.role,
-                    "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
-                })
-            }));
+        ollama_messages.extend(request.messages.iter().map(|m| {
+            json!({
+                "role": m.role,
+                "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
+            })
+        }));
 
         let response = self
             .client
@@ -116,15 +113,12 @@ impl AgentModel for OllamaModel {
                 "content": sys
             }));
         }
-        ollama_messages.extend(request
-            .messages
-            .iter()
-            .map(|m| {
-                json!({
-                    "role": m.role,
-                    "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
-                })
-            }));
+        ollama_messages.extend(request.messages.iter().map(|m| {
+            json!({
+                "role": m.role,
+                "content": m.content.as_ref().map(|c| c.to_string()).unwrap_or_default()
+            })
+        }));
 
         let response = self
             .client
@@ -164,9 +158,10 @@ impl AgentModel for OllamaModel {
                         }
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                             if let Some(content) = json["message"]["content"].as_str()
-                                && !content.is_empty() {
-                                    return Some((Ok(content.to_string()), (byte_stream, buffer)));
-                                }
+                                && !content.is_empty()
+                            {
+                                return Some((Ok(content.to_string()), (byte_stream, buffer)));
+                            }
                             if json["done"].as_bool().unwrap_or(false) {
                                 return None;
                             }

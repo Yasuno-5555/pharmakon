@@ -2,7 +2,7 @@ import React from 'react';
 import { Activity, ShieldAlert } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import type { HealthStats } from '../App';
+import type { HealthStats } from '../types';
 
 const HealthMonitor: React.FC<{ stats: HealthStats | null }> = ({ stats }) => {
   if (!stats) return null;

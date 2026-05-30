@@ -148,8 +148,10 @@ impl Config {
         let tmp_path = config_path.with_extension("json.tmp");
         fs::write(&tmp_path, &content)
             .context(format!("Failed to write config to {:?}", tmp_path))?;
-        fs::rename(&tmp_path, &config_path)
-            .context(format!("Failed to rename config {:?} -> {:?}", tmp_path, config_path))?;
+        fs::rename(&tmp_path, &config_path).context(format!(
+            "Failed to rename config {:?} -> {:?}",
+            tmp_path, config_path
+        ))?;
         Ok(())
     }
 
@@ -417,7 +419,9 @@ impl SpawnHandle {
 
     /// Await the sub-agent's final result.
     pub async fn await_result(self) -> anyhow::Result<String> {
-        self.rx.await.map_err(|_| anyhow::anyhow!("Sub-agent was dropped before completion"))?
+        self.rx
+            .await
+            .map_err(|_| anyhow::anyhow!("Sub-agent was dropped before completion"))?
     }
 }
 

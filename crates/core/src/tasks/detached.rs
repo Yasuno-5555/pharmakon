@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use crate::agent::Agent;
 use anyhow::Result;
 use pharmakon_common::Event;
@@ -31,7 +33,13 @@ impl DetachedTaskRuntime {
     }
 
     /// Spawn a background task with error boundary and result monitoring.
-    pub async fn spawn_task(&self, id: String, agent: Arc<Mutex<Agent>>, message: String, description: String) {
+    pub async fn spawn_task(
+        &self,
+        id: String,
+        agent: Arc<Mutex<Agent>>,
+        message: String,
+        description: String,
+    ) {
         let tasks = self.tasks.clone();
         let event_tx = self.event_tx.clone();
         let desc = description.clone();
@@ -44,7 +52,11 @@ impl DetachedTaskRuntime {
                 Ok(response) => {
                     log::info!("Detached task '{}' completed", desc);
                     let _ = event_tx.send(Event::AgentResponse {
-                        content: pharmakon_common::MessageContent::Text(format!("[Background task: {}]\n{}", desc, response.chars().take(200).collect::<String>())),
+                        content: pharmakon_common::MessageContent::Text(format!(
+                            "[Background task: {}]\n{}",
+                            desc,
+                            response.chars().take(200).collect::<String>()
+                        )),
                     });
                     Ok(response)
                 }
@@ -86,7 +98,11 @@ impl DetachedTaskRuntime {
             match tokio::time::timeout(std::time::Duration::from_secs(300), handle).await {
                 Ok(Ok(_)) => {} // completed normally, already handled inside
                 Ok(Err(join_err)) => {
-                    let msg = if join_err.is_panic() { "panicked" } else { "cancelled" };
+                    let msg = if join_err.is_panic() {
+                        "panicked"
+                    } else {
+                        "cancelled"
+                    };
                     log::error!("Detached task '{}' {}", desc_clone1, msg);
                     let _ = event_tx_clone.send(Event::Error {
                         message: format!("Background task '{}' {}", desc_clone1, msg),
@@ -113,9 +129,13 @@ impl DetachedTaskRuntime {
     /// Get list of currently running tasks.
     pub async fn active_tasks(&self) -> Vec<DetachedTask> {
         let tasks_lock = self.tasks.lock().await;
-        tasks_lock.iter().map(|(id, desc, _h)| {
-            DetachedTask { id: id.clone(), description: desc.clone() }
-        }).collect()
+        tasks_lock
+            .iter()
+            .map(|(id, desc, _h)| DetachedTask {
+                id: id.clone(),
+                description: desc.clone(),
+            })
+            .collect()
     }
 
     pub async fn active_tasks_count(&self) -> usize {
@@ -126,7 +146,7 @@ impl DetachedTaskRuntime {
     pub async fn emit_telemetry_if_changed(&self) {
         let count = self.reap_finished().await;
         let mut last = self.last_report.lock().await;
-        let should_report = last.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(60));
+        let should_report = last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60));
         if should_report && count > 0 {
             *last = Some(std::time::Instant::now());
             let _ = self.event_tx.send(Event::SystemLog {

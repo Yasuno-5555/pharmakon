@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Mutex;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 #[async_trait]
 pub trait VectorStore: Send + Sync {

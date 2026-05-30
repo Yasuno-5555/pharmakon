@@ -1,4 +1,3 @@
-
 use std::collections::VecDeque;
 use std::time::Duration;
 
@@ -123,11 +122,11 @@ pub enum TerminationSignal {
 /// Hysteresis prevents oscillation at tier boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EntropyTier {
-    Normal,    // entropy ≤ T1
-    Elevated,  // T1 < entropy ≤ T2
-    High,      // T2 < entropy ≤ T3
-    Critical,  // T3 < entropy ≤ T4
-    Overflow,  // entropy > T4 (hard terminate)
+    Normal,   // entropy ≤ T1
+    Elevated, // T1 < entropy ≤ T2
+    High,     // T2 < entropy ≤ T3
+    Critical, // T3 < entropy ≤ T4
+    Overflow, // entropy > T4 (hard terminate)
 }
 
 impl EntropyTier {
@@ -138,11 +137,17 @@ impl EntropyTier {
         let t3 = read_entropy_tier_env("PHARMAKON_ENTROPY_TIER3", 0.85);
         let t4 = read_entropy_tier_env("PHARMAKON_MAX_ENTROPY", 0.95);
 
-        if entropy > t4 { EntropyTier::Overflow }
-        else if entropy > t3 { EntropyTier::Critical }
-        else if entropy > t2 { EntropyTier::High }
-        else if entropy > t1 { EntropyTier::Elevated }
-        else { EntropyTier::Normal }
+        if entropy > t4 {
+            EntropyTier::Overflow
+        } else if entropy > t3 {
+            EntropyTier::Critical
+        } else if entropy > t2 {
+            EntropyTier::High
+        } else if entropy > t1 {
+            EntropyTier::Elevated
+        } else {
+            EntropyTier::Normal
+        }
     }
 
     /// Entry threshold for this tier (used by hysteresis).
@@ -202,16 +207,17 @@ impl ProgressTracker {
         let raw_tier = EntropyTier::classify(entropy);
         const HYSTERESIS: f32 = 0.05;
 
-        let effective_tier = if raw_tier < self.current_tier && self.current_tier != EntropyTier::Normal {
-            let entry = self.current_tier.entry_threshold();
-            if entropy > entry - HYSTERESIS {
-                self.current_tier // hold current tier
+        let effective_tier =
+            if raw_tier < self.current_tier && self.current_tier != EntropyTier::Normal {
+                let entry = self.current_tier.entry_threshold();
+                if entropy > entry - HYSTERESIS {
+                    self.current_tier // hold current tier
+                } else {
+                    raw_tier
+                }
             } else {
                 raw_tier
-            }
-        } else {
-            raw_tier
-        };
+            };
 
         let escalated = effective_tier > self.current_tier;
         self.current_tier = effective_tier;
@@ -229,7 +235,10 @@ impl ProgressTracker {
     pub fn check_entropy(&self, entropy: f32, threshold: f32) -> TerminationSignal {
         if entropy > threshold {
             let tier = self.current_tier.as_u8();
-            TerminationSignal::EntropyOverflow { score: entropy, tier }
+            TerminationSignal::EntropyOverflow {
+                score: entropy,
+                tier,
+            }
         } else {
             TerminationSignal::Continue
         }
@@ -249,7 +258,10 @@ impl ProgressTracker {
             }
         }
         if loop_count >= 3 {
-            log::warn!("Loop detected: Same tool call args repeated {} times.", loop_count);
+            log::warn!(
+                "Loop detected: Same tool call args repeated {} times.",
+                loop_count
+            );
             return TerminationSignal::LoopDetected;
         }
 
@@ -264,7 +276,8 @@ impl ProgressTracker {
                 if self.cosine_stagnation_count >= 2 {
                     log::warn!(
                         "Cosine stagnation detected: cos={:.3} for {} consecutive iterations.",
-                        cos, self.cosine_stagnation_count
+                        cos,
+                        self.cosine_stagnation_count
                     );
                     cosine_stagnation_signal = Some(TerminationSignal::CosineStagnation { cos });
                 }
@@ -283,13 +296,20 @@ impl ProgressTracker {
 
         let progress = self.measure_delta(&snapshot);
 
-        if progress < 0.01 { // Using a small epsilon for progress
+        if progress < 0.01 {
+            // Using a small epsilon for progress
             self.stall_count += 1;
-            log::warn!("Stall count increased to {}/{}", self.stall_count, self.stall_threshold);
-
+            log::warn!(
+                "Stall count increased to {}/{}",
+                self.stall_count,
+                self.stall_threshold
+            );
         } else {
             self.stall_count = 0; // Progress was made, reset the counter
-            log::info!("Progress detected (score: {:.2}), stall count reset.", progress);
+            log::info!(
+                "Progress detected (score: {:.2}), stall count reset.",
+                progress
+            );
         }
 
         self.history.push_back(snapshot);
@@ -316,8 +336,6 @@ impl ProgressTracker {
             // First iteration, so any action is progress.
             return 1.0;
         };
-
-        
 
         // More metrics can be added here and weighted.
         // For now, any successful tool call is progress.

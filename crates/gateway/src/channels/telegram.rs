@@ -165,10 +165,10 @@ impl Channel for TelegramChannel {
                                 // Complex engineering task: spawn a dedicated worker agent in a separate session
                                 let worker_session_id = format!("worker-{}-{}", session_id, uuid::Uuid::new_v4());
                                 let _ = b.send_message(
-                                    cid, 
+                                    cid,
                                     format!(
                                         "🟢 Task dispatched to dedicated background Worker Agent [Session: {}].\n\
-                                         You can continue chatting with me here while it works in the background!", 
+                                         You can continue chatting with me here while it works in the background!",
                                         worker_session_id
                                     )
                                 ).await;
@@ -206,6 +206,7 @@ impl Channel for TelegramChannel {
                                     reg.all_metadata().len()
                                 };
                                 log::info!("Worker agent initialized with {} tools in metadata catalog", tool_count);
+                                let worker_agent = Arc::new(worker_agent);
                                 if let Err(e) = pharmakon_core::tool_init::init_all_agent_tools(&worker_agent).await {
                                     log::error!("Failed to init worker agent tools: {}", e);
                                 }
@@ -324,8 +325,7 @@ impl Channel for TelegramChannel {
         //
         // TerminatedByOtherGetUpdates means another bot instance was started
         // with the same token. We wait and retry.
-        const DISPATCH_RETRY_DELAY: tokio::time::Duration =
-            tokio::time::Duration::from_secs(5);
+        const DISPATCH_RETRY_DELAY: tokio::time::Duration = tokio::time::Duration::from_secs(5);
 
         loop {
             tokio::select! {

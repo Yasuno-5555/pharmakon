@@ -1,5 +1,5 @@
-use pharmakon_common::{AgentModel, CommitmentPersistence, Event, SoulManager, Tool, ToolMeta};
 pub use pharmakon_common::tool_meta_catalog::ToolMetaCatalog;
+use pharmakon_common::{AgentModel, CommitmentPersistence, Event, SoulManager, Tool, ToolMeta};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -106,7 +106,9 @@ impl ToolMetaRegistry {
             "shell" => Some(Arc::new(crate::terminal::ShellTool)),
             "read_file" => Some(Arc::new(crate::files::FileReadTool)),
             "write_file" => Some(Arc::new(crate::files::FileWriteTool)),
-            "replace_content" | "replace_file_content" => Some(Arc::new(crate::code::StrictReplaceContentTool)),
+            "replace_content" | "replace_file_content" => {
+                Some(Arc::new(crate::code::StrictReplaceContentTool))
+            }
             "view_file" => Some(Arc::new(crate::code::ViewFileTool)),
             "list_dir" => Some(Arc::new(crate::code::ListDirTool)),
             "apply_patch" => Some(Arc::new(crate::files::ApplyPatchTool)),
@@ -123,7 +125,9 @@ impl ToolMetaRegistry {
             "discover_tools" => Some(Arc::new(crate::tool_discovery::DiscoverToolsTool::new())),
             "hydrate_context" => Some(Arc::new(crate::memory_hydration::HydrateContextTool::new())),
             "playbook" => Some(Arc::new(crate::playbook::PlaybookTool::new())),
-            "search" | "web_search" => Some(Arc::new(crate::web_search::SearchDispatcherTool::new())),
+            "search" | "web_search" => {
+                Some(Arc::new(crate::web_search::SearchDispatcherTool::new()))
+            }
             "duckduckgo_search" => Some(Arc::new(crate::web_search::DuckDuckGoSearchTool::new())),
             "google_search" => Some(Arc::new(crate::web_search::GoogleSearchTool)),
             "repomap" | "get_repo_map" => Some(Arc::new(crate::repomap::RepoMapTool::new())),

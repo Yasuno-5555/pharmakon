@@ -1,9 +1,9 @@
+use crate::codex_utils::state_dir;
 use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
-use crate::codex_utils::{state_dir};
 
 pub struct NexusVisualizerTool;
 #[async_trait]

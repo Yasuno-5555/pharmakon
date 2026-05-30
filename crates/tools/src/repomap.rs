@@ -51,15 +51,17 @@ impl Tool for RepoMapTool {
 
         for entry in walker.flatten() {
             let p = entry.path();
-            if p.is_file() && p.extension().is_some_and(|ext| ext == "rs")
+            if p.is_file()
+                && p.extension().is_some_and(|ext| ext == "rs")
                 && let Ok(symbols) = self.extract_symbols(p)
-                    && !symbols.is_empty() {
-                        report.push_str(&format!("#### {}\n", p.display()));
-                        for sym in symbols {
-                            report.push_str(&format!("- {}\n", sym));
-                        }
-                        report.push('\n');
-                    }
+                && !symbols.is_empty()
+            {
+                report.push_str(&format!("#### {}\n", p.display()));
+                for sym in symbols {
+                    report.push_str(&format!("- {}\n", sym));
+                }
+                report.push('\n');
+            }
         }
 
         Ok(report)

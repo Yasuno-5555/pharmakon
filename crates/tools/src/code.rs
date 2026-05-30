@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel, Tool, ToolCategory};
+use pharmakon_common::{
+    AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel,
+    Tool, ToolCategory,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -136,7 +139,8 @@ impl Tool for GrepSearchTool {
             (cmd, false)
         };
 
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| AgentError(format!("Search failed: {}", e)))?;
 
         let result = String::from_utf8_lossy(&output.stdout).to_string();
@@ -177,8 +181,19 @@ impl Tool for GrepSearchTool {
 
 /// Default ignore patterns for directory listing.
 const DEFAULT_IGNORE: &[&str] = &[
-    ".git", "node_modules", "target", ".DS_Store", ".next", "dist", "build",
-    ".venv", "venv", "__pycache__", ".rbenv", ".bundle", "vendor/bundle",
+    ".git",
+    "node_modules",
+    "target",
+    ".DS_Store",
+    ".next",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".rbenv",
+    ".bundle",
+    "vendor/bundle",
 ];
 
 pub struct ListDirTool;
@@ -223,13 +238,17 @@ impl Tool for ListDirTool {
 
         if !is_in_workspace(path) {
             return Err(AgentError(format!(
-                "Path '{}' is outside the workspace.", path
+                "Path '{}' is outside the workspace.",
+                path
             )));
         }
 
         let root = Path::new(path);
         if !root.is_dir() {
-            return Err(AgentError(format!("'{}' is not a directory or does not exist.", path)));
+            return Err(AgentError(format!(
+                "'{}' is not a directory or does not exist.",
+                path
+            )));
         }
 
         let mut entries: Vec<_> = Vec::new();
@@ -237,7 +256,17 @@ impl Tool for ListDirTool {
         let mut file_count = 0u64;
         let mut total_size = 0u64;
 
-        collect_entries(root, root, depth, show_hidden, max_entries, &mut entries, &mut dir_count, &mut file_count, &mut total_size);
+        collect_entries(
+            root,
+            root,
+            depth,
+            show_hidden,
+            max_entries,
+            &mut entries,
+            &mut dir_count,
+            &mut file_count,
+            &mut total_size,
+        );
 
         let size_str = if total_size >= 1024 * 1024 {
             format!("{:.1}MB", total_size as f64 / (1024.0 * 1024.0))
@@ -264,7 +293,11 @@ impl Tool for ListDirTool {
                 prefix,
                 icon,
                 name,
-                if *kind == "file" { format!("({})", format_size(*size)) } else { String::new() },
+                if *kind == "file" {
+                    format!("({})", format_size(*size))
+                } else {
+                    String::new()
+                },
                 if *kind == "dir" { "/" } else { "" }
             ));
         }
@@ -277,6 +310,7 @@ impl Tool for ListDirTool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_entries(
     root: &Path,
     dir: &Path,
@@ -292,7 +326,10 @@ fn collect_entries(
         return;
     }
 
-    let depth = dir.components().count().saturating_sub(root.components().count());
+    let depth = dir
+        .components()
+        .count()
+        .saturating_sub(root.components().count());
     if depth > max_depth {
         return;
     }
@@ -325,13 +362,26 @@ fn collect_entries(
             continue;
         }
 
-        let rel_depth = dir.components().count().saturating_sub(root.components().count());
+        let rel_depth = dir
+            .components()
+            .count()
+            .saturating_sub(root.components().count());
 
         if let Ok(ftype) = entry.file_type() {
             if ftype.is_dir() {
                 *dir_count += 1;
                 out.push((rel_depth, name_str.clone(), "dir".to_string(), 0));
-                collect_entries(root, &entry.path(), max_depth, show_hidden, max_entries, out, dir_count, file_count, total_size);
+                collect_entries(
+                    root,
+                    &entry.path(),
+                    max_depth,
+                    show_hidden,
+                    max_entries,
+                    out,
+                    dir_count,
+                    file_count,
+                    total_size,
+                );
             } else if ftype.is_symlink() {
                 out.push((rel_depth, name_str, "symlink".to_string(), 0));
             } else {
@@ -429,14 +479,15 @@ impl Tool for ViewFileTool {
         let lines: Vec<&str> = content.lines().collect();
         let total = lines.len();
 
-        let actual_end = end_line.unwrap_or_else(|| {
-            if start_line > 1 {
-                (start_line + 199).min(total)
-            } else {
-                total
-            }
-        })
-        .min(total);
+        let actual_end = end_line
+            .unwrap_or_else(|| {
+                if start_line > 1 {
+                    (start_line + 199).min(total)
+                } else {
+                    total
+                }
+            })
+            .min(total);
 
         if start_line > total {
             return Ok(format!(
@@ -446,17 +497,26 @@ impl Tool for ViewFileTool {
         }
 
         let range_size = actual_end.saturating_sub(start_line.saturating_sub(1));
-        let mut result = format!("### File: {} ({} lines, showing {})\n\n", path, total, range_size);
+        let mut result = format!(
+            "### File: {} ({} lines, showing {})\n\n",
+            path, total, range_size
+        );
 
-        for i in (start_line.max(1).saturating_sub(1))..actual_end {
-            result.push_str(&format!("{:>4}: {}\n", i + 1, lines[i]));
+        for (i, line) in lines
+            .iter()
+            .enumerate()
+            .take(actual_end)
+            .skip(start_line.max(1).saturating_sub(1))
+        {
+            result.push_str(&format!("{:>4}: {}\n", i + 1, line));
         }
 
         if actual_end < total {
             let remaining = total - actual_end;
             result.push_str(&format!(
                 "\n... ({} more lines. Set start_line={} to continue reading.)",
-                remaining, actual_end + 1
+                remaining,
+                actual_end + 1
             ));
         }
 
@@ -522,8 +582,8 @@ impl Tool for StrictReplaceContentTool {
             .as_array()
             .ok_or_else(|| AgentError("Missing edits array".to_string()))?;
 
-        let mut content = fs::read_to_string(path)
-            .map_err(|e| AgentError(format!("Failed to read: {}", e)))?;
+        let mut content =
+            fs::read_to_string(path).map_err(|e| AgentError(format!("Failed to read: {}", e)))?;
         let ends_with_newline = content.ends_with('\n');
 
         for edit in edits {
@@ -538,8 +598,16 @@ impl Tool for StrictReplaceContentTool {
             }
 
             // When trim is enabled, normalize whitespace for fuzzy matching
-            let old = if trim_enabled { raw_old.trim() } else { raw_old };
-            let replacement = if trim_enabled { replacement.trim() } else { replacement };
+            let old = if trim_enabled {
+                raw_old.trim()
+            } else {
+                raw_old
+            };
+            let replacement = if trim_enabled {
+                replacement.trim()
+            } else {
+                replacement
+            };
 
             let mut lines: Vec<&str> = content.split('\n').collect();
             if ends_with_newline && lines.last() == Some(&"") {
@@ -551,7 +619,10 @@ impl Tool for StrictReplaceContentTool {
             let e_idx = end.min(total_lines);
 
             if s_idx >= e_idx {
-                return Err(AgentError(format!("Invalid range: {}-{} (file has {} lines)", start, end, total_lines)));
+                return Err(AgentError(format!(
+                    "Invalid range: {}-{} (file has {} lines)",
+                    start, end, total_lines
+                )));
             }
 
             let scope_text = lines[s_idx..e_idx].join("\n");
@@ -575,7 +646,9 @@ impl Tool for StrictReplaceContentTool {
             if match_count == 0 {
                 return Err(AgentError(format!(
                     "Target text not found in lines {}-{}. Try setting trim=true to ignore whitespace, or check exact indentation:\n---\n{}\n---",
-                    start, end, &raw_old[..raw_old.len().min(100)]
+                    start,
+                    end,
+                    &raw_old[..raw_old.len().min(100)]
                 )));
             }
             if match_count > 1 {
@@ -609,10 +682,13 @@ impl Tool for StrictReplaceContentTool {
             fs::copy(path_obj, &backup_path).ok();
         }
 
-        fs::write(path, &content)
-            .map_err(|e| AgentError(format!("Failed to write: {}", e)))?;
+        fs::write(path, &content).map_err(|e| AgentError(format!("Failed to write: {}", e)))?;
 
-        Ok(format!("Applied {} replacement(s) to {}", edits.len(), path))
+        Ok(format!(
+            "Applied {} replacement(s) to {}",
+            edits.len(),
+            path
+        ))
     }
 }
 
@@ -670,7 +746,10 @@ impl Tool for FindDefinitionTool {
         let pattern = match lang {
             "python" => format!("(def|class|async def)\\s+{}", regex_escape(name)),
             "javascript" | "typescript" => {
-                format!("(function|class|const|interface|type)\\s+{}", regex_escape(name))
+                format!(
+                    "(function|class|const|interface|type)\\s+{}",
+                    regex_escape(name)
+                )
             }
             _ => regex_escape(name),
         };
@@ -701,28 +780,26 @@ impl FindDefinitionTool {
         let mut finder = if rg_available {
             let mut cmd = Command::new("rg");
             cmd.arg("--files")
-               .arg("--glob")
-               .arg("*.rs")
-               .arg(search_path);
+                .arg("--glob")
+                .arg("*.rs")
+                .arg(search_path);
             cmd
         } else {
             let mut cmd = Command::new("find");
             cmd.arg(search_path)
-               .arg("-name")
-               .arg("*.rs")
-               .arg("-type")
-               .arg("f");
+                .arg("-name")
+                .arg("*.rs")
+                .arg("-type")
+                .arg("f");
             cmd
         };
 
-        let output = finder.output()
+        let output = finder
+            .output()
             .map_err(|e| AgentError(format!("Failed to find files: {}", e)))?;
 
         let output_text = String::from_utf8_lossy(&output.stdout).to_string();
-        let files: Vec<&str> = output_text
-            .lines()
-            .filter(|l| !l.is_empty())
-            .collect();
+        let files: Vec<&str> = output_text.lines().filter(|l| !l.is_empty()).collect();
 
         let mut parser = tree_sitter::Parser::new();
         if parser.set_language(&tree_sitter_rust::language()).is_err() {
@@ -758,10 +835,29 @@ impl FindDefinitionTool {
         }
     }
 
-    fn find_def_in_tree(&self, node: tree_sitter::Node, name: &str, file_path: &str, content: &str, out: &mut Vec<String>) {
+    fn find_def_in_tree(
+        &self,
+        node: tree_sitter::Node,
+        name: &str,
+        file_path: &str,
+        content: &str,
+        out: &mut Vec<String>,
+    ) {
         // Check if this node is a definition node matching our name
         let kind = node.kind();
-        let is_def = matches!(kind, "function_item" | "struct_item" | "enum_item" | "trait_item" | "type_item" | "macro_definition" | "impl_item" | "const_item" | "static_item" | "union_item");
+        let is_def = matches!(
+            kind,
+            "function_item"
+                | "struct_item"
+                | "enum_item"
+                | "trait_item"
+                | "type_item"
+                | "macro_definition"
+                | "impl_item"
+                | "const_item"
+                | "static_item"
+                | "union_item"
+        );
 
         if is_def {
             // Get the name from the first child that's an identifier or type identifier
@@ -771,22 +867,23 @@ impl FindDefinitionTool {
                     let child = cursor.node();
                     let child_kind = child.kind();
                     if matches!(child_kind, "identifier" | "type_identifier")
-                        && child.utf8_text(content.as_bytes()).ok() == Some(name) {
-                            // Found it!
-                            let start_line = node.start_position().row + 1;
-                            let end_line = node.end_position().row + 1;
-                            let mut snippet = String::new();
-                            for i in start_line.saturating_sub(1)..end_line.min(start_line + 20) {
-                                if let Some(line) = content.lines().nth(i.saturating_sub(1)) {
-                                    snippet.push_str(&format!("{:>4}: {}\n", i, line));
-                                }
+                        && child.utf8_text(content.as_bytes()).ok() == Some(name)
+                    {
+                        // Found it!
+                        let start_line = node.start_position().row + 1;
+                        let end_line = node.end_position().row + 1;
+                        let mut snippet = String::new();
+                        for i in start_line.saturating_sub(1)..end_line.min(start_line + 20) {
+                            if let Some(line) = content.lines().nth(i.saturating_sub(1)) {
+                                snippet.push_str(&format!("{:>4}: {}\n", i, line));
                             }
-                            out.push(format!(
-                                "{}:{}\n`{}` defined in {} (lines {}-{})\n\n{}",
-                                file_path, start_line, name, file_path, start_line, end_line, snippet
-                            ));
-                            return;
                         }
+                        out.push(format!(
+                            "{}:{}\n`{}` defined in {} (lines {}-{})\n\n{}",
+                            file_path, start_line, name, file_path, start_line, end_line, snippet
+                        ));
+                        return;
+                    }
                     if !cursor.goto_next_sibling() {
                         break;
                     }
@@ -806,11 +903,22 @@ impl FindDefinitionTool {
         }
     }
 
-    async fn grep_fallback(&self, name: &str, search_path: &str, _lang: &str) -> AgentResult<String> {
-        let pattern = format!("(fn|struct|enum|trait|type|impl|macro_rules!)\\s+{}", regex_escape(name));
+    async fn grep_fallback(
+        &self,
+        name: &str,
+        search_path: &str,
+        _lang: &str,
+    ) -> AgentResult<String> {
+        let pattern = format!(
+            "(fn|struct|enum|trait|type|impl|macro_rules!)\\s+{}",
+            regex_escape(name)
+        );
         let out = Command::new("grep")
-            .arg("-r").arg("-n").arg("-E")
-            .arg(&pattern).arg(search_path)
+            .arg("-r")
+            .arg("-n")
+            .arg("-E")
+            .arg(&pattern)
+            .arg(search_path)
             .output()
             .map_err(|e| AgentError(e.to_string()))?;
 
@@ -913,7 +1021,8 @@ pharmakon = Pharmakon()
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(timeout),
             child.wait_with_output(),
-        ).await;
+        )
+        .await;
 
         match result {
             Ok(Ok(output)) => {
@@ -923,12 +1032,19 @@ pharmakon = Pharmakon()
                 if output.status.success() {
                     Ok(stdout)
                 } else {
-                    Ok(format!("Exit code: {}\nStderr: {}\nStdout: {}",
-                        output.status.code().unwrap_or(-1), stderr, stdout))
+                    Ok(format!(
+                        "Exit code: {}\nStderr: {}\nStdout: {}",
+                        output.status.code().unwrap_or(-1),
+                        stderr,
+                        stdout
+                    ))
                 }
             }
             Ok(Err(e)) => Err(AgentError(format!("Python execution error: {}", e))),
-            Err(_) => Err(AgentError(format!("Python timed out after {} seconds", timeout))),
+            Err(_) => Err(AgentError(format!(
+                "Python timed out after {} seconds",
+                timeout
+            ))),
         }
     }
 }

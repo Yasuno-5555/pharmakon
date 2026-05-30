@@ -1,5 +1,5 @@
 use pharmakon_common::AgentError;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -113,8 +113,8 @@ pub fn find_rust_function_span(content: &str, name: &str) -> Option<(usize, usiz
     let bytes = content.as_bytes();
     let mut depth = 0i32;
     let mut end = None;
-    for i in brace_start..bytes.len() {
-        match bytes[i] {
+    for (i, byte) in bytes.iter().enumerate().skip(brace_start) {
+        match byte {
             b'{' => depth += 1,
             b'}' => {
                 depth -= 1;

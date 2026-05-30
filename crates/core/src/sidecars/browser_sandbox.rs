@@ -46,10 +46,10 @@ impl BrowserSandbox {
                 .as_ref()
                 .map(|n| n.iter().any(|name| name.contains(&self.container_name)))
                 .unwrap_or(false)
-        })
-            && c.state.as_deref() == Some("running") {
-                return Ok(3030); // Use new port
-            }
+        }) && c.state.as_deref() == Some("running")
+        {
+            return Ok(3030); // Use new port
+        }
 
         // 3. Create and start container
         let mut port_bindings = HashMap::new();

@@ -14,7 +14,7 @@
 //!       SKILL.md
 //!     ...
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -73,15 +73,17 @@ impl SkillRegistry {
         let mut count = 0;
         for path in &self.search_paths.clone() {
             if path.exists()
-                && let Ok(entries) = std::fs::read_dir(path) {
-                    for entry in entries.flatten() {
-                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                            && let Ok(skill) = self.load_skill_from_dir(&entry.path()) {
-                                self.skills.insert(skill.id.clone(), skill);
-                                count += 1;
-                            }
+                && let Ok(entries) = std::fs::read_dir(path)
+            {
+                for entry in entries.flatten() {
+                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                        && let Ok(skill) = self.load_skill_from_dir(&entry.path())
+                    {
+                        self.skills.insert(skill.id.clone(), skill);
+                        count += 1;
                     }
                 }
+            }
         }
         Ok(count)
     }
@@ -96,25 +98,28 @@ impl SkillRegistry {
         let content = std::fs::read_to_string(&skill_md)
             .context(format!("Failed to read {}", skill_md.display()))?;
 
-        let id = dir.file_name()
+        let id = dir
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
         // Extract name from first heading or use id
-        let name = content.lines()
+        let name = content
+            .lines()
             .find(|l| l.starts_with("# "))
             .map(|l| l.trim_start_matches("# ").to_string())
             .unwrap_or_else(|| id.clone());
 
         // Find companion files (referenced as relative paths)
-        let companion_files: Vec<PathBuf> = content.lines()
+        let companion_files: Vec<PathBuf> = content
+            .lines()
             .filter(|l| l.contains("scripts/") || l.contains("tools/") || l.contains("references/"))
             .filter_map(|l| {
                 let trimmed = l.trim();
                 if let Some(start) = trimmed.find('`') {
-                    let end = trimmed[start+1..].find('`')?;
-                    let path = &trimmed[start+1..start+1+end];
+                    let end = trimmed[start + 1..].find('`')?;
+                    let path = &trimmed[start + 1..start + 1 + end];
                     let full = dir.join(path);
                     if full.exists() { Some(full) } else { None }
                 } else {
@@ -157,7 +162,9 @@ impl SkillRegistry {
         out.push_str("Use `load_skill <id>` to activate a skill's instructions.\n\n");
         for skill in self.skills.values() {
             // Extract first sentence of content for description
-            let desc = skill.content.lines()
+            let desc = skill
+                .content
+                .lines()
                 .find(|l| !l.starts_with('#') && !l.is_empty())
                 .unwrap_or(&skill.name)
                 .trim()
@@ -222,7 +229,9 @@ impl SkillLoaderTool {
 
 #[async_trait::async_trait]
 impl pharmakon_common::Tool for SkillLoaderTool {
-    fn name(&self) -> &str { "load_skill" }
+    fn name(&self) -> &str {
+        "load_skill"
+    }
 
     fn description(&self) -> &str {
         "Load a domain-specific skill's instructions into the agent's working context. \

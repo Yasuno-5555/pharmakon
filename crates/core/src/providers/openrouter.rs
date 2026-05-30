@@ -123,27 +123,24 @@ fn build_or_messages(request: &CompletionRequest) -> Vec<ORMessage> {
             tool_call_id: None,
         });
     }
-    msgs.extend(request
-        .messages
-        .iter()
-        .map(|m| ORMessage {
-            role: m.role.clone(),
-            content: m.content.as_ref().map(map_content),
-            tool_calls: m.tool_calls.as_ref().map(|calls| {
-                calls
-                    .iter()
-                    .map(|c| ORToolCall {
-                        id: c.id.clone(),
-                        r#type: c.r#type.clone(),
-                        function: ORFunctionCall {
-                            name: c.function.name.clone(),
-                            arguments: c.function.arguments.clone(),
-                        },
-                    })
-                    .collect()
-            }),
-            tool_call_id: m.tool_call_id.clone(),
-        }));
+    msgs.extend(request.messages.iter().map(|m| ORMessage {
+        role: m.role.clone(),
+        content: m.content.as_ref().map(map_content),
+        tool_calls: m.tool_calls.as_ref().map(|calls| {
+            calls
+                .iter()
+                .map(|c| ORToolCall {
+                    id: c.id.clone(),
+                    r#type: c.r#type.clone(),
+                    function: ORFunctionCall {
+                        name: c.function.name.clone(),
+                        arguments: c.function.arguments.clone(),
+                    },
+                })
+                .collect()
+        }),
+        tool_call_id: m.tool_call_id.clone(),
+    }));
     msgs
 }
 
@@ -180,10 +177,7 @@ impl OpenRouterModel {
         self
     }
 
-    fn request_builder(
-        &self,
-        body: &impl Serialize,
-    ) -> reqwest::RequestBuilder {
+    fn request_builder(&self, body: &impl Serialize) -> reqwest::RequestBuilder {
         let mut builder = self
             .client
             .post("https://openrouter.ai/api/v1/chat/completions")
@@ -259,10 +253,11 @@ impl AgentModel for OpenRouterModel {
             .ok_or_else(|| AgentError("No choices returned from OpenRouter".to_string()))?;
 
         Ok(CompletionResponse {
-            content: choice.message.content.as_ref().and_then(|v| {
-                v.as_str()
-                    .map(|t| MessageContent::Text(t.to_string()))
-            }),
+            content: choice
+                .message
+                .content
+                .as_ref()
+                .and_then(|v| v.as_str().map(|t| MessageContent::Text(t.to_string()))),
             tool_calls: choice.message.tool_calls.as_ref().map(|calls| {
                 calls
                     .iter()
@@ -310,8 +305,7 @@ impl AgentModel for OpenRouterModel {
             }),
         };
 
-        let mut json_body =
-            serde_json::to_value(&body).map_err(|e| AgentError(e.to_string()))?;
+        let mut json_body = serde_json::to_value(&body).map_err(|e| AgentError(e.to_string()))?;
         json_body
             .as_object_mut()
             .unwrap()
@@ -352,15 +346,11 @@ impl AgentModel for OpenRouterModel {
                         }
                         if let Some(data) = line.strip_prefix("data: ")
                             && let Ok(json) = serde_json::from_str::<Value>(data)
-                                && let Some(content) =
-                                    json["choices"][0]["delta"]["content"].as_str()
-                                    && !content.is_empty()
-                                    {
-                                        return Some((
-                                            Ok(content.to_string()),
-                                            (byte_stream, buffer),
-                                        ));
-                                    }
+                            && let Some(content) = json["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            return Some((Ok(content.to_string()), (byte_stream, buffer)));
+                        }
                         continue;
                     }
 

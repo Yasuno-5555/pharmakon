@@ -1,20 +1,28 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::manual_strip,
+    clippy::trim_split_whitespace
+)]
+
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode, KeyModifiers,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use pharmakon_common::Config;
 use pharmakon_common::Event;
 use pharmakon_core::agent::Agent;
 use pharmakon_core::providers::registry::ModelRegistry;
-use pharmakon_common::Config;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
     style::{Color, Style},
     text::Span,
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 use std::io;
 use std::sync::Arc;
@@ -22,32 +30,29 @@ use std::time::{Duration, Instant};
 
 struct DetailedToolLog {
     name: String,
-    args: String,
     status: &'static str,
     result: String,
     latency_ms: Option<u64>,
-    timestamp: chrono::DateTime<chrono::Local>,
     start_time: Instant,
 }
 
 struct LocalApproval {
     id: String,
     tool: String,
-    args: String,
 }
 
 /// Format a tool call as a compact inline card.
 fn format_tool_call(name: &str, args: &str) -> String {
     let (glyph, label, _) = get_tool_family_info(name);
-    format!(
-        " {} {} │ {} {}",
-        glyph, label, name, truncate(args, 60)
-    )
+    format!(" {} {} │ {} {}", glyph, label, name, truncate(args, 60))
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() }
-    else { format!("{}...", &s[..max.saturating_sub(3)]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max.saturating_sub(3)])
+    }
 }
 
 /// Run the Pharmakon TUI — Claude Code inspired single-pane chat interface.
@@ -111,13 +116,14 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
     });
 
     // Helper macro / lambda to draw the UI state
-    let mut draw_ui = |terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-                       active_model: &str,
-                       status: &str,
-                       active_chat_task: &Option<tokio::task::JoinHandle<()>>,
-                       messages: &[(String, String)],
-                       chat_scroll: Option<usize>,
-                       input_buffer: &str| -> Result<()> {
+    let draw_ui = |terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+                   active_model: &str,
+                   status: &str,
+                   active_chat_task: &Option<tokio::task::JoinHandle<()>>,
+                   messages: &[(String, String)],
+                   chat_scroll: Option<usize>,
+                   input_buffer: &str|
+     -> Result<()> {
         terminal.draw(|f| {
             let area = f.area();
             if area.height < 5 || area.width < 20 {
@@ -137,10 +143,14 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
             let header_text = format!(
                 " 💊 Pharmakon  |  {}  |  {}",
                 active_model,
-                if active_chat_task.is_some() { "⚙ working..." } else { status }
+                if active_chat_task.is_some() {
+                    "⚙ working..."
+                } else {
+                    status
+                }
             );
-            let header = Paragraph::new(header_text)
-                .style(Style::default().fg(Color::Rgb(140, 140, 160)));
+            let header =
+                Paragraph::new(header_text).style(Style::default().fg(Color::Rgb(140, 140, 160)));
             f.render_widget(header, vert[0]);
 
             // ── Chat area ──
@@ -166,7 +176,8 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                         display_lines.push((Color::DarkGray, String::new()));
                     }
                     "thought" => {
-                        display_lines.push((Color::Rgb(120, 120, 140), format!("  💭 {}", content)));
+                        display_lines
+                            .push((Color::Rgb(120, 120, 140), format!("  💭 {}", content)));
                     }
                     "tool" => {
                         display_lines.push((Color::Magenta, format!(" {}", content)));
@@ -209,19 +220,30 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                 } else {
                     0
                 }
-            } else { total_lines.saturating_sub(chat_height) };
+            } else {
+                total_lines.saturating_sub(chat_height)
+            };
 
             let visible_lines: Vec<ListItem> = display_lines[start_idx..]
                 .iter()
-                .map(|(color, text)| ListItem::new(text.as_str()).style(Style::default().fg(*color)))
+                .map(|(color, text)| {
+                    ListItem::new(text.as_str()).style(Style::default().fg(*color))
+                })
                 .collect();
 
-            let chat_block = List::new(visible_lines)
-                .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Rgb(50, 50, 60))));
+            let chat_block = List::new(visible_lines).block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(Color::Rgb(50, 50, 60))),
+            );
             f.render_widget(chat_block, vert[1]);
 
             // ── Input box ──
-            let input_prefix = if input_buffer.starts_with('/') { "/" } else { "> " };
+            let input_prefix = if input_buffer.starts_with('/') {
+                "/"
+            } else {
+                "> "
+            };
             let input_text = format!("{}{}", input_prefix, input_buffer);
 
             let (border_color, input_title) = if active_chat_task.is_some() {
@@ -237,7 +259,10 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(border_color))
-                        .title(Span::styled(input_title, Style::default().fg(Color::DarkGray))),
+                        .title(Span::styled(
+                            input_title,
+                            Style::default().fg(Color::DarkGray),
+                        )),
                 )
                 .style(Style::default().fg(Color::White));
             f.render_widget(input_para, vert[2]);
@@ -246,7 +271,15 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
     };
 
     // Perform initial draw
-    draw_ui(&mut terminal, &active_model, &status, &active_chat_task, &messages, chat_scroll, &input_buffer)?;
+    draw_ui(
+        &mut terminal,
+        &active_model,
+        &status,
+        &active_chat_task,
+        &messages,
+        chat_scroll,
+        &input_buffer,
+    )?;
 
     loop {
         let mut need_redraw = false;
@@ -295,11 +328,9 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
 
                                     detailed_tool_logs.push(DetailedToolLog {
                                         name: name.clone(),
-                                        args: args_str,
                                         status: "RUNNING",
                                         result: String::new(),
                                         latency_ms: None,
-                                        timestamp: chrono::Local::now(),
                                         start_time: Instant::now(),
                                     });
                                 }
@@ -322,12 +353,11 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                     messages.push(("result".to_string(), format!("  ✔ {} ➔ {}", tool_name, preview)));
                                 }
                                 Event::ApprovalRequest { id, tool, args } => {
-                                    let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
+                                    let _args_str = serde_json::to_string_pretty(args).unwrap_or_default();
                                     status = "Awaiting authorization...".to_string();
                                     pending_approvals.push(LocalApproval {
                                         id: id.clone(),
                                         tool: tool.clone(),
-                                        args: args_str,
                                     });
                                 }
                                 Event::Error { message } => {
@@ -370,7 +400,6 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                 agent.approve(a.id, true);
                                 status = format!("Approved: {}", a.tool);
                             }
-                            need_redraw = true;
                             continue;
                         }
                         if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('x') {
@@ -379,21 +408,18 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                 agent.approve(a.id, false);
                                 status = format!("Rejected: {}", a.tool);
                             }
-                            need_redraw = true;
                             continue;
                         }
 
                         match key.code {
                             KeyCode::PageUp => {
                                 chat_scroll = Some(chat_scroll.unwrap_or(0).saturating_add(5));
-                                need_redraw = true;
                             }
                             KeyCode::PageDown => {
                                 if let Some(s) = chat_scroll.as_mut() {
                                     *s = s.saturating_sub(5);
                                     if *s == 0 { chat_scroll = None; }
                                 }
-                                need_redraw = true;
                             }
                             KeyCode::Esc => {
                                 if let Some(ref handle) = active_chat_task {
@@ -404,7 +430,6 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                 } else {
                                     input_buffer.clear();
                                 }
-                                need_redraw = true;
                             }
                             KeyCode::Enter => {
                                 if is_busy {
@@ -420,7 +445,6 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                     detailed_tool_logs.clear();
                                     messages.push(("system".to_string(), "Session reset.".to_string()));
                                     status = "Ready.".to_string();
-                                    need_redraw = true;
                                     continue;
                                 }
                                 if msg == "/revert" || msg == "/undo" {
@@ -438,7 +462,6 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                             status = format!("Revert failed: {}", e);
                                         }
                                     }
-                                    need_redraw = true;
                                     continue;
                                 }
                                 if msg.starts_with("/model") {
@@ -488,7 +511,6 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                     } else {
                                         messages.push(("system".to_string(), "Usage: /model [--save] <model_id>".to_string()));
                                     }
-                                    need_redraw = true;
                                     continue;
                                 }
                                 if msg == "/exit" || msg == "/quit" { break; }
@@ -502,15 +524,12 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                                         log::error!("Agent error: {}", e);
                                     }
                                 }));
-                                need_redraw = true;
                             }
                             KeyCode::Char(c) => {
                                 input_buffer.push(c);
-                                need_redraw = true;
                             }
                             KeyCode::Backspace => {
                                 input_buffer.pop();
-                                need_redraw = true;
                             }
                             _ => {}
                         }
@@ -522,7 +541,7 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
                 }
             }
             // 3. Task completion
-            res = async {
+            _task_result = async {
                 if let Some(ref mut handle) = active_chat_task {
                     let _ = handle.await;
                 } else {
@@ -545,12 +564,24 @@ pub async fn run_tui(agent: Arc<Agent>, initial_message: Option<String>) -> Resu
         }
 
         if need_redraw {
-            draw_ui(&mut terminal, &active_model, &status, &active_chat_task, &messages, chat_scroll, &input_buffer)?;
+            draw_ui(
+                &mut terminal,
+                &active_model,
+                &status,
+                &active_chat_task,
+                &messages,
+                chat_scroll,
+                &input_buffer,
+            )?;
         }
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -574,9 +605,6 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
     });
 
     let mut event_rx = agent.event_tx.subscribe();
-    // Track whether we're inside a chat call to show events live
-    let mut in_chat = false;
-
     loop {
         // Drain pending events (from previous chat if any)
         while let Ok(event) = event_rx.try_recv() {
@@ -584,7 +612,7 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
                 Event::AgentResponse { content } => {
                     println!("\n{}\n", content);
                 }
-                Event::AgentResponseChunk { chunk, .. } if in_chat => {
+                Event::AgentResponseChunk { chunk, .. } => {
                     print!("{}", chunk);
                     io::stdout().flush().ok();
                 }
@@ -613,7 +641,9 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let input = input.trim().to_string();
-        if input.is_empty() { continue; }
+        if input.is_empty() {
+            continue;
+        }
 
         match input.as_str() {
             "/quit" | "/exit" => break,
@@ -654,18 +684,27 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
                         let states = agent.session_states.lock().await;
                         let est_tokens = if let Some(state) = states.get(&session_id) {
                             let s = state.lock().await;
-                            s.history.iter().map(|m| m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0)).sum::<usize>() / 4
+                            s.history
+                                .iter()
+                                .map(|m| {
+                                    m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0)
+                                })
+                                .sum::<usize>()
+                                / 4
                         } else {
                             0
                         };
                         let est_cost = (est_tokens as f64) * 0.000001;
-                        println!("⚠ Context re-processing cost: ~{} tokens (${:.4})", est_tokens, est_cost);
+                        println!(
+                            "⚠ Context re-processing cost: ~{} tokens (${:.4})",
+                            est_tokens, est_cost
+                        );
 
                         if save {
                             if let Ok(mut cfg) = Config::load() {
                                 if let Some(idx) = model_id.find('/') {
                                     cfg.default_agent.provider = model_id[..idx].to_string();
-                                    cfg.default_agent.model = model_id[idx+1..].to_string();
+                                    cfg.default_agent.model = model_id[idx + 1..].to_string();
                                 } else {
                                     cfg.default_agent.model = model_id.to_string();
                                 }
@@ -685,8 +724,6 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
             _ => {}
         }
 
-        // Send and show live events
-        in_chat = true;
         match agent.chat(&input).await {
             Ok(response) => {
                 if !response.is_empty() {
@@ -697,7 +734,6 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
                 eprintln!("\u{2716} Error: {}", e);
             }
         }
-        in_chat = false;
         println!();
     }
 
@@ -708,7 +744,9 @@ pub async fn run_repl(agent: Arc<Agent>) -> Result<()> {
 fn get_tool_family_info(name: &str) -> (&'static str, &'static str, Color) {
     match name {
         "list_dir" | "view_file" => ("\u{25B7}", "read", Color::Blue),
-        "modify_code" | "replace_file_content" | "multi_replace_file_content" | "write_to_file" => ("\u{25C6}", "patch", Color::Green),
+        "modify_code" | "replace_file_content" | "multi_replace_file_content" | "write_to_file" => {
+            ("\u{25C6}", "patch", Color::Green)
+        }
         "shell" | "codeact" => ("\u{25B6}", "run", Color::Magenta),
         "grep_search" => ("\u{2315}", "find", Color::Cyan),
         _ => ("\u{2022}", "tool", Color::DarkGray),

@@ -2,9 +2,10 @@ import React, { useEffect } from 'react';
 import { Send, Trash2, Bot } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import MessageItem from '../components/MessageItem';
+import type { Message } from '../types';
 
 interface ChatViewProps {
-  messages: any[];
+  messages: Message[];
   input: string;
   setInput: (val: string) => void;
   sendMessage: (e?: React.FormEvent) => void;
@@ -17,12 +18,13 @@ interface ChatViewProps {
   switchModel: (id: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  onInteractiveResponse: (elementId: string, action: string) => void;
 }
 
 const ChatView: React.FC<ChatViewProps> = ({
   messages, input, setInput, sendMessage, handleKeyDown, handleInput,
   connected, clearMessages, currentModel, availableModels, switchModel,
-  textareaRef, messagesEndRef
+  textareaRef, messagesEndRef, onInteractiveResponse,
 }) => {
   // Auto-expand textarea
   useEffect(() => {
@@ -30,7 +32,7 @@ const ChatView: React.FC<ChatViewProps> = ({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
-  }, [input]);
+  }, [input, textareaRef]);
 
   return (
     <div className="chat-view">
@@ -80,7 +82,11 @@ const ChatView: React.FC<ChatViewProps> = ({
             </motion.div>
           ) : (
             messages.map(msg => (
-              <MessageItem key={msg.id} msg={msg} socket={null as any} />
+              <MessageItem
+                key={msg.id}
+                msg={msg}
+                onInteractiveResponse={onInteractiveResponse}
+              />
             ))
           )}
         </AnimatePresence>

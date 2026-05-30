@@ -1,12 +1,15 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, ExecutionProfile, Reversibility, SideEffectLevel, Tool, ToolCategory};
+use pharmakon_common::{
+    AgentError, AgentResult, ExecutionProfile, Reversibility, SideEffectLevel, Tool, ToolCategory,
+};
 use reqwest::Client;
 use serde_json::{Value, json};
 use std::time::Duration;
 
 const MAX_BODY_SIZE: u64 = 5 * 1024 * 1024; // 5MB
 const DEFAULT_TIMEOUT: u64 = 30;
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; Pharmakon/0.1; +https://github.com/yasuno-5555/Pharmakon)";
+const USER_AGENT: &str =
+    "Mozilla/5.0 (compatible; Pharmakon/0.1; +https://github.com/yasuno-5555/Pharmakon)";
 
 /// Simple HTML-to-text conversion that extracts readable content.
 /// Uses the scraper crate for proper HTML parsing.
@@ -47,25 +50,32 @@ fn html_to_text(html: &str, max_length: usize) -> String {
 
     // Extract title and description
     if let Ok(sel) = Selector::parse("title")
-        && let Some(el) = clean_doc.select(&sel).next() {
-            let title = el.text().collect::<String>().trim().to_string();
-            if !title.is_empty() {
-                output.push_str(&format!("# {}\n\n", title));
-            }
+        && let Some(el) = clean_doc.select(&sel).next()
+    {
+        let title = el.text().collect::<String>().trim().to_string();
+        if !title.is_empty() {
+            output.push_str(&format!("# {}\n\n", title));
         }
+    }
 
     if let Ok(sel) = Selector::parse("meta[name=description]")
         && let Some(el) = clean_doc.select(&sel).next()
-            && let Some(content) = el.value().attr("content")
-                && !content.is_empty() {
-                    output.push_str(&format!("> {}\n\n", content));
-                }
+        && let Some(content) = el.value().attr("content")
+        && !content.is_empty()
+    {
+        output.push_str(&format!("> {}\n\n", content));
+    }
 
     // Extract text content
     if let Some(ref sel) = p_selector {
         for element in clean_doc.select(sel) {
             let tag = element.value().name();
-            let text: String = element.text().collect::<Vec<_>>().join(" ").trim().to_string();
+            let text: String = element
+                .text()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_string();
 
             if text.is_empty() {
                 continue;
@@ -92,7 +102,10 @@ fn html_to_text(html: &str, max_length: usize) -> String {
             output.push_str(&format!("{}{}{}\n", prefix, text, suffix));
 
             // Add blank line after headings and blockquotes
-            if matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre") {
+            if matches!(
+                tag,
+                "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre"
+            ) {
                 output.push('\n');
             }
 
@@ -110,28 +123,29 @@ fn html_to_text(html: &str, max_length: usize) -> String {
 
     // Extract links with markers
     if output.len() < max_length / 2
-        && let Some(ref sel) = a_selector {
-            for element in clean_doc.select(sel) {
-                if let Some(href) = element.value().attr("href") {
-                    let text: String = element.text().collect();
-                    let text = text.trim();
-                    if text.is_empty() || href.starts_with('#') || href.starts_with("javascript:") {
-                        continue;
-                    }
-                    link_counter += 1;
-                    let href_clean = if href.starts_with('/') {
-                        // Relative URL — skip, can't resolve without base
-                        continue;
-                    } else {
-                        href
-                    };
-                    links.push(format!("[{}] {} — {}", link_counter, text, href_clean));
-                    if links.len() >= 20 {
-                        break;
-                    }
+        && let Some(ref sel) = a_selector
+    {
+        for element in clean_doc.select(sel) {
+            if let Some(href) = element.value().attr("href") {
+                let text: String = element.text().collect();
+                let text = text.trim();
+                if text.is_empty() || href.starts_with('#') || href.starts_with("javascript:") {
+                    continue;
+                }
+                link_counter += 1;
+                let href_clean = if href.starts_with('/') {
+                    // Relative URL — skip, can't resolve without base
+                    continue;
+                } else {
+                    href
+                };
+                links.push(format!("[{}] {} — {}", link_counter, text, href_clean));
+                if links.len() >= 20 {
+                    break;
                 }
             }
         }
+    }
 
     if !links.is_empty() {
         output.push_str("\n\n---\nLinks:\n");
@@ -210,33 +224,29 @@ impl Tool for WebFetchTool {
         // Basic URL validation
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return Err(AgentError(format!(
-                "Invalid URL: '{}'. URL must start with http:// or https://", url
+                "Invalid URL: '{}'. URL must start with http:// or https://",
+                url
             )));
         }
 
-        let response = self.client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    AgentError(format!("Request timed out after {}s: {}", DEFAULT_TIMEOUT, url))
-                } else if e.is_connect() {
-                    AgentError(format!("Connection failed: {} ({})", url, e))
-                } else if e.is_redirect() {
-                    AgentError(format!("Too many redirects: {}", url))
-                } else {
-                    AgentError(format!("Request failed: {} ({})", url, e))
-                }
-            })?;
+        let response = self.client.get(url).send().await.map_err(|e| {
+            if e.is_timeout() {
+                AgentError(format!(
+                    "Request timed out after {}s: {}",
+                    DEFAULT_TIMEOUT, url
+                ))
+            } else if e.is_connect() {
+                AgentError(format!("Connection failed: {} ({})", url, e))
+            } else if e.is_redirect() {
+                AgentError(format!("Too many redirects: {}", url))
+            } else {
+                AgentError(format!("Request failed: {} ({})", url, e))
+            }
+        })?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(AgentError(format!(
-                "HTTP {}: {}",
-                status.as_u16(),
-                url
-            )));
+            return Err(AgentError(format!("HTTP {}: {}", status.as_u16(), url)));
         }
 
         let content_type = response
@@ -266,12 +276,17 @@ impl Tool for WebFetchTool {
                 let truncated: String = body.chars().take(max_chars).collect();
                 return Ok(format!(
                     "Content-Type: {}\nSize: {} bytes (showing {} chars)\n\n{}",
-                    content_type, body.len(), max_chars, truncated
+                    content_type,
+                    body.len(),
+                    max_chars,
+                    truncated
                 ));
             }
             return Ok(format!(
                 "Content-Type: {}\nSize: {} bytes\n\n{}",
-                content_type, body.len(), body
+                content_type,
+                body.len(),
+                body
             ));
         }
 

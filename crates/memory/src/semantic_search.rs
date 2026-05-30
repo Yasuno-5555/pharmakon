@@ -1,4 +1,4 @@
-use crate::vector_store::{VectorStore, InMemoryVectorStore};
+use crate::vector_store::{InMemoryVectorStore, VectorStore};
 use anyhow::Result;
 use pharmakon_common::EmbeddingModel;
 use std::sync::Arc;

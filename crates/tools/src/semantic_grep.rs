@@ -1,9 +1,9 @@
+use crate::codex_utils::tokenize;
 use async_trait::async_trait;
 use pharmakon_common::{AgentError, AgentResult, Tool, ToolCategory};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::fs;
-use crate::codex_utils::{tokenize};
 
 pub struct SemanticGrepTool;
 #[async_trait]
@@ -79,14 +79,15 @@ impl Tool for SemanticGrepTool {
                 }
             }
             if let Some((line, preview)) = best_line
-                && best_score > 0.0 {
-                    matches.push(json!({
-                        "path": path_text,
-                        "line": line,
-                        "score": best_score,
-                        "preview": preview.trim()
-                    }));
-                }
+                && best_score > 0.0
+            {
+                matches.push(json!({
+                    "path": path_text,
+                    "line": line,
+                    "score": best_score,
+                    "preview": preview.trim()
+                }));
+            }
         }
         matches.sort_by(|a, b| {
             b["score"]

@@ -6,9 +6,7 @@
 //! - `deepseek-v4-flash` model for general-purpose tasks
 //! - Supports function calling with the same tool schema
 
-use crate::model::{
-    AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse,
-};
+use crate::model::{AgentError, AgentModel, AgentResult, CompletionRequest, CompletionResponse};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -152,7 +150,11 @@ impl DeepSeekModel {
         self
     }
 
-    fn map_messages(&self, messages: Vec<crate::model::Message>, system_instruction: Option<&str>) -> Vec<DeepSeekMessage> {
+    fn map_messages(
+        &self,
+        messages: Vec<crate::model::Message>,
+        system_instruction: Option<&str>,
+    ) -> Vec<DeepSeekMessage> {
         let mut msgs = Vec::new();
         if let Some(sys) = system_instruction {
             msgs.push(DeepSeekMessage {
@@ -162,33 +164,28 @@ impl DeepSeekModel {
                 tool_call_id: None,
             });
         }
-        msgs.extend(messages
-            .into_iter()
-            .map(|m| DeepSeekMessage {
-                role: m.role,
-                content: m.content.as_ref().map(map_to_deepseek_content),
-                tool_calls: m.tool_calls.map(|calls| {
-                    calls
-                        .into_iter()
-                        .map(|c| DeepSeekToolCall {
-                            id: c.id,
-                            r#type: c.r#type,
-                            function: DeepSeekFunctionCall {
-                                name: c.function.name,
-                                arguments: c.function.arguments,
-                            },
-                        })
-                        .collect()
-                }),
-                tool_call_id: m.tool_call_id,
-            }));
+        msgs.extend(messages.into_iter().map(|m| DeepSeekMessage {
+            role: m.role,
+            content: m.content.as_ref().map(map_to_deepseek_content),
+            tool_calls: m.tool_calls.map(|calls| {
+                calls
+                    .into_iter()
+                    .map(|c| DeepSeekToolCall {
+                        id: c.id,
+                        r#type: c.r#type,
+                        function: DeepSeekFunctionCall {
+                            name: c.function.name,
+                            arguments: c.function.arguments,
+                        },
+                    })
+                    .collect()
+            }),
+            tool_call_id: m.tool_call_id,
+        }));
         msgs
     }
 
-    fn map_tools(
-        &self,
-        tools: Vec<crate::model::ToolDefinition>,
-    ) -> Vec<DeepSeekTool> {
+    fn map_tools(&self, tools: Vec<crate::model::ToolDefinition>) -> Vec<DeepSeekTool> {
         tools
             .into_iter()
             .map(|t| DeepSeekTool {
@@ -323,14 +320,11 @@ impl AgentModel for DeepSeekModel {
                         }
                         if let Some(data) = line.strip_prefix("data: ")
                             && let Ok(json) = serde_json::from_str::<serde_json::Value>(data)
-                            && let Some(content) =
-                                json["choices"][0]["delta"]["content"].as_str()
-                                && !content.is_empty() {
-                                    return Some((
-                                        Ok(content.to_string()),
-                                        (byte_stream, buffer),
-                                    ));
-                                }
+                            && let Some(content) = json["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            return Some((Ok(content.to_string()), (byte_stream, buffer)));
+                        }
                         continue;
                     }
 

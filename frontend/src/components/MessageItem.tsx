@@ -1,25 +1,16 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Bot, Terminal, Sparkles, BookOpen } from 'lucide-react';
-
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import type { Components } from 'react-markdown';
+import type { Message } from '../types';
 
 interface MessageItemProps {
-  msg: {
-    id: string;
-    role: string;
-    content?: string;
-    thought?: string;
-    images?: string[];
-    toolCall?: { name: string; args: any };
-    toolResult?: { result: string };
-    interactive?: { id: string; components: any[] };
-    context_used?: string[];
-  };
-  socket: WebSocket | null;
+  msg: Message;
+  onInteractiveResponse?: (elementId: string, action: string) => void;
 }
 
 interface ToolFamilyInfo {
@@ -83,7 +74,37 @@ const getToolFamilyInfo = (name: string): ToolFamilyInfo => {
   };
 };
 
-const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
+const markdownComponents: Components = {
+  code({ className, children }) {
+    const match = /language-(\w+)/.exec(className || '');
+    return match ? (
+      <div className="code-block-container">
+        <div className="code-header">
+          <span>{match[1].toUpperCase()}</span>
+        </div>
+        <SyntaxHighlighter
+          style={vscDarkPlus}
+          language={match[1]}
+          PreTag="div"
+          customStyle={{
+            margin: 0,
+            padding: '16px',
+            background: 'rgba(0,0,0,0.3)',
+            fontSize: '0.85rem',
+          }}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      </div>
+    ) : (
+      <code className="inline-code">
+        {children}
+      </code>
+    );
+  },
+};
+
+const MessageItem: React.FC<MessageItemProps> = ({ msg, onInteractiveResponse }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 15, scale: 0.98 }}
@@ -189,35 +210,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
             {msg.content && (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                components={{
-                  code({node, inline, className, children, ...props}: any) {
-                    const match = /language-(\w+)/.exec(className || '')
-                    return !inline && match ? (
-                      <div className="code-block-container">
-                        <div className="code-header">
-                          <span>{match[1].toUpperCase()}</span>
-                        </div>
-                        <SyntaxHighlighter
-                          {...props}
-                          children={String(children).replace(/\n$/, '')}
-                          style={vscDarkPlus}
-                          language={match[1]}
-                          PreTag="div"
-                          customStyle={{
-                            margin: 0,
-                            padding: '16px',
-                            background: 'rgba(0,0,0,0.3)',
-                            fontSize: '0.85rem'
-                          }}
-                        />
-                      </div>
-                    ) : (
-                      <code {...props} className="inline-code">
-                        {children}
-                      </code>
-                    )
-                  }
-                }}
+                components={markdownComponents}
               >
                 {msg.content}
               </ReactMarkdown>
@@ -240,13 +233,17 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, socket }) => {
 
         {msg.interactive && (
           <div className="interactive-container">
-            {msg.interactive.components.map((comp: any, i: number) => {
+            {msg.interactive.components.map((comp, i) => {
               if (comp.type === 'Button') {
                 return (
                   <button
                     key={i}
                     className={`premium-btn-${comp.payload.style || 'primary'}`}
-                    onClick={() => socket?.send(JSON.stringify({ type: 'InteractiveResponse', payload: { element_id: comp.payload.id, action: 'click' } }))}
+                    onClick={() => {
+                      if (comp.payload.id) {
+                        onInteractiveResponse?.(comp.payload.id, 'click');
+                      }
+                    }}
                   >
                     {comp.payload.label}
                   </button>

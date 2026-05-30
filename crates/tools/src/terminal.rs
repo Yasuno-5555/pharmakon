@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use pharmakon_common::{AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel, Tool};
+use pharmakon_common::{
+    AgentError, AgentResult, ExecutionProfile, FilesystemScope, Reversibility, SideEffectLevel,
+    Tool,
+};
 use serde_json::{Value, json};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -101,11 +104,14 @@ impl Tool for TerminalTool {
             .as_str()
             .ok_or_else(|| AgentError("Missing command".to_string()))?;
         let reset = args["reset"].as_bool().unwrap_or(false);
-        let timeout_secs = args["timeout"].as_u64().unwrap_or(30).max(1).min(300);
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(30).clamp(1, 300);
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
         if args["dry_run"].as_bool().unwrap_or(false) {
-            return Ok(format!("[DRY RUN] Would run in persistent terminal: {}", command));
+            return Ok(format!(
+                "[DRY RUN] Would run in persistent terminal: {}",
+                command
+            ));
         }
 
         if reset {
@@ -129,7 +135,10 @@ impl Tool for TerminalTool {
         };
 
         // Send command with a unique completion marker
-        let marker = format!("__PHARM_DONE_{}__", uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let marker = format!(
+            "__PHARM_DONE_{}__",
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        );
         let cmd_line = format!("{}; echo \"{}\"\n", full_command, marker);
 
         session
@@ -250,7 +259,7 @@ impl Tool for ShellTool {
             .as_str()
             .or_else(|| args["cmd"].as_str())
             .ok_or_else(|| AgentError("Missing command".to_string()))?;
-        let timeout_secs = args["timeout"].as_u64().unwrap_or(60).max(1).min(300);
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(60).clamp(1, 300);
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
         if args["dry_run"].as_bool().unwrap_or(false) {
@@ -270,7 +279,8 @@ impl Tool for ShellTool {
             child.current_dir(wd);
         }
 
-        let spawned = child.spawn()
+        let spawned = child
+            .spawn()
             .map_err(|e| AgentError(format!("Failed to spawn shell: {}", e)))?;
 
         let result = tokio::time::timeout(timeout_duration, spawned.wait_with_output()).await;
@@ -284,12 +294,16 @@ impl Tool for ShellTool {
                     Ok(stdout)
                 } else {
                     let code = output.status.code().unwrap_or(-1);
-                    Ok(format!("Exit code: {}\nStdout: {}\nStderr: {}", code, stdout, stderr))
+                    Ok(format!(
+                        "Exit code: {}\nStdout: {}\nStderr: {}",
+                        code, stdout, stderr
+                    ))
                 }
             }
             Ok(Err(e)) => Err(AgentError(format!("Shell execution failed: {}", e))),
             Err(_) => Err(AgentError(format!(
-                "Command timed out after {}s. Use terminal tool for long-running commands.", timeout_secs
+                "Command timed out after {}s. Use terminal tool for long-running commands.",
+                timeout_secs
             ))),
         }
     }
@@ -315,19 +329,28 @@ pub struct ManagedProcess {
     pub output_buffer: Arc<tokio::sync::RwLock<String>>,
 }
 
-static PROCESS_REGISTRY: std::sync::OnceLock<Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<ManagedProcess>>>>> = std::sync::OnceLock::new();
+type ProcessRegistry =
+    Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<ManagedProcess>>>>;
 
-fn get_process_registry() -> Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<ManagedProcess>>>> {
-    PROCESS_REGISTRY.get_or_init(|| Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))).clone()
+static PROCESS_REGISTRY: std::sync::OnceLock<ProcessRegistry> = std::sync::OnceLock::new();
+
+fn get_process_registry() -> ProcessRegistry {
+    PROCESS_REGISTRY
+        .get_or_init(|| Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())))
+        .clone()
 }
 
 pub struct BackgroundRunTool;
 
 impl BackgroundRunTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 impl Default for BackgroundRunTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
@@ -357,7 +380,8 @@ impl Tool for BackgroundRunTool {
         }
 
         let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(command)
+        cmd.arg("-c")
+            .arg(command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -367,8 +391,7 @@ impl Tool for BackgroundRunTool {
             cmd.current_dir(wd);
         }
 
-        let mut child = cmd.spawn()
-            .map_err(|e| AgentError(e.to_string()))?;
+        let mut child = cmd.spawn().map_err(|e| AgentError(e.to_string()))?;
 
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().unwrap();
@@ -382,7 +405,9 @@ impl Tool for BackgroundRunTool {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
             while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 buffer.write().await.push_str(&line);
                 line.clear();
             }
@@ -394,7 +419,9 @@ impl Tool for BackgroundRunTool {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
             while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 buffer.write().await.push_str(&format!("[stderr] {}", line));
                 line.clear();
             }
@@ -412,7 +439,10 @@ impl Tool for BackgroundRunTool {
         let registry = get_process_registry();
         registry.write().await.insert(handle.clone(), managed);
 
-        Ok(format!("Started background process: {}\nHandle: {}", command, handle))
+        Ok(format!(
+            "Started background process: {}\nHandle: {}",
+            command, handle
+        ))
     }
 }
 
@@ -425,7 +455,9 @@ impl Default for ProcessStatusTool {
 }
 
 impl ProcessStatusTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
@@ -459,13 +491,17 @@ impl Tool for ProcessStatusTool {
             if handles.is_empty() {
                 return Ok("No background processes running.".to_string());
             }
-            return Ok(format!("Active background processes:\n{}", handles.join("\n")));
+            return Ok(format!(
+                "Active background processes:\n{}",
+                handles.join("\n")
+            ));
         }
 
         let registry = get_process_registry();
         let map = registry.read().await;
 
-        let managed = map.get(handle)
+        let managed = map
+            .get(handle)
             .ok_or_else(|| AgentError(format!("Process handle '{}' not found.", handle)))?;
 
         let mut child = managed.child.lock().await;
@@ -480,19 +516,24 @@ impl Tool for ProcessStatusTool {
 
         match child.try_wait() {
             Ok(Some(status)) => {
-                let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".to_string());
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string());
                 Ok(format!(
                     "Process {} exited (code: {})\n--- output ---\n{}",
                     handle, code, output
                 ))
             }
-            Ok(None) => {
-                Ok(format!(
-                    "Process {} is running\n--- recent output ---\n{}",
-                    handle,
-                    if output.is_empty() { "(no output yet)" } else { &output }
-                ))
-            }
+            Ok(None) => Ok(format!(
+                "Process {} is running\n--- recent output ---\n{}",
+                handle,
+                if output.is_empty() {
+                    "(no output yet)"
+                } else {
+                    &output
+                }
+            )),
             Err(e) => Err(AgentError(format!("Error checking process: {}", e))),
         }
     }
@@ -507,7 +548,9 @@ impl Default for SendCommandInputTool {
 }
 
 impl SendCommandInputTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
@@ -536,18 +579,25 @@ impl Tool for SendCommandInputTool {
         let wait_ms = args["wait_ms"].as_u64().unwrap_or(500).min(30000);
 
         if handle.is_empty() || input.is_empty() {
-            return Err(AgentError("Both handle and input are required.".to_string()));
+            return Err(AgentError(
+                "Both handle and input are required.".to_string(),
+            ));
         }
 
         let registry = get_process_registry();
         let map = registry.read().await;
 
-        let managed = map.get(handle)
+        let managed = map
+            .get(handle)
             .ok_or_else(|| AgentError(format!("Process handle '{}' not found.", handle)))?;
 
         let mut stdin_lock = managed.stdin.lock().await;
-        let stdin = stdin_lock.as_mut()
-            .ok_or_else(|| AgentError(format!("Process {} has no stdin (may already be closed).", handle)))?;
+        let stdin = stdin_lock.as_mut().ok_or_else(|| {
+            AgentError(format!(
+                "Process {} has no stdin (may already be closed).",
+                handle
+            ))
+        })?;
 
         // Auto-append newline if missing (common case: hitting Enter in a REPL)
         let final_input = if !input.ends_with('\n') {
@@ -556,9 +606,13 @@ impl Tool for SendCommandInputTool {
             input.to_string()
         };
 
-        stdin.write_all(final_input.as_bytes()).await
+        stdin
+            .write_all(final_input.as_bytes())
+            .await
             .map_err(|e| AgentError(format!("Failed to write to stdin: {}", e)))?;
-        stdin.flush().await
+        stdin
+            .flush()
+            .await
             .map_err(|e| AgentError(format!("Failed to flush stdin: {}", e)))?;
 
         // Brief wait for output to accumulate

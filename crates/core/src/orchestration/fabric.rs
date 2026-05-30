@@ -60,29 +60,31 @@ impl DistributedFabric {
 
     /// Selects the optimal node adaptively based on resource capabilities and active load level.
     pub fn route_task(&self, req: &TaskRequirements) -> Option<&FabricNode> {
-        let mut candidates: Vec<&FabricNode> = self.nodes.iter()
+        let mut candidates: Vec<&FabricNode> = self
+            .nodes
+            .iter()
             .filter(|node| {
                 if node.status != FabricNodeStatus::Online {
                     return false;
                 }
-                
+
                 // 1. Check GPU requirement
                 if req.gpu_needed && !node.capabilities.gpu_available {
                     return false;
                 }
-                
+
                 // 2. Check RAM bounds
                 if node.capabilities.total_ram_gb < req.min_ram_gb {
                     return false;
                 }
-                
+
                 // 3. Check tool support
                 for tool in &req.required_tools {
                     if !node.capabilities.supported_tools.contains(tool) {
                         return false;
                     }
                 }
-                
+
                 true
             })
             .collect();
@@ -93,7 +95,8 @@ impl DistributedFabric {
 
         // Sort dynamically: lowest active load score first
         candidates.sort_by(|a, b| {
-            a.capabilities.active_load_score
+            a.capabilities
+                .active_load_score
                 .partial_cmp(&b.capabilities.active_load_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -108,7 +111,9 @@ impl DistributedFabric {
         task: &str,
         plan_node: &crate::orchestration::world::PlanNode,
     ) -> Result<RemoteTaskResult, String> {
-        let node = self.nodes.iter()
+        let node = self
+            .nodes
+            .iter()
             .find(|n| n.node_id == node_id)
             .ok_or_else(|| format!("Target node '{}' not found in fabric registry", node_id))?;
 

@@ -34,21 +34,30 @@ impl EpisodicMemory {
                 if char_boundary == 0 {
                     let next_char_len = remaining.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
                     let (chunk, rest) = remaining.split_at(next_char_len);
-                    chunks.push((format!("episode_{}_{}", trajectory_id, index), chunk.to_string()));
+                    chunks.push((
+                        format!("episode_{}_{}", trajectory_id, index),
+                        chunk.to_string(),
+                    ));
                     remaining = rest.trim_start();
                     index += 1;
                     continue;
                 }
 
                 if remaining.len() <= char_boundary {
-                    chunks.push((format!("episode_{}_{}", trajectory_id, index), remaining.to_string()));
+                    chunks.push((
+                        format!("episode_{}_{}", trajectory_id, index),
+                        remaining.to_string(),
+                    ));
                     break;
                 }
 
                 let sub_str = &remaining[..char_boundary];
                 let split_pos = sub_str.rfind('\n').unwrap_or(char_boundary);
                 let (chunk, rest) = remaining.split_at(split_pos);
-                chunks.push((format!("episode_{}_{}", trajectory_id, index), chunk.to_string()));
+                chunks.push((
+                    format!("episode_{}_{}", trajectory_id, index),
+                    chunk.to_string(),
+                ));
                 remaining = rest.trim_start();
                 index += 1;
             }

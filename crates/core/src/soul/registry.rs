@@ -40,10 +40,11 @@ impl SoulRegistry {
             let path = entry.path();
             if let Some(ext) = path.extension().and_then(|s| s.to_str())
                 && (ext == "yaml" || ext == "yml")
-                && let Ok(soul) = Soul::load_from_file(&path) {
-                    let name = path.file_stem().unwrap().to_str().unwrap().to_string();
-                    self.souls.insert(name, soul);
-                }
+                && let Ok(soul) = Soul::load_from_file(&path)
+            {
+                let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+                self.souls.insert(name, soul);
+            }
         }
         Ok(())
     }

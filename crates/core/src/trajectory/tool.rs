@@ -81,17 +81,17 @@ impl Tool for ExecutionTraceTool {
                     let id = "default".to_string();
                     // Try to get current session ID
                     if let Ok(_rt) = tokio::runtime::Handle::try_current() {
-                         // We can't easily access task_local here without the scope
+                        // We can't easily access task_local here without the scope
                     }
                     id
                 });
-            
+
             if let Some(_store) = &agent.session_store {
-                 // We need a method in store to load trajectory events
-                 // For now, let's assume we can get them.
-                 // Actually, let's just return the Markdown representation from the Agent's current trajectory
-                 let t = agent.trajectory.lock().await;
-                 Ok(t.to_markdown())
+                // We need a method in store to load trajectory events
+                // For now, let's assume we can get them.
+                // Actually, let's just return the Markdown representation from the Agent's current trajectory
+                let t = agent.trajectory.lock().await;
+                Ok(t.to_markdown())
             } else {
                 Err(AgentError("No session store configured".to_string()))
             }

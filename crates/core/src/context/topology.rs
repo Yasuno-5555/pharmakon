@@ -84,7 +84,9 @@ impl PromptLayers {
     pub fn estimated_tokens(&self) -> usize {
         let cacheable = self.cacheable_prefix.len() / 4;
         let semi = self.semi_static.len() / 4;
-        let dynamic: usize = self.dynamic.iter()
+        let dynamic: usize = self
+            .dynamic
+            .iter()
             .map(|m| m.content.as_ref().map(|c| c.to_string().len()).unwrap_or(0) / 4)
             .sum();
         let actionable = self.actionable.len() / 4;
@@ -158,14 +160,17 @@ impl ContextPacker {
         self.units.sort_by(|a, b| {
             let a_prio = source_priority(&a.source);
             let b_prio = source_priority(&b.source);
-            b_prio.cmp(&a_prio)
-                .then_with(|| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal))
+            b_prio.cmp(&a_prio).then_with(|| {
+                b.weight
+                    .partial_cmp(&a.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
         });
 
         // Fill from the tail (highest priority)
         let mut dynamic_messages = Vec::new();
         let mut remaining = self.budget.saturating_sub(
-            cacheable_prefix.len() / 4 + semi_static.len() / 4 + actionable.len() / 4
+            cacheable_prefix.len() / 4 + semi_static.len() / 4 + actionable.len() / 4,
         );
 
         for unit in self.units.iter().rev() {
@@ -190,10 +195,15 @@ impl ContextPacker {
         }
 
         // Convert strings to Messages (they come from various sources as string blocks)
-        let dynamic: Vec<Message> = dynamic_messages.into_iter()
+        let dynamic: Vec<Message> = dynamic_messages
+            .into_iter()
             .enumerate()
             .map(|(i, content)| Message {
-                role: if i % 3 == 0 { "assistant".to_string() } else { "system".to_string() },
+                role: if i % 3 == 0 {
+                    "assistant".to_string()
+                } else {
+                    "system".to_string()
+                },
                 content: Some(MessageContent::Text(content)),
                 ..Default::default()
             })
@@ -232,22 +242,34 @@ mod tests {
         let layers = PromptLayers {
             cacheable_prefix: "SYSTEM: You are an engineer.".to_string(),
             semi_static: "GOAL: Fix the build.".to_string(),
-            dynamic: vec![
-                Message {
-                    role: "user".to_string(),
-                    content: Some(MessageContent::Text("Help".to_string())),
-                    ..Default::default()
-                },
-            ],
+            dynamic: vec![Message {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text("Help".to_string())),
+                ..Default::default()
+            }],
             actionable: "Run cargo check and report errors.".to_string(),
         };
 
         let assembled = layers.assemble();
         assert_eq!(assembled.len(), 4);
         assert_eq!(assembled[0].role, "system");
-        assert!(assembled[0].content.as_ref().unwrap().to_string().contains("engineer"));
+        assert!(
+            assembled[0]
+                .content
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("engineer")
+        );
         assert_eq!(assembled[3].role, "user");
-        assert!(assembled[3].content.as_ref().unwrap().to_string().contains("cargo check"));
+        assert!(
+            assembled[3]
+                .content
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("cargo check")
+        );
     }
 
     #[test]
@@ -265,16 +287,26 @@ mod tests {
 
         // Verify all items made it into the packed layers
         let assembled = layers.assemble();
-        let combined: String = assembled.iter()
+        let combined: String = assembled
+            .iter()
             .filter_map(|m| m.content.as_ref().map(|c| c.to_string()))
             .collect::<Vec<_>>()
             .join("\n");
 
         assert!(combined.contains("nexus"), "Should contain nexus content");
         assert!(combined.contains("grep"), "Should contain tool result");
-        assert!(combined.contains("conversation"), "Should contain conversation");
+        assert!(
+            combined.contains("conversation"),
+            "Should contain conversation"
+        );
         // Verify the actionable instruction is last
         let last = assembled.last().unwrap();
-        assert!(last.content.as_ref().unwrap().to_string().contains("ACTIONABLE"));
+        assert!(
+            last.content
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("ACTIONABLE")
+        );
     }
 }

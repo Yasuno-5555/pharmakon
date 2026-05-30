@@ -1,14 +1,15 @@
+#![allow(clippy::collapsible_if, clippy::needless_borrows_for_generic_args)]
+
 pub mod app;
 pub mod tray;
 pub mod widgets;
 
-pub use app::{AppData, UiEvent, FileNode, DiffLine, TerminalLine};
+pub use app::{AppData, DiffLine, FileNode, TerminalLine, UiEvent};
 use pharmakon_core::agent::Agent;
 use pharmakon_core::automation::cron::CronManager;
 use pharmakon_core::persistence::DbSessionStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-
 
 /// Bridge agent broadcast events to the UI mpsc channel.
 fn spawn_event_bridge(agent: Arc<Agent>, tx: mpsc::UnboundedSender<UiEvent>) {
@@ -30,7 +31,10 @@ fn spawn_event_bridge(agent: Arc<Agent>, tx: mpsc::UnboundedSender<UiEvent>) {
                 }
                 Ok(pharmakon_common::Event::ToolCall { name, args }) => {
                     let args_str = serde_json::to_string(&args).unwrap_or_default();
-                    let _ = tx.send(UiEvent::ToolCall { name, args: args_str });
+                    let _ = tx.send(UiEvent::ToolCall {
+                        name,
+                        args: args_str,
+                    });
                 }
                 Ok(pharmakon_common::Event::ToolResult { result }) => {
                     let _ = tx.send(UiEvent::ToolResult(result));
@@ -44,32 +48,52 @@ fn spawn_event_bridge(agent: Arc<Agent>, tx: mpsc::UnboundedSender<UiEvent>) {
                 Ok(pharmakon_common::Event::ModelSwitched { model_id }) => {
                     let _ = tx.send(UiEvent::ModelSwitched(model_id));
                 }
-                Ok(pharmakon_common::Event::TokenUsageUpdate { total_tokens, total_cost }) => {
-                    let _ = tx.send(UiEvent::TokenUsage { tokens: total_tokens, cost: total_cost });
+                Ok(pharmakon_common::Event::TokenUsageUpdate {
+                    total_tokens,
+                    total_cost,
+                }) => {
+                    let _ = tx.send(UiEvent::TokenUsage {
+                        tokens: total_tokens,
+                        cost: total_cost,
+                    });
                 }
-                Ok(pharmakon_common::Event::GatewayStatus { uptime, memory_usage, .. }) => {
-                    let _ = tx.send(UiEvent::GatewayStatus { uptime, memory: memory_usage });
+                Ok(pharmakon_common::Event::GatewayStatus {
+                    uptime,
+                    memory_usage,
+                    ..
+                }) => {
+                    let _ = tx.send(UiEvent::GatewayStatus {
+                        uptime,
+                        memory: memory_usage,
+                    });
                 }
                 Ok(pharmakon_common::Event::McpStats { stats }) => {
-                    let mapped: Vec<(String, u32)> = stats.into_iter().map(|s| (s.name, s.call_count)).collect();
+                    let mapped: Vec<(String, u32)> =
+                        stats.into_iter().map(|s| (s.name, s.call_count)).collect();
                     let _ = tx.send(UiEvent::McpStats(mapped));
                 }
                 Ok(pharmakon_common::Event::ToolList { tools }) => {
-                    let mapped: Vec<app::ToolInfo> = tools.into_iter().map(|t| app::ToolInfo {
-                        name: t.name,
-                        description: t.description,
-                    }).collect();
+                    let mapped: Vec<app::ToolInfo> = tools
+                        .into_iter()
+                        .map(|t| app::ToolInfo {
+                            name: t.name,
+                            description: t.description,
+                        })
+                        .collect();
                     let _ = tx.send(UiEvent::ToolList(mapped));
                 }
                 Ok(pharmakon_common::Event::SystemLog { level, message }) => {
                     let _ = tx.send(UiEvent::SystemLog { level, message });
                 }
                 Ok(pharmakon_common::Event::OrchestrationState { sub_agents, .. }) => {
-                    let mapped: Vec<app::SwarmStatus> = sub_agents.into_iter().map(|s| app::SwarmStatus {
-                        id: s.name,
-                        role: s.role,
-                        status: s.status,
-                    }).collect();
+                    let mapped: Vec<app::SwarmStatus> = sub_agents
+                        .into_iter()
+                        .map(|s| app::SwarmStatus {
+                            id: s.name,
+                            role: s.role,
+                            status: s.status,
+                        })
+                        .collect();
                     let _ = tx.send(UiEvent::OrchestrationState(mapped));
                 }
                 Ok(pharmakon_common::Event::GraphUpdate { relations }) => {
@@ -79,13 +103,23 @@ fn spawn_event_bridge(agent: Arc<Agent>, tx: mpsc::UnboundedSender<UiEvent>) {
                     let _ = tx.send(UiEvent::SettingsUpdate(settings));
                 }
                 Ok(pharmakon_common::Event::CronJobList { jobs }) => {
-                    let mapped: Vec<app::CronJobInfoData> = jobs.into_iter().map(|j| app::CronJobInfoData {
-                        id: j.id, schedule_type: j.schedule_type, expr: j.expr, message: j.message,
-                    }).collect();
+                    let mapped: Vec<app::CronJobInfoData> = jobs
+                        .into_iter()
+                        .map(|j| app::CronJobInfoData {
+                            id: j.id,
+                            schedule_type: j.schedule_type,
+                            expr: j.expr,
+                            message: j.message,
+                        })
+                        .collect();
                     let _ = tx.send(UiEvent::CronJobList(mapped));
                 }
                 Ok(pharmakon_common::Event::ApprovalRequest { id, tool, args }) => {
-                    let _ = tx.send(UiEvent::ApprovalRequest { id, tool, args: args.to_string() });
+                    let _ = tx.send(UiEvent::ApprovalRequest {
+                        id,
+                        tool,
+                        args: args.to_string(),
+                    });
                 }
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -122,7 +156,8 @@ pub fn run_app(
         "Pharmakon IDE",
         options,
         Box::new(move |_cc| Ok(Box::new(PharmakonIde::new(app_data, tx)))),
-    ).map_err(|e| e.into())
+    )
+    .map_err(|e| e.into())
 }
 
 #[derive(Debug, Clone)]
@@ -137,7 +172,7 @@ fn parse_message(content: &str) -> Vec<MessageSegment> {
     let mut in_code_block = false;
     let mut current_lang = String::new();
     let mut current_code = String::new();
-    
+
     for line in content.lines() {
         if line.trim().starts_with("```") {
             if in_code_block {
@@ -164,7 +199,7 @@ fn parse_message(content: &str) -> Vec<MessageSegment> {
             current_text.push('\n');
         }
     }
-    
+
     if in_code_block {
         segments.push(MessageSegment::CodeBlock {
             language: current_lang,
@@ -173,7 +208,7 @@ fn parse_message(content: &str) -> Vec<MessageSegment> {
     } else if !current_text.is_empty() {
         segments.push(MessageSegment::Text(current_text));
     }
-    
+
     segments
 }
 
@@ -185,23 +220,26 @@ fn syntax_highlight(
     extension: &str,
     inline_suggestion: Option<&str>,
 ) -> egui::text::LayoutJob {
-    use syntect::easy::HighlightLines;
-    use egui::text::LayoutJob;
     use egui::TextFormat;
-    
+    use egui::text::LayoutJob;
+    use syntect::easy::HighlightLines;
+
     let syntax = syntax_set
         .find_syntax_by_extension(extension)
         .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
-        
+
     let theme = &theme_set.themes["base16-ocean.dark"];
     let mut highlighter = HighlightLines::new(syntax, theme);
-    
+
     let mut job = LayoutJob::default();
-    
+
     for line in text.split_inclusive('\n') {
-        let regions = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
+        let regions = highlighter
+            .highlight_line(line, syntax_set)
+            .unwrap_or_default();
         for (style, r_text) in regions {
-            let color = egui::Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+            let color =
+                egui::Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b);
             job.append(
                 r_text,
                 0.0,
@@ -213,7 +251,7 @@ fn syntax_highlight(
             );
         }
     }
-    
+
     if let Some(ghost) = inline_suggestion {
         job.append(
             ghost,
@@ -226,28 +264,32 @@ fn syntax_highlight(
             },
         );
     }
-    
+
     job
 }
 
-fn draw_file_tree(ui: &mut egui::Ui, nodes: &mut [FileNode], selected_file: Option<&str>) -> Option<String> {
+fn draw_file_tree(
+    ui: &mut egui::Ui,
+    nodes: &mut [FileNode],
+    selected_file: Option<&str>,
+) -> Option<String> {
     let mut clicked_file = None;
     for node in nodes {
         if node.is_dir {
             let icon = if node.expanded { "📂 " } else { "📁 " };
             let label = format!("{}{}", icon, node.name);
-            
+
             let id = ui.make_persistent_id(&node.path);
             let header = egui::CollapsingHeader::new(label)
-                .id_source(id)
+                .id_salt(id)
                 .default_open(false);
-                
+
             let res = header.show(ui, |ui| {
                 if let Some(f) = draw_file_tree(ui, &mut node.children, selected_file) {
                     clicked_file = Some(f);
                 }
             });
-            
+
             if res.header_response.clicked() {
                 node.expanded = !node.expanded;
             }
@@ -279,7 +321,13 @@ struct PharmakonIde {
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum BottomTab { Tools, Logs, Graph, Swarms, Terminal }
+enum BottomTab {
+    Tools,
+    Logs,
+    Graph,
+    Swarms,
+    Terminal,
+}
 
 impl PharmakonIde {
     fn new(data: AppData, event_tx: mpsc::UnboundedSender<UiEvent>) -> Self {
@@ -293,7 +341,6 @@ impl PharmakonIde {
     }
 }
 
-
 impl eframe::App for PharmakonIde {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.data.drain_events();
@@ -301,7 +348,8 @@ impl eframe::App for PharmakonIde {
         // Apply a premium dark theme on the first frame and persist
         let mut visuals = egui::Visuals::dark();
         visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(20, 20, 22); // Background (Cursor Charcoal)
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 39, 42)); // Border (Cursor Zinc)
+        visuals.widgets.noninteractive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 39, 42)); // Border (Cursor Zinc)
         visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(28, 28, 30);
         visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(45, 45, 48);
         visuals.widgets.active.bg_fill = egui::Color32::from_rgb(139, 92, 246); // Purple accent
@@ -311,25 +359,40 @@ impl eframe::App for PharmakonIde {
         // 1. Top bar: status + active model info
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.colored_label(egui::Color32::from_rgb(139, 92, 246), "💊 PHARMAKON COMPANION IDE");
+                ui.colored_label(
+                    egui::Color32::from_rgb(139, 92, 246),
+                    "💊 PHARMAKON COMPANION IDE",
+                );
                 ui.separator();
                 ui.label(format!("Workspace: {}", self.data.workspace_root));
-                
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.checkbox(&mut self.is_console_open, "📟 Collapsible Drawer");
                     ui.separator();
-                    ui.colored_label(egui::Color32::LIGHT_BLUE, format!("Model: {}", self.data.current_model));
+                    ui.colored_label(
+                        egui::Color32::LIGHT_BLUE,
+                        format!("Model: {}", self.data.current_model),
+                    );
                 });
             });
         });
 
         // 2. Left Panel: File explorer (always open)
-        egui::SidePanel::left("file_panel").resizable(true).default_width(220.0).show(ctx, |ui| {
-            ui.heading("📁 Workspace Files");
-            ui.horizontal(|ui| {
-                let resp = ui.add_sized([ui.available_width() - 50.0, 20.0], egui::TextEdit::singleline(&mut self.folder_input).hint_text("/path/to/project..."));
-                if (ui.button("📂").clicked() || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
-                    && !self.folder_input.is_empty() {
+        egui::SidePanel::left("file_panel")
+            .resizable(true)
+            .default_width(220.0)
+            .show(ctx, |ui| {
+                ui.heading("📁 Workspace Files");
+                ui.horizontal(|ui| {
+                    let resp = ui.add_sized(
+                        [ui.available_width() - 50.0, 20.0],
+                        egui::TextEdit::singleline(&mut self.folder_input)
+                            .hint_text("/path/to/project..."),
+                    );
+                    if (ui.button("📂").clicked()
+                        || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+                        && !self.folder_input.is_empty()
+                    {
                         let p = std::path::PathBuf::from(&self.folder_input);
                         if p.is_dir() {
                             self.data.workspace_root = p.to_string_lossy().to_string();
@@ -337,33 +400,39 @@ impl eframe::App for PharmakonIde {
                             self.folder_input.clear();
                         }
                     }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("📂 Pick Folder").clicked()
-                    && let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("📂 Pick Folder").clicked()
+                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                    {
                         self.data.workspace_root = folder.to_string_lossy().to_string();
                         self.data.refresh_file_tree();
                         self.folder_input.clear();
                     }
-                if ui.button("📄 Pick File").clicked()
-                    && let Some(file) = rfd::FileDialog::new().pick_file() {
+                    if ui.button("📄 Pick File").clicked()
+                        && let Some(file) = rfd::FileDialog::new().pick_file()
+                    {
                         let full = file.to_string_lossy().to_string();
                         self.data.open_file(&full);
                     }
-            });
-            ui.colored_label(egui::Color32::GRAY, self.data.workspace_root.clone());
-            if ui.button("↻ Refresh workspace").clicked() {
-                self.data.refresh_file_tree();
-            }
-            ui.separator();
-            
-            // Recursive hierarchical file tree
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(clicked_p) = draw_file_tree(ui, &mut self.data.file_tree_nodes, self.data.selected_file.as_deref()) {
-                    self.data.open_file(&clicked_p);
+                });
+                ui.colored_label(egui::Color32::GRAY, self.data.workspace_root.clone());
+                if ui.button("↻ Refresh workspace").clicked() {
+                    self.data.refresh_file_tree();
                 }
+                ui.separator();
+
+                // Recursive hierarchical file tree
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(clicked_p) = draw_file_tree(
+                        ui,
+                        &mut self.data.file_tree_nodes,
+                        self.data.selected_file.as_deref(),
+                    ) {
+                        self.data.open_file(&clicked_p);
+                    }
+                });
             });
-        });
 
         // 3. Right Panel: Chat/AI Assistant panel (always open, Cursor-style!)
         egui::SidePanel::right("chat_panel").resizable(true).default_width(380.0).show(ctx, |ui| {
@@ -386,10 +455,10 @@ impl eframe::App for PharmakonIde {
                 });
                 ui.separator();
             }
-            
+
             // Layout Chat body & inputs
             let body_height = ui.available_height() - 75.0;
-            
+
             // Scrollable Chat history
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width(), body_height),
@@ -407,7 +476,7 @@ impl eframe::App for PharmakonIde {
                             if let Some(thought) = &msg.thought {
                                 ui.colored_label(egui::Color32::from_rgb(139, 92, 246), format!("  🧠 thought: {}", thought));
                             }
-                            
+
                             // Parse and render segments (including code blocks with copy/apply buttons)
                             let segments = parse_message(&msg.content);
                             for segment in segments {
@@ -447,7 +516,7 @@ impl eframe::App for PharmakonIde {
             );
 
             ui.separator();
-            
+
             // Text Entry and Send Command Area
             ui.horizontal(|ui| {
                 let resp = ui.add_sized([ui.available_width() - 65.0, 45.0], egui::TextEdit::multiline(&mut self.data.input_text).hint_text("Ask Copilot or request code modification..."));
@@ -469,7 +538,7 @@ impl eframe::App for PharmakonIde {
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Terminal, "📟 Terminal");
                 });
                 ui.separator();
-                
+
                 match self.bottom_tab {
                     BottomTab::Tools => {
                         egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
@@ -533,9 +602,9 @@ impl eframe::App for PharmakonIde {
                                     ui.colored_label(egui::Color32::GRAY, "Embedded Terminal Ready. Type command and hit Enter.");
                                 }
                             });
-                            
+
                             ui.separator();
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label("$");
                                 let resp = ui.add_sized(
@@ -543,19 +612,17 @@ impl eframe::App for PharmakonIde {
                                     egui::TextEdit::singleline(&mut self.data.terminal_input)
                                         .hint_text("cargo build / git status / echo hello...")
                                 );
-                                
+
                                 let enter_pressed = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                                 if ui.button("Run").clicked() || enter_pressed {
                                     let cmd = self.data.terminal_input.trim().to_string();
                                     if !cmd.is_empty() {
-                                        let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
-                                        
                                         // Self-insert prompt input locally immediately
                                         let _ = self.event_tx.send(UiEvent::TerminalOutput {
                                             text: cmd.clone(),
                                             is_input: true,
                                         });
-                                        
+
                                         let tx = self.event_tx.clone();
                                         tokio::spawn(async move {
                                             let output = if cfg!(target_os = "windows") {
@@ -567,7 +634,7 @@ impl eframe::App for PharmakonIde {
                                                     .args(&["-c", &cmd])
                                                     .output()
                                             };
-                                            
+
                                             match output {
                                                 Ok(out) => {
                                                     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -623,10 +690,10 @@ impl eframe::App for PharmakonIde {
                             "md" => "📝 ",
                             _ => "📄 ",
                         };
-                        
+
                         let label = format!("{}{}", icon, filename);
                         let is_active = self.data.active_tab_index == Some(idx);
-                        
+
                         let tab_btn = ui.selectable_label(is_active, label);
                         if tab_btn.clicked() {
                             self.data.open_file(path);
@@ -665,13 +732,13 @@ impl eframe::App for PharmakonIde {
                     });
                 });
                 ui.separator();
-                
+
                 // Divvy up vertical workspace space: Upper editor area, lower telemetry runway
                 let editor_height = ui.available_height() * 0.55;
-                
+
                 ui.group(|ui| {
                     ui.set_height(editor_height);
-                    
+
                     if self.data.diff_preview_mode {
                         // Render Diff View
                         egui::ScrollArea::both().show(ui, |ui| {
@@ -728,10 +795,10 @@ impl eframe::App for PharmakonIde {
                             .extension()
                             .and_then(|s| s.to_str())
                             .unwrap_or("");
-                        
+
                         let syntax_set = &self.data.syntax_set;
                         let theme_set = &self.data.theme_set;
-                        
+
                         // Suggest brace completion ghost text as prototype suggestion
                         if self.data.inline_suggestion.is_none() && self.data.file_content.trim_end().ends_with('{') {
                             self.data.inline_suggestion = Some(app::InlineSuggestion {
@@ -739,19 +806,19 @@ impl eframe::App for PharmakonIde {
                                 position: self.data.file_content.len(),
                             });
                         }
-                        
+
                         let suggestion_text = self.data.inline_suggestion.as_ref().map(|s| s.ghost_text.clone());
                         let suggestion_text_ref = suggestion_text.as_deref();
-                        
+
                         let mut layouter = |ui: &egui::Ui, string: &str, _wrap_width: f32| {
                             let job = syntax_highlight(ui.ctx(), syntax_set, theme_set, string, ext, suggestion_text_ref);
                             ui.fonts(|f| f.layout_job(job))
                         };
-                        
+
                         let total_lines = self.data.file_content.lines().count().max(1);
                         let mut apply_autocomplete = false;
                         let mut suggestion_to_apply = String::new();
-                        
+
                         egui::ScrollArea::both().show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 // Draw Line Numbers
@@ -765,7 +832,7 @@ impl eframe::App for PharmakonIde {
                                         ));
                                     }
                                 });
-                                
+
                                 // Draw Editor
                                 ui.vertical(|ui| {
                                     let resp = ui.add_sized(
@@ -777,7 +844,7 @@ impl eframe::App for PharmakonIde {
                                             .desired_rows(total_lines)
                                             .layouter(&mut layouter)
                                     );
-                                    
+
                                     // Handle autocomplete selection with TAB
                                     if resp.has_focus() && suggestion_text.is_some() {
                                         if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
@@ -790,7 +857,7 @@ impl eframe::App for PharmakonIde {
                                 });
                             });
                         });
-                        
+
                         if apply_autocomplete {
                             self.data.inline_suggestion = None;
                             self.data.file_content.push_str(&suggestion_to_apply);
@@ -861,7 +928,7 @@ impl eframe::App for PharmakonIde {
                     ui.heading("💊 Pharmakon - Autonomous Cognitive Environment");
                     ui.colored_label(egui::Color32::GRAY, "Lightweight multi-agent compiler, reflection system, and local editor.");
                     ui.add_space(30.0);
-                    
+
                     ui.group(|ui| {
                         ui.set_width(450.0);
                         ui.heading("🚀 Quick Workspace Setup");
@@ -901,9 +968,13 @@ impl eframe::App for PharmakonIde {
                     ui.horizontal(|ui| {
                         if ui.button("Save ✅").clicked() {
                             if let Err(e) = std::fs::write(&current_path, &self.data.file_content) {
-                                self.data.system_logs.push(format!("ERR: Failed to save: {}", e));
+                                self.data
+                                    .system_logs
+                                    .push(format!("ERR: Failed to save: {}", e));
                             } else {
-                                self.data.system_logs.push(format!("SUCCESS: Saved changes to {}", current_path));
+                                self.data
+                                    .system_logs
+                                    .push(format!("SUCCESS: Saved changes to {}", current_path));
                                 self.data.original_content = self.data.file_content.clone();
                             }
                             self.data.show_save_confirm_dialog = false;
@@ -921,14 +992,20 @@ impl eframe::App for PharmakonIde {
         // Bottom status info
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(if self.data.health_stats.is_alive { "● LIVE" } else { "○ OFFLINE" });
-                ui.label(format!(" | {} tokens | ${:.4} | {} tools active",
-                    self.data.token_count, self.data.total_cost,
-                    self.data.tools.len()));
+                ui.label(if self.data.health_stats.is_alive {
+                    "● LIVE"
+                } else {
+                    "○ OFFLINE"
+                });
+                ui.label(format!(
+                    " | {} tokens | ${:.4} | {} tools active",
+                    self.data.token_count,
+                    self.data.total_cost,
+                    self.data.tools.len()
+                ));
             });
         });
 
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
-

@@ -3,9 +3,7 @@ use axum::{
     extract::{Path, State},
     response::IntoResponse,
 };
-use pharmakon_core::agent::Agent;
 use serde::Deserialize;
-use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct WebhookPayload {
@@ -14,12 +12,7 @@ pub struct WebhookPayload {
 
 pub async fn webhook_handler(
     Path(webhook_id): Path<String>,
-    State((agent, _canvas_host, _cron_manager, config)): State<(
-        Arc<Agent>,
-        Arc<crate::canvas::CanvasHost>,
-        Arc<pharmakon_core::automation::cron::CronManager>,
-        Arc<pharmakon_common::Config>,
-    )>,
+    State((agent, _canvas_host, _cron_manager, config)): State<crate::GatewayState>,
     headers: axum::http::HeaderMap,
     Json(payload): Json<WebhookPayload>,
 ) -> impl IntoResponse {

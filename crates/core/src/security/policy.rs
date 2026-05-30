@@ -47,9 +47,10 @@ impl Policy for DefaultSecurityPolicy {
             }
             "read_file" | "write_file" => {
                 if let Some(path) = args["path"].as_str()
-                    && let Err(e) = SecurityAuditor::audit_file_path(path) {
-                        return PolicyAction::Deny(e.to_string());
-                    }
+                    && let Err(e) = SecurityAuditor::audit_file_path(path)
+                {
+                    return PolicyAction::Deny(e.to_string());
+                }
                 PolicyAction::Allow
             }
             _ => PolicyAction::Allow,
@@ -70,27 +71,37 @@ impl Policy for ConstitutionalPolicy {
     fn evaluate_tool_call(&self, tool_name: &str, args: &Value) -> PolicyAction {
         // Rule 1: No self-modification of the agent's own source
         if (tool_name == "write_file" || tool_name == "apply_patch" || tool_name == "mutate_ast")
-            && let Some(path) = args["path"].as_str() {
-                let path_lower = path.to_lowercase();
-                if path_lower.contains("crates/core/src/") || path_lower.contains("crates/common/src/")
-                    || path_lower.contains("crates/memory/src/") || path_lower.contains("crates/tools/src/")
-                {
-                    return PolicyAction::Deny(
-                        "Constitutional violation: Agent cannot modify its own source code.".to_string(),
-                    );
-                }
-                // Rule 2: Protect the policy engine itself
-                if path_lower.contains("security/policy") || path_lower.contains("constitutional") {
-                    return PolicyAction::Deny(
-                        "Constitutional violation: Cannot modify the policy enforcement system.".to_string(),
-                    );
-                }
+            && let Some(path) = args["path"].as_str()
+        {
+            let path_lower = path.to_lowercase();
+            if path_lower.contains("crates/core/src/")
+                || path_lower.contains("crates/common/src/")
+                || path_lower.contains("crates/memory/src/")
+                || path_lower.contains("crates/tools/src/")
+            {
+                return PolicyAction::Deny(
+                    "Constitutional violation: Agent cannot modify its own source code."
+                        .to_string(),
+                );
             }
+            // Rule 2: Protect the policy engine itself
+            if path_lower.contains("security/policy") || path_lower.contains("constitutional") {
+                return PolicyAction::Deny(
+                    "Constitutional violation: Cannot modify the policy enforcement system."
+                        .to_string(),
+                );
+            }
+        }
 
         // Rule 3: Shell commands must pass constitutional review
-        if tool_name == "shell" && args["command"].as_str().is_some_and(|c| {
-            c.contains("rm -rf /") || c.contains("sudo ") || c.contains("chmod 777") || c.contains("git clean")
-        }) {
+        if tool_name == "shell"
+            && args["command"].as_str().is_some_and(|c| {
+                c.contains("rm -rf /")
+                    || c.contains("sudo ")
+                    || c.contains("chmod 777")
+                    || c.contains("git clean")
+            })
+        {
             return PolicyAction::Deny(
                 "Constitutional violation: Destructive system or repository commands (like git clean) are prohibited.".to_string(),
             );
@@ -112,12 +123,11 @@ impl Default for PolicyEngine {
 
 impl PolicyEngine {
     pub fn new() -> Self {
-        let mut policies: Vec<Box<dyn Policy>> = Vec::new();
-        policies.push(Box::new(ConstitutionalPolicy));
-        policies.push(Box::new(DefaultSecurityPolicy));
-        Self {
-            policies,
-        }
+        let policies: Vec<Box<dyn Policy>> = vec![
+            Box::new(ConstitutionalPolicy),
+            Box::new(DefaultSecurityPolicy),
+        ];
+        Self { policies }
     }
 
     pub fn add_policy(&mut self, policy: Box<dyn Policy>) {

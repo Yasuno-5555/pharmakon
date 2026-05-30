@@ -69,9 +69,10 @@ impl Tool for CheckpointTool {
                 for entry in fs::read_dir(&checkpoint_dir).map_err(|e| AgentError(e.to_string()))? {
                     let entry = entry.map_err(|e| AgentError(e.to_string()))?;
                     if let Some(name) = entry.file_name().to_str()
-                        && name.ends_with(".json") {
-                            entries.push(name.replace(".json", ""));
-                        }
+                        && name.ends_with(".json")
+                    {
+                        entries.push(name.replace(".json", ""));
+                    }
                 }
                 Ok(json!({ "checkpoints": entries }).to_string())
             }

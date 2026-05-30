@@ -48,7 +48,10 @@ impl AgentModel for GroqModel {
         let name = self.model_name.to_lowercase();
         if name.contains("32768") || name.contains("mixtral") {
             32768
-        } else if name.contains("llama-3.3") || name.contains("llama3-70b") || name.contains("llama-3.1") {
+        } else if name.contains("llama-3.3")
+            || name.contains("llama3-70b")
+            || name.contains("llama-3.1")
+        {
             131072
         } else if name.contains("8b") {
             8192
@@ -107,32 +110,36 @@ impl AgentModel for GroqModel {
             .as_str()
             .map(|s| pharmakon_common::MessageContent::Text(s.to_string()));
 
-        let tool_calls = choice["message"]["tool_calls"].as_array().map(|tc| tc.iter()
-                    .map(|t| ToolCall {
-                        id: t["id"].as_str().unwrap_or_default().to_string(),
-                        r#type: t["type"].as_str().unwrap_or_default().to_string(),
-                        function: FunctionCall {
-                            name: t["function"]["name"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
-                            arguments: t["function"]["arguments"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
-                            thought_signature: None,
-                        },
-                    })
-                    .collect());
+        let tool_calls = choice["message"]["tool_calls"].as_array().map(|tc| {
+            tc.iter()
+                .map(|t| ToolCall {
+                    id: t["id"].as_str().unwrap_or_default().to_string(),
+                    r#type: t["type"].as_str().unwrap_or_default().to_string(),
+                    function: FunctionCall {
+                        name: t["function"]["name"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        arguments: t["function"]["arguments"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        thought_signature: None,
+                    },
+                })
+                .collect()
+        });
 
         let finish_reason_str = choice["finish_reason"].as_str();
 
-        let usage = json.get("usage").map(|u| pharmakon_common::agent_types::Usage {
-            prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
-            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
-            thoughts_tokens: None,
-        });
+        let usage = json
+            .get("usage")
+            .map(|u| pharmakon_common::agent_types::Usage {
+                prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+                completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+                total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+                thoughts_tokens: None,
+            });
 
         Ok(CompletionResponse {
             content,
@@ -204,14 +211,11 @@ impl AgentModel for GroqModel {
                         }
                         if let Some(data) = line.strip_prefix("data: ")
                             && let Ok(json) = serde_json::from_str::<Value>(data)
-                                && let Some(content) =
-                                    json["choices"][0]["delta"]["content"].as_str()
-                                    && !content.is_empty() {
-                                        return Some((
-                                            Ok(content.to_string()),
-                                            (byte_stream, buffer),
-                                        ));
-                                    }
+                            && let Some(content) = json["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            return Some((Ok(content.to_string()), (byte_stream, buffer)));
+                        }
                         continue;
                     }
 

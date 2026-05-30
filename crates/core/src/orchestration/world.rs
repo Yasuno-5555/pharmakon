@@ -1,15 +1,22 @@
 //! World Model Agent V2 — Simulate-before-acting execution loop with Plan AST, Static Verification, and Failure Taxonomy.
 //!
 //! Activated for Deep tasks; Simple/Standard tasks skip to standard CodeAct.
+#![allow(
+    clippy::collapsible_else_if,
+    clippy::collapsible_if,
+    clippy::let_and_return,
+    clippy::manual_strip,
+    clippy::unnecessary_unwrap
+)]
 
 use crate::agent::Agent;
 use crate::model::{CompletionRequest, Message, MessageContent};
 use anyhow::{Result, anyhow};
+use futures::future::{BoxFuture, FutureExt};
+use pharmakon_common::Tool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use pharmakon_common::Tool;
-use futures::future::{BoxFuture, FutureExt};
 
 // ═══════════════════════════════════════════════════════
 // Plan AST Types
@@ -55,12 +62,17 @@ pub fn detect_verify_strategy(workspace_root: &Path) -> VerifyStrategy {
         VerifyStrategy::Cmake
     } else if workspace_root.join("package.json").exists() && has_command("npm") {
         VerifyStrategy::Npm
-    } else if (workspace_root.join("setup.py").exists() || workspace_root.join("pyproject.toml").exists()) && has_command("pytest") {
+    } else if (workspace_root.join("setup.py").exists()
+        || workspace_root.join("pyproject.toml").exists())
+        && has_command("pytest")
+    {
         VerifyStrategy::PythonTest
     } else if workspace_root.join("go.mod").exists() && has_command("go") {
         VerifyStrategy::Go
     } else {
-        log::warn!("No suitable verification tool found in environment. Falling back to verification skip (Shell('true')).");
+        log::warn!(
+            "No suitable verification tool found in environment. Falling back to verification skip (Shell('true'))."
+        );
         VerifyStrategy::Shell("true".to_string())
     }
 }
@@ -146,10 +158,16 @@ pub async fn run_verify(dir: &Path, strategy: &VerifyStrategy, changed_files: &[
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "condition_type")]
 pub enum Condition {
-    FileExists { path: PathBuf },
+    FileExists {
+        path: PathBuf,
+    },
     CargoCheckSuccess,
-    VerifySuccess { strategy: Option<VerifyStrategy> },
-    Script { script: String },
+    VerifySuccess {
+        strategy: Option<VerifyStrategy>,
+    },
+    Script {
+        script: String,
+    },
     #[serde(untagged)]
     Legacy(String),
 }
@@ -158,7 +176,11 @@ impl Condition {
     pub async fn evaluate(&self, workspace_root: &Path) -> bool {
         match self {
             Condition::FileExists { path } => {
-                let resolved = if path.is_absolute() { path.clone() } else { workspace_root.join(path) };
+                let resolved = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    workspace_root.join(path)
+                };
                 resolved.exists()
             }
             Condition::CargoCheckSuccess => {
@@ -166,11 +188,14 @@ impl Condition {
                 run_verify(workspace_root, &strategy, &[]).await
             }
             Condition::VerifySuccess { strategy } => {
-                let s = strategy.clone().unwrap_or_else(|| detect_verify_strategy(workspace_root));
+                let s = strategy
+                    .clone()
+                    .unwrap_or_else(|| detect_verify_strategy(workspace_root));
                 run_verify(workspace_root, &s, &[]).await
             }
             Condition::Script { script } | Condition::Legacy(script) => {
-                let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
+                let engine =
+                    crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
                 let r = engine.execute(script);
                 r.success && r.output.trim() == "true"
             }
@@ -287,10 +312,22 @@ impl StaticVerifier {
         Self { risk_ceiling }
     }
 
-    pub async fn verify(&self, agent: &Agent, node: &PlanNode, workspace_root: &Path) -> Result<Vec<String>> {
+    pub async fn verify(
+        &self,
+        agent: &Agent,
+        node: &PlanNode,
+        workspace_root: &Path,
+    ) -> Result<Vec<String>> {
         let mut issues = Vec::new();
         let mut simulated_created_paths = HashSet::new();
-        self.verify_node(agent, node, workspace_root, &mut issues, &mut simulated_created_paths).await?;
+        self.verify_node(
+            agent,
+            node,
+            workspace_root,
+            &mut issues,
+            &mut simulated_created_paths,
+        )
+        .await?;
         Ok(issues)
     }
 
@@ -303,7 +340,11 @@ impl StaticVerifier {
         simulated_created_paths: &mut HashSet<PathBuf>,
     ) -> Result<()> {
         match node {
-            PlanNode::Script { language, code, timeout_secs: _ } => {
+            PlanNode::Script {
+                language,
+                code,
+                timeout_secs: _,
+            } => {
                 let script_risk = 0.8;
                 if script_risk > self.risk_ceiling {
                     issues.push(format!("Risk ceiling violation: Script node ({:?}) has risk {} which exceeds ceiling {}", language, script_risk, self.risk_ceiling));
@@ -311,7 +352,10 @@ impl StaticVerifier {
                 let dangerous = ["rm -rf", "sudo ", "chmod 777", "shutil.rmtree"];
                 for pattern in dangerous {
                     if code.contains(pattern) {
-                        issues.push(format!("Dangerous code pattern detected in script: '{}'", pattern));
+                        issues.push(format!(
+                            "Dangerous code pattern detected in script: '{}'",
+                            pattern
+                        ));
                     }
                 }
             }
@@ -333,82 +377,131 @@ impl StaticVerifier {
                     }
                 };
                 if tool_risk > self.risk_ceiling {
-                    issues.push(format!("Risk ceiling violation: Tool '{}' has risk {} which exceeds ceiling {}", tool, tool_risk, self.risk_ceiling));
+                    issues.push(format!(
+                        "Risk ceiling violation: Tool '{}' has risk {} which exceeds ceiling {}",
+                        tool, tool_risk, self.risk_ceiling
+                    ));
                 }
 
                 // 2. Dangerous shell command patterns
                 if tool == "shell"
-                    && let Some(cmd) = args.get("command").and_then(|c| c.as_str()) {
-                        let dangerous = ["rm -rf /", "sudo ", "chmod 777", "mkfs", "dd if="];
-                        for pattern in dangerous {
-                            if cmd.contains(pattern) {
-                                issues.push(format!("Dangerous command pattern detected: '{}'", pattern));
-                            }
+                    && let Some(cmd) = args.get("command").and_then(|c| c.as_str())
+                {
+                    let dangerous = ["rm -rf /", "sudo ", "chmod 777", "mkfs", "dd if="];
+                    for pattern in dangerous {
+                        if cmd.contains(pattern) {
+                            issues
+                                .push(format!("Dangerous command pattern detected: '{}'", pattern));
                         }
-
-                        // Heuristic symbolic package / workspace creation
-                        if cmd.contains("cargo new ")
-                            && let Some(pos) = cmd.find("cargo new ") {
-                                let sub = &cmd[pos + 10..];
-                                let name = sub.split_whitespace().next().unwrap_or("");
-                                if !name.is_empty() {
-                                    let pkg_root = resolve_path(workspace_root, name);
-                                    simulated_created_paths.insert(pkg_root.join("Cargo.toml"));
-                                    simulated_created_paths.insert(pkg_root.join("src/lib.rs"));
-                                    simulated_created_paths.insert(pkg_root.join("src/main.rs"));
-                                }
-                            }
                     }
+
+                    // Heuristic symbolic package / workspace creation
+                    if cmd.contains("cargo new ")
+                        && let Some(pos) = cmd.find("cargo new ")
+                    {
+                        let sub = &cmd[pos + 10..];
+                        let name = sub.split_whitespace().next().unwrap_or("");
+                        if !name.is_empty() {
+                            let pkg_root = resolve_path(workspace_root, name);
+                            simulated_created_paths.insert(pkg_root.join("Cargo.toml"));
+                            simulated_created_paths.insert(pkg_root.join("src/lib.rs"));
+                            simulated_created_paths.insert(pkg_root.join("src/main.rs"));
+                        }
+                    }
+                }
 
                 // 3. Symbolic creation registry to solve the "Time-Paradox" bug
                 if (tool == "write_file" || tool == "apply_patch")
-                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
-                        let resolved = resolve_path(workspace_root, path_str);
-                        simulated_created_paths.insert(resolved);
-                    }
+                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str())
+                {
+                    let resolved = resolve_path(workspace_root, path_str);
+                    simulated_created_paths.insert(resolved);
+                }
 
                 // 4. Hallucinated path check (reading non-existent files)
                 if tool == "read_file"
-                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str()) {
-                        let resolved = resolve_path(workspace_root, path_str);
-                        if !resolved.exists() && !simulated_created_paths.contains(&resolved) {
-                            issues.push(format!("Hallucinated path: File '{}' does not exist", path_str));
-                        }
+                    && let Some(path_str) = args.get("path").and_then(|p| p.as_str())
+                {
+                    let resolved = resolve_path(workspace_root, path_str);
+                    if !resolved.exists() && !simulated_created_paths.contains(&resolved) {
+                        issues.push(format!(
+                            "Hallucinated path: File '{}' does not exist",
+                            path_str
+                        ));
                     }
+                }
 
                 // 5. Patch applicability dry-run (incorporates symbolic tracking)
                 if tool == "apply_patch"
                     && let Some(path_str) = args.get("path").and_then(|p| p.as_str())
-                        && let Some(patch_str) = args.get("patch").and_then(|p| p.as_str()) {
-                            let resolved = resolve_path(workspace_root, path_str);
-                            if resolved.exists() {
-                                if let Ok(original) = tokio::fs::read_to_string(&resolved).await {
-                                    if let Ok(patch) = diffy::Patch::from_str(patch_str) {
-                                        if let Err(e) = diffy::apply(&original, &patch) {
-                                            issues.push(format!("Patch dry-run failed for '{}': {}", path_str, e));
-                                        }
-                                    } else {
-                                        issues.push(format!("Invalid patch syntax for '{}'", path_str));
-                                    }
+                    && let Some(patch_str) = args.get("patch").and_then(|p| p.as_str())
+                {
+                    let resolved = resolve_path(workspace_root, path_str);
+                    if resolved.exists() {
+                        if let Ok(original) = tokio::fs::read_to_string(&resolved).await {
+                            if let Ok(patch) = diffy::Patch::from_str(patch_str) {
+                                if let Err(e) = diffy::apply(&original, &patch) {
+                                    issues.push(format!(
+                                        "Patch dry-run failed for '{}': {}",
+                                        path_str, e
+                                    ));
                                 }
-                            } else if !simulated_created_paths.contains(&resolved) {
-                                issues.push(format!("Patch target path does not exist: '{}'", path_str));
+                            } else {
+                                issues.push(format!("Invalid patch syntax for '{}'", path_str));
                             }
                         }
+                    } else if !simulated_created_paths.contains(&resolved) {
+                        issues.push(format!("Patch target path does not exist: '{}'", path_str));
+                    }
+                }
             }
             PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                 for child in nodes {
-                    Box::pin(self.verify_node(agent, child, workspace_root, issues, simulated_created_paths)).await?;
+                    Box::pin(self.verify_node(
+                        agent,
+                        child,
+                        workspace_root,
+                        issues,
+                        simulated_created_paths,
+                    ))
+                    .await?;
                 }
             }
-            PlanNode::Conditional { condition: _, then_branch, else_branch } => {
-                Box::pin(self.verify_node(agent, then_branch, workspace_root, issues, simulated_created_paths)).await?;
+            PlanNode::Conditional {
+                condition: _,
+                then_branch,
+                else_branch,
+            } => {
+                Box::pin(self.verify_node(
+                    agent,
+                    then_branch,
+                    workspace_root,
+                    issues,
+                    simulated_created_paths,
+                ))
+                .await?;
                 if let Some(else_b) = else_branch {
-                    Box::pin(self.verify_node(agent, else_b, workspace_root, issues, simulated_created_paths)).await?;
+                    Box::pin(self.verify_node(
+                        agent,
+                        else_b,
+                        workspace_root,
+                        issues,
+                        simulated_created_paths,
+                    ))
+                    .await?;
                 }
             }
-            PlanNode::Retry { node, .. } | PlanNode::Verify { node, .. } | PlanNode::Gate { node, .. } => {
-                Box::pin(self.verify_node(agent, node, workspace_root, issues, simulated_created_paths)).await?;
+            PlanNode::Retry { node, .. }
+            | PlanNode::Verify { node, .. }
+            | PlanNode::Gate { node, .. } => {
+                Box::pin(self.verify_node(
+                    agent,
+                    node,
+                    workspace_root,
+                    issues,
+                    simulated_created_paths,
+                ))
+                .await?;
             }
         }
         Ok(())
@@ -432,7 +525,9 @@ pub struct CachedPlan {
 
 impl CachedPlan {
     pub fn freshness(&self) -> f64 {
-        let elapsed_secs = chrono::Utc::now().signed_duration_since(self.created_at).num_seconds() as f64;
+        let elapsed_secs = chrono::Utc::now()
+            .signed_duration_since(self.created_at)
+            .num_seconds() as f64;
         let half_life_secs = 7.0 * 24.0 * 60.0 * 60.0; // 1 week
         let lambda = 2.0f64.ln() / half_life_secs;
         (-lambda * elapsed_secs).exp()
@@ -462,17 +557,22 @@ pub struct PlanCache {
 
 impl PlanCache {
     pub fn load() -> Self {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/plan_cache.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/plan_cache.json");
         if path.exists()
             && let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(cache) = serde_json::from_str(&content) {
-                    return cache;
-                }
+            && let Ok(cache) = serde_json::from_str(&content)
+        {
+            return cache;
+        }
         Self::default()
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = dirs::home_dir().unwrap_or_default().join(".pharmakon/plan_cache.json");
+        let path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".pharmakon/plan_cache.json");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -494,11 +594,7 @@ impl PlanCache {
         });
         let remove = self.entries.len() - max;
         self.entries.drain(0..remove);
-        log::info!(
-            "PlanCache: evicted {} entries (limit: {})",
-            remove,
-            max
-        );
+        log::info!("PlanCache: evicted {} entries (limit: {})", remove, max);
     }
 
     pub fn find_plan(&self, task: &str, fingerprint: &str) -> Option<CandidatePlan> {
@@ -529,8 +625,12 @@ impl PlanCache {
 
     fn tokenize_and_normalize(&self, text: &str) -> std::collections::HashSet<String> {
         let stop_words: std::collections::HashSet<&str> = [
-            "the", "a", "to", "for", "with", "in", "an", "of", "and", "is", "on", "at", "by", "from", "as"
-        ].iter().cloned().collect();
+            "the", "a", "to", "for", "with", "in", "an", "of", "and", "is", "on", "at", "by",
+            "from", "as",
+        ]
+        .iter()
+        .cloned()
+        .collect();
 
         text.to_lowercase()
             .chars()
@@ -542,20 +642,26 @@ impl PlanCache {
             .collect()
     }
 
-    fn jaccard_similarity(&self, set_a: &std::collections::HashSet<String>, set_b: &std::collections::HashSet<String>) -> f64 {
+    fn jaccard_similarity(
+        &self,
+        set_a: &std::collections::HashSet<String>,
+        set_b: &std::collections::HashSet<String>,
+    ) -> f64 {
         if set_a.is_empty() && set_b.is_empty() {
             return 1.0;
         }
         if set_a.is_empty() || set_b.is_empty() {
             return 0.0;
         }
-        let intersection: std::collections::HashSet<_> = set_a.intersection(set_b).cloned().collect();
+        let intersection: std::collections::HashSet<_> =
+            set_a.intersection(set_b).cloned().collect();
         let union: std::collections::HashSet<_> = set_a.union(set_b).cloned().collect();
         intersection.len() as f64 / union.len() as f64
     }
 
     fn extract_trigrams(&self, text: &str) -> std::collections::HashSet<String> {
-        let normalized = text.to_lowercase()
+        let normalized = text
+            .to_lowercase()
             .chars()
             .filter(|c| c.is_alphanumeric() || c.is_whitespace())
             .collect::<String>();
@@ -587,7 +693,13 @@ impl PlanCache {
         intersection as f64 / union as f64
     }
 
-    pub fn record_result(&mut self, task: &str, plan: &CandidatePlan, success: bool, fingerprint: String) {
+    pub fn record_result(
+        &mut self,
+        task: &str,
+        plan: &CandidatePlan,
+        success: bool,
+        fingerprint: String,
+    ) {
         if let Some(entry) = self.entries.iter_mut().find(|e| e.plan_id == plan.id) {
             if success {
                 entry.success_count += 1;
@@ -633,7 +745,9 @@ impl PlanCache {
                 }).catch_unwind().await;
 
                 if res.is_err() {
-                    log::error!("Background Thread: Pattern mining & AOT compilation task panicked!");
+                    log::error!(
+                        "Background Thread: Pattern mining & AOT compilation task panicked!"
+                    );
                 }
             });
         }
@@ -643,16 +757,18 @@ impl PlanCache {
 pub fn get_environment_fingerprint(workspace_root: &Path) -> String {
     let mut fingerprint = String::new();
     if let Ok(meta) = std::fs::metadata(workspace_root.join("Cargo.toml"))
-        && let Ok(modified) = meta.modified() {
-            fingerprint.push_str(&format!("{:?}", modified));
-        }
+        && let Ok(modified) = meta.modified()
+    {
+        fingerprint.push_str(&format!("{:?}", modified));
+    }
     if let Ok(output) = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(workspace_root)
         .output()
-        && output.status.success() {
-            fingerprint.push_str(String::from_utf8_lossy(&output.stdout).trim());
-        }
+        && output.status.success()
+    {
+        fingerprint.push_str(String::from_utf8_lossy(&output.stdout).trim());
+    }
     crate::event_log::short_hash(&fingerprint)
 }
 
@@ -691,68 +807,110 @@ pub struct PlanFailure {
 impl FailureKind {
     pub fn classify(err_msg: &str, tool: &str) -> PlanFailure {
         let err_lower = err_msg.to_lowercase();
-        if err_lower.contains("syntax") || err_lower.contains("expected") || err_lower.contains("unresolved import") {
+        if err_lower.contains("syntax")
+            || err_lower.contains("expected")
+            || err_lower.contains("unresolved import")
+        {
             PlanFailure {
                 kind: FailureKind::SyntaxError,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
-                feedback_for_planner: format!("A syntax error occurred during {}: {}. Please fix the syntax or imports.", tool, err_msg),
+                feedback_for_planner: format!(
+                    "A syntax error occurred during {}: {}. Please fix the syntax or imports.",
+                    tool, err_msg
+                ),
             }
         } else if err_lower.contains("timeout") || err_lower.contains("timed out") {
             PlanFailure {
                 kind: FailureKind::Timeout,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
-                feedback_for_planner: format!("The step {} timed out. Consider simplifying the operation or running in background.", tool),
+                feedback_for_planner: format!(
+                    "The step {} timed out. Consider simplifying the operation or running in background.",
+                    tool
+                ),
             }
-        } else if err_lower.contains("blocked") || err_lower.contains("denied by policy") || err_lower.contains("rm -rf /") {
+        } else if err_lower.contains("blocked")
+            || err_lower.contains("denied by policy")
+            || err_lower.contains("rm -rf /")
+        {
             PlanFailure {
                 kind: FailureKind::DangerousCommand,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Terminal,
-                feedback_for_planner: format!("Terminal Safety Error: The command or tool {} was blocked. Do not attempt this action again.", tool),
+                feedback_for_planner: format!(
+                    "Terminal Safety Error: The command or tool {} was blocked. Do not attempt this action again.",
+                    tool
+                ),
             }
-        } else if err_lower.contains("does not exist") || err_lower.contains("not found") || err_lower.contains("no such file") {
+        } else if err_lower.contains("does not exist")
+            || err_lower.contains("not found")
+            || err_lower.contains("no such file")
+        {
             PlanFailure {
                 kind: FailureKind::PathHallucination,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
-                feedback_for_planner: format!("Path Hallucination: The path specified in {} does not exist. Verify paths using read_dir or find before referencing them.", tool),
+                feedback_for_planner: format!(
+                    "Path Hallucination: The path specified in {} does not exist. Verify paths using read_dir or find before referencing them.",
+                    tool
+                ),
             }
         } else if err_lower.contains("permission denied") || err_lower.contains("access denied") {
             PlanFailure {
                 kind: FailureKind::PermissionDenied,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::StrategicRetry,
-                feedback_for_planner: format!("Permission Denied: Access to resource in {} was denied. Attempt using a different approach or workspace directory.", tool),
+                feedback_for_planner: format!(
+                    "Permission Denied: Access to resource in {} was denied. Attempt using a different approach or workspace directory.",
+                    tool
+                ),
             }
-        } else if err_lower.contains("patch") || err_lower.contains("hunk failed") || err_lower.contains("conflict") {
+        } else if err_lower.contains("patch")
+            || err_lower.contains("hunk failed")
+            || err_lower.contains("conflict")
+        {
             PlanFailure {
                 kind: FailureKind::PatchFailed,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
                 feedback_for_planner: "Patch Applicability Error: The unified patch failed to apply to the target file. Check lines, context, and use fresh read_file to regenerate accurate diff hunk headers.".to_string(),
             }
-        } else if err_lower.contains("dependency") || err_lower.contains("missing crate") || err_lower.contains("could not find") {
+        } else if err_lower.contains("dependency")
+            || err_lower.contains("missing crate")
+            || err_lower.contains("could not find")
+        {
             PlanFailure {
                 kind: FailureKind::DependencyUnmet,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
-                feedback_for_planner: format!("Dependency Missing: A required package or library for {} is missing. Please add the dependency to Cargo.toml or equivalent config first.", tool),
+                feedback_for_planner: format!(
+                    "Dependency Missing: A required package or library for {} is missing. Please add the dependency to Cargo.toml or equivalent config first.",
+                    tool
+                ),
             }
-        } else if err_lower.contains("cargo check failed") || err_lower.contains("test failed") || err_lower.contains("assertion failed") {
+        } else if err_lower.contains("cargo check failed")
+            || err_lower.contains("test failed")
+            || err_lower.contains("assertion failed")
+        {
             PlanFailure {
                 kind: FailureKind::LogicalFailure,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::Recoverable,
-                feedback_for_planner: format!("Logical Verification Gate failed: Cargo check or test validation was not satisfied after running {}. Refine the code logic and ensure correctness.", tool),
+                feedback_for_planner: format!(
+                    "Logical Verification Gate failed: Cargo check or test validation was not satisfied after running {}. Refine the code logic and ensure correctness.",
+                    tool
+                ),
             }
         } else {
             PlanFailure {
                 kind: FailureKind::ToolExecutionError,
                 description: err_msg.to_string(),
                 recoverability: Recoverability::StrategicRetry,
-                feedback_for_planner: format!("Tool runtime error in {}: {}. Retry using alternative tools.", tool, err_msg),
+                feedback_for_planner: format!(
+                    "Tool runtime error in {}: {}. Retry using alternative tools.",
+                    tool, err_msg
+                ),
             }
         }
     }
@@ -786,7 +944,10 @@ pub async fn generate_candidate_plans(
     let mut plans = Vec::new();
 
     for i in 1..=max_plans {
-        log::info!("Generating plan variation #{} using schema-forced tool call...", i);
+        log::info!(
+            "Generating plan variation #{} using schema-forced tool call...",
+            i
+        );
         let prompt = format!(
             "You are a strategic planner for an autonomous coding agent. Generate candidate action plan variant #{}.\n\
              You MUST call the 'plan_generation' tool to submit your structured action plan with AST nodes.\n\
@@ -794,7 +955,7 @@ pub async fn generate_candidate_plans(
              Task: {}\n\
              \n\
              Context: {}",
-             i, task, context
+            i, task, context
         );
 
         let request = CompletionRequest {
@@ -816,26 +977,29 @@ pub async fn generate_candidate_plans(
                 if let Some(tool_calls) = response.tool_calls {
                     for tc in tool_calls {
                         if tc.function.name == "plan_generation"
-                            && let Ok(p) = serde_json::from_str::<CandidatePlan>(&tc.function.arguments) {
-                                parsed_plan = Some(p);
-                                break;
-                            }
+                            && let Ok(p) =
+                                serde_json::from_str::<CandidatePlan>(&tc.function.arguments)
+                        {
+                            parsed_plan = Some(p);
+                            break;
+                        }
                     }
                 }
 
                 // Fallback: parse raw text content
                 if parsed_plan.is_none()
-                    && let Some(text) = response.content.as_ref().and_then(|c| c.as_text()) {
-                        let json_text = if let Some(start) = text.find('{') {
-                            let end = text.rfind('}').unwrap_or(text.len());
-                            &text[start..end + 1]
-                        } else {
-                            text
-                        };
-                        if let Ok(p) = serde_json::from_str::<CandidatePlan>(json_text.trim()) {
-                            parsed_plan = Some(p);
-                        }
+                    && let Some(text) = response.content.as_ref().and_then(|c| c.as_text())
+                {
+                    let json_text = if let Some(start) = text.find('{') {
+                        let end = text.rfind('}').unwrap_or(text.len());
+                        &text[start..end + 1]
+                    } else {
+                        text
+                    };
+                    if let Ok(p) = serde_json::from_str::<CandidatePlan>(json_text.trim()) {
+                        parsed_plan = Some(p);
                     }
+                }
 
                 if let Some(mut plan) = parsed_plan {
                     plan.id = format!("plan-{}", i);
@@ -852,7 +1016,10 @@ pub async fn generate_candidate_plans(
         return Err(anyhow!("Zero plans generated successfully"));
     }
 
-    log::info!("WorldModel V2: generated {} schema-compliant plan(s)", plans.len());
+    log::info!(
+        "WorldModel V2: generated {} schema-compliant plan(s)",
+        plans.len()
+    );
     Ok(plans)
 }
 
@@ -872,7 +1039,11 @@ fn calculate_static_bayesian_score(
             PlanNode::Step { tool, .. } => tool.clone(),
             _ => "compound".to_string(),
         };
-        let matches: Vec<_> = lib.entries.iter().filter(|e| e.category == category).collect();
+        let matches: Vec<_> = lib
+            .entries
+            .iter()
+            .filter(|e| e.category == category)
+            .collect();
         if matches.is_empty() {
             0.5 // Uninformative prior Beta(1,1) expectation
         } else {
@@ -890,7 +1061,10 @@ fn calculate_static_bayesian_score(
             0.5
         } else {
             // Dynamic similarity metrics aggregation using genome success rates
-            let total_score: f64 = query_shots.iter().map(|s| s.genome.success_rate as f64).sum();
+            let total_score: f64 = query_shots
+                .iter()
+                .map(|s| s.genome.success_rate as f64)
+                .sum();
             (total_score / query_shots.len() as f64).clamp(0.1, 1.0)
         }
     };
@@ -909,9 +1083,7 @@ fn calculate_static_bayesian_score(
     // Calculate toolchain risk based on AST structure
     fn calculate_risk(node: &PlanNode) -> f64 {
         match node {
-            PlanNode::Script { .. } => {
-                0.15
-            }
+            PlanNode::Script { .. } => 0.15,
             PlanNode::Step { tool, .. } => {
                 if tool == "shell" || tool == "codeact" {
                     0.15
@@ -922,16 +1094,20 @@ fn calculate_static_bayesian_score(
             PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                 nodes.iter().map(calculate_risk).sum()
             }
-            PlanNode::Conditional { then_branch, else_branch, .. } => {
+            PlanNode::Conditional {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let mut r = calculate_risk(then_branch);
                 if let Some(else_b) = else_branch {
                     r += calculate_risk(else_b);
                 }
                 r
             }
-            PlanNode::Retry { node, .. } | PlanNode::Verify { node, .. } | PlanNode::Gate { node, .. } => {
-                calculate_risk(node)
-            }
+            PlanNode::Retry { node, .. }
+            | PlanNode::Verify { node, .. }
+            | PlanNode::Gate { node, .. } => calculate_risk(node),
         }
     }
 
@@ -946,7 +1122,8 @@ fn calculate_static_bayesian_score(
 
     // Mathematical dynamic EVPI (Expected Value of Perfect Information)
     // Formula scales with the entropy of the probability estimate and computational cost bounds
-    let entropy = -posterior_prob * posterior_prob.ln() - (1.0 - posterior_prob) * (1.0 - posterior_prob).ln();
+    let entropy = -posterior_prob * posterior_prob.ln()
+        - (1.0 - posterior_prob) * (1.0 - posterior_prob).ln();
     let safe_entropy = if entropy.is_nan() { 0.1 } else { entropy };
     let calculated_evpi = (safe_entropy * (plan.estimated_tokens as f64 / 1000.0)).clamp(0.01, 2.5);
 
@@ -1024,7 +1201,7 @@ pub fn execute_node<'a>(
                             }
                     }
 
-                
+
                 match tool.as_str() {
                     "codeact" => {
                         let engine = crate::orchestration::codeact::CodeActEngine::new(workspace_root.to_path_buf());
@@ -1163,7 +1340,7 @@ pub fn execute_node<'a>(
                     let child_cloned = child.clone();
                     let workspace_cloned = workspace_root.to_path_buf();
                     let sem_cloned = semaphore.clone();
-                    
+
                     let handle = tokio::spawn(async move {
                         let _permit = match sem_cloned.acquire().await {
                             Ok(p) => Some(p),
@@ -1181,7 +1358,7 @@ pub fn execute_node<'a>(
 
                 let results = futures::future::join_all(handles).await;
                 let mut combined = String::new();
-                
+
                 for res_wrap in results {
                     match res_wrap {
                         Ok((Ok(out), local_snaps)) => {
@@ -1271,11 +1448,7 @@ pub fn execute_node<'a>(
     }.boxed()
 }
 
-pub async fn execute_world_model(
-    agent: &Agent,
-    _session_id: &str,
-    task: &str,
-) -> Result<String> {
+pub async fn execute_world_model(agent: &Agent, _session_id: &str, task: &str) -> Result<String> {
     let workspace_root = std::env::current_dir().unwrap_or_default();
     let fingerprint = get_environment_fingerprint(&workspace_root);
 
@@ -1284,14 +1457,20 @@ pub async fn execute_world_model(
 
     // Re-planning / Reflect retry loops (fixes FailureTaxonomy feedback disappearing)
     for replan_attempt in 1..=3 {
-        log::info!("WorldModel V2: Planning & Evaluation attempt {}/3...", replan_attempt);
+        log::info!(
+            "WorldModel V2: Planning & Evaluation attempt {}/3...",
+            replan_attempt
+        );
 
         let mut active_plan = None;
 
         // 1. Check AOT compiled binaries first (absolute highest performance path)
         let reloader = crate::orchestration::aot::AotHotReloader::new();
         if let Some(aot_plan) = reloader.try_hot_load(task) {
-            log::info!("WorldModel V2: AOT pre-compiled binary loaded for task: '{}'", task);
+            log::info!(
+                "WorldModel V2: AOT pre-compiled binary loaded for task: '{}'",
+                task
+            );
             active_plan = Some(aot_plan);
         } else {
             // 2. Look up cached plan or template pattern
@@ -1301,7 +1480,10 @@ pub async fn execute_world_model(
             } else {
                 let pattern_lib = crate::orchestration::pattern_miner::PatternLibrary::load();
                 if let Some(instantiated) = pattern_lib.instantiate_match(task) {
-                    log::info!("WorldModel V2: mined template matched and instantiated for task: '{}'", task);
+                    log::info!(
+                        "WorldModel V2: mined template matched and instantiated for task: '{}'",
+                        task
+                    );
                     active_plan = Some(instantiated);
                 }
             }
@@ -1326,23 +1508,29 @@ pub async fn execute_world_model(
 
         // 2. Perform static verification, compilation and static scoring (no simulation/cloning!)
         let mut validations = Vec::new();
-        
+
         // Strict dynamic risk ceiling setting to enforce toolchains limits!
         let verifier = StaticVerifier::new(0.75);
         let compiler = crate::orchestration::PlanCompiler::new();
 
         for mut plan in plans {
             let raw_ast = plan.get_ast();
-            
+
             // Compile and optimize AST!
             let compiled_ast = compiler.compile(raw_ast);
             plan.root = Some(compiled_ast.clone());
 
-            let verify_issues = verifier.verify(agent, &compiled_ast, &workspace_root).await?;
+            let verify_issues = verifier
+                .verify(agent, &compiled_ast, &workspace_root)
+                .await?;
             let valid = verify_issues.is_empty();
 
             if !valid {
-                log::warn!("Plan '{}' failed pre-execution verification: {:?}", plan.id, verify_issues);
+                log::warn!(
+                    "Plan '{}' failed pre-execution verification: {:?}",
+                    plan.id,
+                    verify_issues
+                );
                 continue;
             }
 
@@ -1361,11 +1549,21 @@ pub async fn execute_world_model(
         }
 
         // Sort by score descending
-        validations.sort_by(|a, b| b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal));
+        validations.sort_by(|a, b| {
+            b.1.score
+                .partial_cmp(&a.1.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         if validations.is_empty() {
-            log::warn!("All candidate plan verifications failed on attempt {}", replan_attempt);
-            previous_failure_feedbacks.push(format!("Attempt {} failed: Plan validation checks rejected all candidates.", replan_attempt));
+            log::warn!(
+                "All candidate plan verifications failed on attempt {}",
+                replan_attempt
+            );
+            previous_failure_feedbacks.push(format!(
+                "Attempt {} failed: Plan validation checks rejected all candidates.",
+                replan_attempt
+            ));
             continue;
         }
 
@@ -1378,10 +1576,12 @@ pub async fn execute_world_model(
 
         // 3. Speculative Parallel Execution (Phase 8)
         if validations.len() >= 2 {
-            log::info!("WorldModel V2: Multi-candidate plans available. Enabling Speculative Parallel Execution!");
+            log::info!(
+                "WorldModel V2: Multi-candidate plans available. Enabling Speculative Parallel Execution!"
+            );
             let executor = crate::orchestration::speculative::SpeculativeExecutor::new(
                 crate::orchestration::speculative::SpeculativeMode::WorkspaceSandbox,
-                &workspace_root
+                &workspace_root,
             );
             let plan_a = validations[0].0.clone();
             let plan_b = validations[1].0.clone();
@@ -1395,7 +1595,10 @@ pub async fn execute_world_model(
                     ));
                 }
                 Err(e) => {
-                    log::warn!("WorldModel V2: Speculative parallel execution failed ({}). Falling back to sequential execution.", e);
+                    log::warn!(
+                        "WorldModel V2: Speculative parallel execution failed ({}). Falling back to sequential execution.",
+                        e
+                    );
                 }
             }
         }
@@ -1408,7 +1611,10 @@ pub async fn execute_world_model(
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
             .unwrap_or_default();
         if !git_checkpoint_untracked_modified.is_empty() {
-            log::info!("Forensic Checkpoint: repository has uncommitted mutations:\n{}", git_checkpoint_untracked_modified);
+            log::info!(
+                "Forensic Checkpoint: repository has uncommitted mutations:\n{}",
+                git_checkpoint_untracked_modified
+            );
         }
 
         // 4. Execution of the best plan sequentially
@@ -1418,10 +1624,15 @@ pub async fn execute_world_model(
             let ast = plan.get_ast();
             let mut snapshotted_files = Vec::new();
 
-            log::info!("WorldModel V2: executing compiled plan '{}' on real workspace", plan.id);
-            let exec_result = execute_node(agent, &ast, &workspace_root, &mut snapshotted_files).await;
+            log::info!(
+                "WorldModel V2: executing compiled plan '{}' on real workspace",
+                plan.id
+            );
+            let exec_result =
+                execute_node(agent, &ast, &workspace_root, &mut snapshotted_files).await;
 
-            let changed_paths: Vec<PathBuf> = snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
+            let changed_paths: Vec<PathBuf> =
+                snapshotted_files.iter().map(|(p, _)| p.clone()).collect();
             let strategy = detect_verify_strategy(&workspace_root);
             let verify_ok = run_verify(&workspace_root, &strategy, &changed_paths).await;
 
@@ -1430,7 +1641,9 @@ pub async fn execute_world_model(
                 cache.record_result(task, plan, true, fingerprint.clone());
                 return Ok(format!(
                     "✅ Plan '{}' executed successfully: {}\nOutput: {}",
-                    plan.id, plan.description, exec_result.unwrap()
+                    plan.id,
+                    plan.description,
+                    exec_result.unwrap()
                 ));
             }
 
@@ -1443,21 +1656,37 @@ pub async fn execute_world_model(
             let failure = FailureKind::classify(&error_msg, "AST Executor");
             log::warn!(
                 "WorldModel V2: Plan '{}' failed real-world execution. Error classified as {:?}. Recoverability: {:?}",
-                plan.id, failure.kind, failure.recoverability
+                plan.id,
+                failure.kind,
+                failure.recoverability
             );
 
             // Complete Forensic Rollback — revert all file system mutations!
-            log::warn!("WorldModel V2: Initiating Forensic Rollback to remove all Ghost-Effects...");
+            log::warn!(
+                "WorldModel V2: Initiating Forensic Rollback to remove all Ghost-Effects..."
+            );
             for (path, snap_id) in &snapshotted_files {
                 if let Err(e) = agent.snapshot_store.restore(snap_id, path).await {
-                    log::error!("WorldModel V2: Snapshot rollback failed for {}: {}", path.display(), e);
+                    log::error!(
+                        "WorldModel V2: Snapshot rollback failed for {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
 
             // Revert all modified and untracked files safely via stash to avoid permanent data loss!
-            log::warn!("WorldModel V2: Stashing any uncommitted changes to git stash to avoid data loss...");
+            log::warn!(
+                "WorldModel V2: Stashing any uncommitted changes to git stash to avoid data loss..."
+            );
             std::process::Command::new("git")
-                .args(["stash", "push", "--include-untracked", "-m", "Pharmakon Auto-Rollback Guard"])
+                .args([
+                    "stash",
+                    "push",
+                    "--include-untracked",
+                    "-m",
+                    "Pharmakon Auto-Rollback Guard",
+                ])
                 .current_dir(&workspace_root)
                 .output()
                 .ok();
@@ -1467,7 +1696,10 @@ pub async fn execute_world_model(
             fallback_error = failure.feedback_for_planner.clone();
 
             if matches!(failure.recoverability, Recoverability::Terminal) {
-                return Err(anyhow!("Plan execution aborted (Terminal failure): {}", error_msg));
+                return Err(anyhow!(
+                    "Plan execution aborted (Terminal failure): {}",
+                    error_msg
+                ));
             }
         }
 
@@ -1499,21 +1731,23 @@ async fn run_cargo_check_optimized(dir: &Path, changed_files: &[PathBuf]) -> boo
         static ref WARM_UP_ONCE: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::new();
     }
     let dir_cloned = dir.to_path_buf();
-    let _ = WARM_UP_ONCE.get_or_init(|| async {
-        tokio::spawn(async move {
-            log::info!("⚡ Cache Warmup: Running initial cargo check in background...");
-            let mut cmd = tokio::process::Command::new("cargo");
-            cmd.arg("check").current_dir(&dir_cloned);
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await;
-            log::info!("⚡ Cache Warmup: Initial cargo check background warmup completed.");
-        });
-        ()
-    }).await;
+    let _ = WARM_UP_ONCE
+        .get_or_init(|| async {
+            tokio::spawn(async move {
+                log::info!("⚡ Cache Warmup: Running initial cargo check in background...");
+                let mut cmd = tokio::process::Command::new("cargo");
+                cmd.arg("check").current_dir(&dir_cloned);
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await;
+                log::info!("⚡ Cache Warmup: Initial cargo check background warmup completed.");
+            });
+        })
+        .await;
 
     // 2. 結果キャッシュチェック（5分以内の同一状態での再チェックをスキップ）
-    use std::sync::Mutex as StdMutex;
-    use std::time::{Instant, Duration};
     use std::collections::HashMap;
+    use std::sync::Mutex as StdMutex;
+    use std::time::{Duration, Instant};
 
     struct CheckCache {
         last_global_success: Option<Instant>,
@@ -1532,7 +1766,9 @@ async fn run_cargo_check_optimized(dir: &Path, changed_files: &[PathBuf]) -> boo
         let cache = CHECK_CACHE.lock().unwrap();
         if let Some(last) = cache.last_global_success {
             if last.elapsed() < Duration::from_secs(300) {
-                log::info!("⚡ Cargo Check Skip: Global check skipped due to active cache (< 5 min).");
+                log::info!(
+                    "⚡ Cargo Check Skip: Global check skipped due to active cache (< 5 min)."
+                );
                 return true;
             }
         }
@@ -1562,7 +1798,10 @@ async fn run_cargo_check_optimized(dir: &Path, changed_files: &[PathBuf]) -> boo
             }
         }
         if all_cached {
-            log::info!("⚡ Cargo Check Skip: Targeted check for {:?} skipped due to active cache (< 5 min).", target_crates);
+            log::info!(
+                "⚡ Cargo Check Skip: Targeted check for {:?} skipped due to active cache (< 5 min).",
+                target_crates
+            );
             return true;
         }
     }
@@ -1576,7 +1815,10 @@ async fn run_cargo_check_optimized(dir: &Path, changed_files: &[PathBuf]) -> boo
         for krate in &target_crates {
             cmd.arg("-p").arg(krate);
         }
-        log::info!("⚡ Cargo Check Optimized: Running targeted check for crates: {:?}", target_crates);
+        log::info!(
+            "⚡ Cargo Check Optimized: Running targeted check for crates: {:?}",
+            target_crates
+        );
     } else {
         log::info!("⚡ Cargo Check: Running full workspace cargo check...");
     }
@@ -1598,7 +1840,10 @@ async fn run_cargo_check_optimized(dir: &Path, changed_files: &[PathBuf]) -> boo
                 }
                 true
             } else {
-                log::warn!("cargo check failed: {}", String::from_utf8_lossy(&output.stderr));
+                log::warn!(
+                    "cargo check failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
                 false
             }
         }
@@ -1645,7 +1890,11 @@ fn find_crate_name(file_path: &Path) -> Option<String> {
 
 fn resolve_path(root: &Path, path: &str) -> PathBuf {
     let p = Path::new(path);
-    if p.is_absolute() { p.to_path_buf() } else { root.join(p) }
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        root.join(p)
+    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1677,8 +1926,14 @@ mod tests {
     #[test]
     fn test_resolve_path() {
         let root = Path::new("/workspace");
-        assert_eq!(resolve_path(root, "src/main.rs"), PathBuf::from("/workspace/src/main.rs"));
-        assert_eq!(resolve_path(root, "/tmp/absolute.rs"), PathBuf::from("/tmp/absolute.rs"));
+        assert_eq!(
+            resolve_path(root, "src/main.rs"),
+            PathBuf::from("/workspace/src/main.rs")
+        );
+        assert_eq!(
+            resolve_path(root, "/tmp/absolute.rs"),
+            PathBuf::from("/tmp/absolute.rs")
+        );
     }
 
     #[tokio::test]
@@ -1695,7 +1950,12 @@ mod tests {
                 dry_run_first: false,
             }),
         };
-        cache.record_result("implement user authentication login endpoint", &plan, true, "hash123".to_string());
+        cache.record_result(
+            "implement user authentication login endpoint",
+            &plan,
+            true,
+            "hash123".to_string(),
+        );
 
         // Now query with a semantically similar task
         let found = cache.find_plan("create user login authentication endpoint", "hash123");

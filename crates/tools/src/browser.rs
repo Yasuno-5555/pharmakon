@@ -18,7 +18,9 @@ pub struct BrowserTool {
 }
 
 impl Default for BrowserTool {
-    fn default() -> Self { Self::new(None) }
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
 impl BrowserTool {
@@ -39,9 +41,11 @@ impl BrowserTool {
 
         match action {
             "navigate" => {
-                let url = args["url"].as_str().ok_or_else(|| AgentError("Missing URL".into()))?;
+                let url = args["url"]
+                    .as_str()
+                    .ok_or_else(|| AgentError("Missing URL".into()))?;
                 *mock_url_lock = url.to_string();
-                
+
                 log::info!("Simulated Browser navigating to {}...", url);
                 let client = Client::new();
                 let res = client.get(url).send().await;
@@ -49,11 +53,18 @@ impl BrowserTool {
                     Ok(response) => {
                         let html = response.text().await.unwrap_or_default();
                         *mock_content_lock = html;
-                        Ok(format!("Mock Browser navigated successfully to {}. Loaded page content ({} bytes).", url, mock_content_lock.len()))
+                        Ok(format!(
+                            "Mock Browser navigated successfully to {}. Loaded page content ({} bytes).",
+                            url,
+                            mock_content_lock.len()
+                        ))
                     }
                     Err(e) => {
                         *mock_content_lock = format!("Failed to fetch: {}", e);
-                        Ok(format!("Mock Browser simulated offline load of {} (Request Failed: {})", url, e))
+                        Ok(format!(
+                            "Mock Browser simulated offline load of {} (Request Failed: {})",
+                            url, e
+                        ))
                     }
                 }
             }
@@ -67,7 +78,8 @@ impl BrowserTool {
                 }
                 let out_path = out_dir.join("mock_browser_screenshot.svg");
 
-                let mock_svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 768" width="100%" height="100%">
+                let mock_svg = format!(
+                    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 768" width="100%" height="100%">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#1e1b4b" />
@@ -93,17 +105,25 @@ impl BrowserTool {
   
   <rect x="100" y="230" width="824" height="1" fill="#1f2937" />
   <text x="100" y="270" font-family="sans-serif" font-size="14" fill="#818cf8">Active simulated elements and anchor links have been parsed and annotated.</text>
-</svg>"##, mock_url_lock, mock_content_lock.len());
+</svg>"##,
+                    mock_url_lock,
+                    mock_content_lock.len()
+                );
 
-                fs::write(&out_path, mock_svg).map_err(|e| AgentError(format!("Failed to write mock SVG: {}", e)))?;
-                Ok(format!("Mock screenshot successfully saved to {:?}", out_path))
+                fs::write(&out_path, mock_svg)
+                    .map_err(|e| AgentError(format!("Failed to write mock SVG: {}", e)))?;
+                Ok(format!(
+                    "Mock screenshot successfully saved to {:?}",
+                    out_path
+                ))
             }
-            "extract" => {
-                Ok(mock_content_lock.clone())
-            }
+            "extract" => Ok(mock_content_lock.clone()),
             "click" | "type" => {
                 let selector = args["selector"].as_str().unwrap_or("unknown");
-                Ok(format!("Simulated mock browser action '{}' on selector '{}' successfully.", action, selector))
+                Ok(format!(
+                    "Simulated mock browser action '{}' on selector '{}' successfully.",
+                    action, selector
+                ))
             }
             "wait" => {
                 let seconds = args["seconds"].as_u64().unwrap_or(1);
@@ -114,11 +134,18 @@ impl BrowserTool {
                 let html = mock_content_lock.clone();
                 let mut elements = Vec::new();
                 let mut id = 1;
-                
+
                 // Parse out potential link and input elements
                 for cap in html.split('<').skip(1) {
                     if cap.starts_with("a ") && cap.contains("href=") {
-                        let text = cap.split('>').nth(1).unwrap_or("").split('<').next().unwrap_or("").trim();
+                        let text = cap
+                            .split('>')
+                            .nth(1)
+                            .unwrap_or("")
+                            .split('<')
+                            .next()
+                            .unwrap_or("")
+                            .trim();
                         let display_text = if text.is_empty() { "Anchor Link" } else { text };
                         let truncated = &display_text[..std::cmp::min(display_text.len(), 40)];
                         elements.push(json!({
@@ -135,7 +162,9 @@ impl BrowserTool {
                         }));
                         id += 1;
                     }
-                    if id > 20 { break; }
+                    if id > 20 {
+                        break;
+                    }
                 }
 
                 let mut out_dir = PathBuf::from("frontend/public/assets");
@@ -146,18 +175,27 @@ impl BrowserTool {
                     let _ = fs::create_dir_all(&out_dir);
                 }
                 let out_path = out_dir.join("mock_annotated_screenshot.svg");
-                
-                let mock_svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 768" width="100%" height="100%">
+
+                let mock_svg = format!(
+                    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 768" width="100%" height="100%">
   <rect width="1024" height="768" fill="#0f172a" />
   <rect x="0" y="0" width="1024" height="50" fill="#1e1b4b" />
   <text x="30" y="30" font-family="sans-serif" font-size="14" fill="white">Annotated Mock Screen - {}</text>
   <text x="100" y="100" font-family="sans-serif" font-size="18" fill="#10b981">Successfully annotated {} interactive elements.</text>
-</svg>"##, mock_url_lock, id - 1);
-                
-                fs::write(&out_path, mock_svg).map_err(|e| AgentError(format!("Failed to write mock SVG: {}", e)))?;
-                Ok(format!("Annotated mock screen saved to: {:?}\nElements mapped:\n{}", out_path, serde_json::to_string_pretty(&elements).unwrap_or_default()))
+</svg>"##,
+                    mock_url_lock,
+                    id - 1
+                );
+
+                fs::write(&out_path, mock_svg)
+                    .map_err(|e| AgentError(format!("Failed to write mock SVG: {}", e)))?;
+                Ok(format!(
+                    "Annotated mock screen saved to: {:?}\nElements mapped:\n{}",
+                    out_path,
+                    serde_json::to_string_pretty(&elements).unwrap_or_default()
+                ))
             }
-            _ => Err(AgentError("Unsupported mock browser action".into()))
+            _ => Err(AgentError("Unsupported mock browser action".into())),
         }
     }
 }
@@ -217,7 +255,10 @@ impl Tool for BrowserTool {
                     *browser_lock = Some(browser);
                 }
                 Err(e) => {
-                    log::warn!("Failed to launch headless chrome ({}). Falling back to mock HTTP browser emulator...", e);
+                    log::warn!(
+                        "Failed to launch headless chrome ({}). Falling back to mock HTTP browser emulator...",
+                        e
+                    );
                     *self.is_mock_mode.lock().await = true;
                     return self.call_mock(&action, &args).await;
                 }
@@ -225,12 +266,16 @@ impl Tool for BrowserTool {
         }
 
         if tab_lock.is_none() {
-            let browser = browser_lock.as_ref().ok_or_else(|| AgentError("Browser not initialized".to_string()))?;
+            let browser = browser_lock
+                .as_ref()
+                .ok_or_else(|| AgentError("Browser not initialized".to_string()))?;
             let tab = browser.new_tab().map_err(|e| AgentError(e.to_string()))?;
             *tab_lock = Some(tab);
         }
 
-        let tab = tab_lock.as_ref().ok_or_else(|| AgentError("Tab session not initialized".to_string()))?;
+        let tab = tab_lock
+            .as_ref()
+            .ok_or_else(|| AgentError("Tab session not initialized".to_string()))?;
 
         match action.as_str() {
             "navigate" => {
@@ -280,7 +325,7 @@ impl Tool for BrowserTool {
                         true,
                     )
                     .map_err(|e| AgentError(e.to_string()))?;
-                
+
                 let mut out_dir = PathBuf::from("frontend/public/assets");
                 if !out_dir.exists() {
                     out_dir = PathBuf::from(".pharmakon/screenshots");
@@ -289,9 +334,13 @@ impl Tool for BrowserTool {
                     let _ = fs::create_dir_all(&out_dir);
                 }
                 let out_path = out_dir.join("browser_screenshot.png");
-                fs::write(&out_path, &png_data).map_err(|e| AgentError(format!("Failed to write screenshot: {}", e)))?;
-                
-                Ok(format!("Captured screenshot successfully and saved to {:?}", out_path))
+                fs::write(&out_path, &png_data)
+                    .map_err(|e| AgentError(format!("Failed to write screenshot: {}", e)))?;
+
+                Ok(format!(
+                    "Captured screenshot successfully and saved to {:?}",
+                    out_path
+                ))
             }
             "extract" => {
                 let content = tab.get_content().map_err(|e| AgentError(e.to_string()))?;
@@ -345,10 +394,12 @@ impl Tool for BrowserTool {
                     return JSON.stringify(annotations);
                 })();
                 "#;
-                
-                let res = tab.evaluate(js, false).map_err(|e| AgentError(e.to_string()))?;
+
+                let res = tab
+                    .evaluate(js, false)
+                    .map_err(|e| AgentError(e.to_string()))?;
                 let annotations_json = res.value.unwrap_or_default().to_string();
-                
+
                 let png_data = tab
                     .capture_screenshot(
                         headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption::Png,
@@ -357,7 +408,7 @@ impl Tool for BrowserTool {
                         true,
                     )
                     .map_err(|e| AgentError(e.to_string()))?;
-                    
+
                 let mut out_dir = PathBuf::from("frontend/public/assets");
                 if !out_dir.exists() {
                     out_dir = PathBuf::from(".pharmakon/screenshots");
@@ -366,9 +417,14 @@ impl Tool for BrowserTool {
                     let _ = fs::create_dir_all(&out_dir);
                 }
                 let out_path = out_dir.join("browser_annotated.png");
-                fs::write(&out_path, &png_data).map_err(|e| AgentError(format!("Failed to write annotated screenshot: {}", e)))?;
-                
-                Ok(format!("Annotated screen saved to: {:?}\nElements mapped:\n{}", out_path, annotations_json))
+                fs::write(&out_path, &png_data).map_err(|e| {
+                    AgentError(format!("Failed to write annotated screenshot: {}", e))
+                })?;
+
+                Ok(format!(
+                    "Annotated screen saved to: {:?}\nElements mapped:\n{}",
+                    out_path, annotations_json
+                ))
             }
             _ => Err(AgentError("Unsupported browser action".to_string())),
         }

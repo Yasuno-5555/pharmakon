@@ -5,6 +5,13 @@
 //! - Atomic rollback to any prior event ID
 //! - Entropy monitoring via event stream analysis
 //! - Forensic debugging of multi-step tool chains
+#![allow(
+    clippy::collapsible_if,
+    clippy::len_without_is_empty,
+    clippy::manual_flatten,
+    clippy::manual_is_multiple_of,
+    clippy::redundant_pattern_matching
+)]
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -27,10 +34,7 @@ pub struct AgentEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
     /// A tool was invoked by the agent.
-    ToolCalled {
-        tool: String,
-        args_hash: String,
-    },
+    ToolCalled { tool: String, args_hash: String },
     /// A tool returned a result.
     ToolResult {
         tool: String,
@@ -49,10 +53,7 @@ pub enum EventKind {
         snapshot_after_id: String,
     },
     /// Token/cost budget was consumed.
-    BudgetConsumed {
-        tokens: u64,
-        cost_usd: f64,
-    },
+    BudgetConsumed { tokens: u64, cost_usd: f64 },
     /// A sub-agent was spawned.
     SubAgentSpawned {
         child_session: String,
@@ -73,13 +74,9 @@ pub enum EventKind {
         entropy: f32,
     },
     /// The agent emitted a thought.
-    ThoughtEmitted {
-        content_hash: String,
-    },
+    ThoughtEmitted { content_hash: String },
     /// Category activation changed.
-    CategoryActivated {
-        category: String,
-    },
+    CategoryActivated { category: String },
     /// Session lifecycle event.
     SessionEvent {
         action: String, // "started", "completed", "suspended", "failed"
@@ -123,9 +120,10 @@ impl EventLog {
     pub fn new(persist_path: Option<PathBuf>) -> Self {
         // Ensure persistence directory exists
         if let Some(ref path) = persist_path
-            && let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+            && let Some(parent) = path.parent()
+        {
+            let _ = std::fs::create_dir_all(parent);
+        }
 
         Self {
             events: Mutex::new(VecDeque::new()),
@@ -414,7 +412,11 @@ mod tests {
             .await;
         }
         let entropy = log.recent_tool_entropy(10).await;
-        assert!(entropy < 0.3, "Diverse tools should have low entropy: {}", entropy);
+        assert!(
+            entropy < 0.3,
+            "Diverse tools should have low entropy: {}",
+            entropy
+        );
     }
 
     #[tokio::test]

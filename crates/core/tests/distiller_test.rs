@@ -1,6 +1,6 @@
+use pharmakon_core::orchestration::ollama_distiller::OllamaDistiller;
 use pharmakon_core::persistence::DbSessionStore;
 use pharmakon_core::trajectory::{Trajectory, TrajectoryStep};
-use pharmakon_core::orchestration::ollama_distiller::OllamaDistiller;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -9,7 +9,7 @@ async fn test_distiller_trajectory_formatting() {
     let session_id = "distill-test-session";
 
     let mut traj = Trajectory::new(session_id.to_string(), "test-frontier-model".to_string());
-    
+
     // Step 1: User Intent
     traj.add_step(TrajectoryStep::Intent {
         goal: "Write a high-performance HTTP server in Rust".to_string(),
@@ -20,7 +20,8 @@ async fn test_distiller_trajectory_formatting() {
 
     // Step 2: Agent Thought
     traj.add_step(TrajectoryStep::Thought {
-        content: "I will use axum for its state-of-the-art routing capability and speed.".to_string(),
+        content: "I will use axum for its state-of-the-art routing capability and speed."
+            .to_string(),
         timestamp: chrono::Utc::now(),
     });
 
@@ -66,7 +67,7 @@ async fn test_distiller_trajectory_formatting() {
         // Let's call the public distill and expect connection failure or success, but first let's verify
         // the core database loader.
         let loaded_traj = &all_trajectories[0];
-        
+
         // Let's reconstruct the formatting logic to assert its correctness:
         let mut user_query = String::new();
         let mut assistant_steps = Vec::new();
@@ -96,10 +97,16 @@ async fn test_distiller_trajectory_formatting() {
     };
 
     assert_eq!(user_prompt, "Write a high-performance HTTP server in Rust");
-    assert!(assistant_prompt.contains("[Thought]\nI will use axum for its state-of-the-art routing capability and speed."));
+    assert!(assistant_prompt.contains(
+        "[Thought]\nI will use axum for its state-of-the-art routing capability and speed."
+    ));
     assert!(assistant_prompt.contains("[Action]\nTool: write_file\nArgs: {\"content\":\"fn main() { println!(\\\"Run server\\\"); }\",\"path\":\"src/main.rs\"}"));
     assert!(assistant_prompt.contains("[Observation]\nSuccessfully wrote 38 bytes to src/main.rs"));
-    assert!(assistant_prompt.contains("[Response]\nI have scaffolded the Axum server configuration in src/main.rs."));
+    assert!(
+        assistant_prompt.contains(
+            "[Response]\nI have scaffolded the Axum server configuration in src/main.rs."
+        )
+    );
 }
 
 #[tokio::test]
@@ -109,7 +116,9 @@ async fn test_distiller_offline_resilience() {
     let store = Arc::new(DbSessionStore::new("sqlite::memory:").await.unwrap());
     let distiller = OllamaDistiller::new(store);
 
-    let result = distiller.distill("llama3.2", "pharmakon-distilled-test").await;
+    let result = distiller
+        .distill("llama3.2", "pharmakon-distilled-test")
+        .await;
     match result {
         Ok(_) => println!("Ollama is online and successfully compiled the model."),
         Err(e) => {
@@ -117,10 +126,10 @@ async fn test_distiller_offline_resilience() {
             // Verify that the error is indeed a reqwest/connection error and not a logic panic
             let err_str = e.to_string();
             assert!(
-                err_str.contains("Ollama") || 
-                err_str.contains("connection") || 
-                err_str.contains("Connect") ||
-                err_str.contains("error sending request")
+                err_str.contains("Ollama")
+                    || err_str.contains("connection")
+                    || err_str.contains("Connect")
+                    || err_str.contains("error sending request")
             );
         }
     }

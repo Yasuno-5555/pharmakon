@@ -21,14 +21,13 @@ impl InsightSynthesizer {
             markdown
         );
 
-        let system_prompt = "You are an Meta-Cognitive Analyst. Your job is to extract wisdom from experience.";
-        let messages = vec![
-            Message {
-                role: "user".to_string(),
-                content: Some(MessageContent::Text(prompt)),
-                ..Default::default()
-            },
-        ];
+        let system_prompt =
+            "You are an Meta-Cognitive Analyst. Your job is to extract wisdom from experience.";
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: Some(MessageContent::Text(prompt)),
+            ..Default::default()
+        }];
 
         let model = {
             let m = agent.model.lock().await;
@@ -62,13 +61,11 @@ impl InsightSynthesizer {
 
         let critic_system_prompt = "You are a Senior Architectural Critic. You are extremely conservative and only approve mandates that are universally true for this project.";
         let critic_req = CompletionRequest {
-            messages: vec![
-                Message {
-                    role: "user".to_string(),
-                    content: Some(MessageContent::Text(mandate_prompt)),
-                    ..Default::default()
-                },
-            ],
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text(mandate_prompt)),
+                ..Default::default()
+            }],
             temperature: Some(0.1),
             max_tokens: Some(512),
             tools: None,
@@ -77,7 +74,10 @@ impl InsightSynthesizer {
         };
 
         if let Ok(critic_resp) = model.complete(critic_req).await {
-            let mandate = critic_resp.content.map(|c| c.to_string()).unwrap_or_default();
+            let mandate = critic_resp
+                .content
+                .map(|c| c.to_string())
+                .unwrap_or_default();
             if !mandate.contains("NONE") && mandate.len() > 10 {
                 let mandate_path = std::path::PathBuf::from("PHARMAKON.md");
                 let mut existing = std::fs::read_to_string(&mandate_path).unwrap_or_default();
@@ -110,7 +110,8 @@ impl InsightSynthesizer {
         if let Some(store) = &agent.session_store {
             let store_clone = store.clone();
             tokio::spawn(async move {
-                let distiller = crate::orchestration::ollama_distiller::OllamaDistiller::new(store_clone);
+                let distiller =
+                    crate::orchestration::ollama_distiller::OllamaDistiller::new(store_clone);
                 // Distill from default llama3.2 to our target pharmakon-distilled
                 if let Err(e) = distiller.distill("llama3.2", "pharmakon-distilled").await {
                     log::warn!("Auto background Ollama distillation skipped/failed: {}", e);

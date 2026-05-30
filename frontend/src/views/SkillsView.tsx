@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Search, Package, Code, Globe, Terminal, Star, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
+import type { ToolInfo } from '../types';
 
 interface SkillsViewProps {
-  tools: any[];
+  tools: ToolInfo[];
 }
 
 const SkillsView: React.FC<SkillsViewProps> = ({ tools }) => {
@@ -12,10 +13,10 @@ const SkillsView: React.FC<SkillsViewProps> = ({ tools }) => {
 
   const categories = ['All', 'System', 'Network', 'FileSystem', 'Code', 'Media'];
 
-  const filteredTools = (tools || []).map(t => ({
+  const filteredTools = (tools || []).map((t) => ({
     ...t,
     category: t.category || 'System', // Default category for display
-    parameters: t.parameters?.properties || t.parameters || {}
+    parameters: t.parameters?.properties || t.parameters || {},
   })).filter(t =>
     (filter === 'All' || t.category === filter) &&
     (t.name.includes(search) || t.description.toLowerCase().includes(search.toLowerCase()))

@@ -191,17 +191,13 @@ impl RetryState {
                 }
             }
 
-            FailureClass::Escalation => {
-                RetryAction::AskHuman {
-                    reason: format!("Escalation required: {}", error),
-                }
-            }
+            FailureClass::Escalation => RetryAction::AskHuman {
+                reason: format!("Escalation required: {}", error),
+            },
 
-            FailureClass::Terminal => {
-                RetryAction::Abort {
-                    reason: format!("Terminal failure — retrying will not help: {}", error),
-                }
-            }
+            FailureClass::Terminal => RetryAction::Abort {
+                reason: format!("Terminal failure — retrying will not help: {}", error),
+            },
         }
     }
 

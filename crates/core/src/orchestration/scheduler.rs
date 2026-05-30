@@ -8,8 +8,8 @@
 //! (`priority_score`, `expected_information_gain`, `retry_cost`) to support
 //! future multi-task prioritization and cost-benefit scheduling.
 
-use crate::orchestration::budget::{self, ExecutionBudget, TaskComplexity};
 use crate::model::{AgentModel, CompletionRequest, Message, MessageContent};
+use crate::orchestration::budget::{self, ExecutionBudget, TaskComplexity};
 use std::sync::Arc;
 
 // --- Managed Task ---
@@ -132,7 +132,9 @@ impl From<&ManagedTask> for TaskSnapshot {
             suspended_at: chrono::Utc::now().to_rfc3339(),
             budget_wall_time_secs: task.budget.hard_max_wall_time.as_secs(),
             budget_stall_threshold: match &task.budget.policy {
-                crate::orchestration::budget::TerminationPolicy::ProgressBased { stall_threshold } => *stall_threshold,
+                crate::orchestration::budget::TerminationPolicy::ProgressBased {
+                    stall_threshold,
+                } => *stall_threshold,
                 _ => 3,
             },
         }
@@ -181,20 +183,19 @@ pub async fn classify_task_complexity(
     let word_count = trimmed.split_whitespace().count();
     let is_ambiguous = word_count < 3 || trimmed.len() < 12;
 
-    if is_ambiguous && heuristic == TaskComplexity::Simple
+    if is_ambiguous
+        && heuristic == TaskComplexity::Simple
         && let Some(model) = model
-            && let Some(llm_result) = llm_classify(description, model).await {
-                return llm_result;
-            }
+        && let Some(llm_result) = llm_classify(description, model).await
+    {
+        return llm_result;
+    }
 
     heuristic
 }
 
 /// LLM-based classification prompt.
-async fn llm_classify(
-    description: &str,
-    model: &Arc<dyn AgentModel>,
-) -> Option<TaskComplexity> {
+async fn llm_classify(description: &str, model: &Arc<dyn AgentModel>) -> Option<TaskComplexity> {
     let prompt = format!(
         "Classify the following task into exactly one category: Simple, Standard, or Deep.\n\
          - Simple: one-shot commands, quick lookups, trivial questions.\n\
@@ -247,10 +248,22 @@ fn heuristic_classify(description: &str) -> TaskComplexity {
 
     // Deep: complex, multi-step, or architectural tasks
     const DEEP_KEYWORDS: &[&str] = &[
-        "rewrite", "redesign", "migrate", "architecture", "refactor",
-        "security audit", "multi-step", "complex", "swarm",
-        "decompose", "rearchitect", "overhaul", "restructure",
-        "concurrency", "async migration", "database migration",
+        "rewrite",
+        "redesign",
+        "migrate",
+        "architecture",
+        "refactor",
+        "security audit",
+        "multi-step",
+        "complex",
+        "swarm",
+        "decompose",
+        "rearchitect",
+        "overhaul",
+        "restructure",
+        "concurrency",
+        "async migration",
+        "database migration",
     ];
 
     if DEEP_KEYWORDS.iter().any(|k| trimmed.contains(k)) {
@@ -263,9 +276,21 @@ fn heuristic_classify(description: &str) -> TaskComplexity {
 
     // Standard: file/code modifications
     const STANDARD_KEYWORDS: &[&str] = &[
-        "implement", "debug", "test", "fix", "add", "create",
-        "modify", "update", "change", "build", "compile",
-        "optimize", "improve", "review", "analyze",
+        "implement",
+        "debug",
+        "test",
+        "fix",
+        "add",
+        "create",
+        "modify",
+        "update",
+        "change",
+        "build",
+        "compile",
+        "optimize",
+        "improve",
+        "review",
+        "analyze",
     ];
 
     if STANDARD_KEYWORDS.iter().any(|k| trimmed.contains(k)) {
@@ -277,10 +302,7 @@ fn heuristic_classify(description: &str) -> TaskComplexity {
 }
 
 /// Convenience: classify and create a fully managed task in one call.
-pub async fn manage_task(
-    description: &str,
-    model: Option<&Arc<dyn AgentModel>>,
-) -> ManagedTask {
+pub async fn manage_task(description: &str, model: Option<&Arc<dyn AgentModel>>) -> ManagedTask {
     let complexity = classify_task_complexity(description, model).await;
     let budget = budget::estimate_budget(complexity);
     ManagedTask::new(description, complexity, budget)

@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import { Save, Shield, Bot, Key } from 'lucide-react';
+import type { AppSettings } from '../types';
 
 interface SettingsViewProps {
-  settings: any;
-  onUpdate: (settings: any) => void;
+  settings: AppSettings | null;
+  onUpdate: (settings: AppSettings) => void;
 }
 
 const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdate }) => {
-  const [localSettings, setLocalSettings] = useState(settings || {
+  const [localSettings, setLocalSettings] = useState<AppSettings>(settings || {
     model: 'gemini-2.0-flash',
     temperature: 0.7,
     auto_approval: false,
     max_tokens: 100000,
-    api_key: '************'
+    api_key: '************',
   });
 
   const handleSave = () => {

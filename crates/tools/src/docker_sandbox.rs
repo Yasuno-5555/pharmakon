@@ -36,7 +36,7 @@ impl DockerSandbox {
 
         if let Some(id) = id_lock.as_ref() {
             // Check if container is still alive
-            if let Ok(_) = self.docker.inspect_container(id, None).await {
+            if self.docker.inspect_container(id, None).await.is_ok() {
                 return Ok(id.clone());
             }
         }
@@ -85,7 +85,11 @@ impl DockerSandbox {
         let exec_config = CreateExecOptions {
             attach_stdout: Some(true),
             attach_stderr: Some(true),
-            cmd: Some(vec!["sh".to_string(), "-c".to_string(), command.to_string()]),
+            cmd: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                command.to_string(),
+            ]),
             ..Default::default()
         };
 
@@ -118,11 +122,8 @@ impl DockerSandbox {
         let timeout = timeout_duration.unwrap_or(self.timeout);
         let run_result = tokio::time::timeout(timeout, run_future).await;
 
-        if let Err(_) = run_result {
-            stderr.push_str(&format!(
-                "\n[Error: Command timed out after {:?}]",
-                timeout
-            ));
+        if run_result.is_err() {
+            stderr.push_str(&format!("\n[Error: Command timed out after {:?}]", timeout));
         } else if let Ok(Err(e)) = run_result {
             return Err(e);
         }

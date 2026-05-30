@@ -4,10 +4,10 @@
 //! and secondary Plan B (isolated sandbox or dry-run) to minimize LLM latency
 //! and maximize execution velocity.
 
-use std::path::{Path, PathBuf};
-use anyhow::{Result, anyhow};
 use crate::agent::Agent;
 use crate::orchestration::world::{CandidatePlan, execute_node};
+use anyhow::{Result, anyhow};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpeculativeMode {
@@ -57,19 +57,29 @@ impl SpeculativeExecutor {
         };
 
         // 2. Clone Agent for Plan B (speculative isolated execution)
-        let spec_session_id = format!("{}-spec-{}", session_id, &uuid::Uuid::new_v4().to_string()[..8]);
+        let spec_session_id = format!(
+            "{}-spec-{}",
+            session_id,
+            &uuid::Uuid::new_v4().to_string()[..8]
+        );
         let agent_b = agent.clone_for_speculative(
             matches!(self.mode, SpeculativeMode::DryRun),
-            spec_session_id.clone()
+            spec_session_id.clone(),
         );
 
         // Prepare Sandbox directory inside workspace
-        let sandbox_dir = self.sandbox_root.join(format!("speculative_run_{}", &uuid::Uuid::new_v4().to_string()[..8]));
+        let sandbox_dir = self.sandbox_root.join(format!(
+            "speculative_run_{}",
+            &uuid::Uuid::new_v4().to_string()[..8]
+        ));
         if matches!(self.mode, SpeculativeMode::WorkspaceSandbox) {
             let _ = std::fs::create_dir_all(&sandbox_dir);
             // Restore original snapshot into the sandbox directory
             if let Some(ref snapshot) = original_snapshot {
-                agent.snapshot_store.restore_dir(&sandbox_dir, snapshot).await?;
+                agent
+                    .snapshot_store
+                    .restore_dir(&sandbox_dir, snapshot)
+                    .await?;
             }
         }
 
@@ -80,7 +90,13 @@ impl SpeculativeExecutor {
         let primary_handle = tokio::spawn(async move {
             let mut snapshotted_files = Vec::new();
             let ast = plan_a_clone.get_ast();
-            let res = execute_node(&agent_a, &ast, &workspace_root_clone, &mut snapshotted_files).await;
+            let res = execute_node(
+                &agent_a,
+                &ast,
+                &workspace_root_clone,
+                &mut snapshotted_files,
+            )
+            .await;
             (res, snapshotted_files)
         });
 
@@ -107,7 +123,9 @@ impl SpeculativeExecutor {
 
         match result_a {
             Ok(res_a) => {
-                log::info!("[SPECULATIVE] Primary Plan A completed successfully! Disposing Plan B.");
+                log::info!(
+                    "[SPECULATIVE] Primary Plan A completed successfully! Disposing Plan B."
+                );
                 // Cleanup sandbox
                 if matches!(self.mode, SpeculativeMode::WorkspaceSandbox) {
                     let _ = std::fs::remove_dir_all(&sandbox_dir);
@@ -130,16 +148,25 @@ impl SpeculativeExecutor {
                 // Await Secondary Plan (B)
                 let (result_b, _snaps_b) = match secondary_handle.await {
                     Ok(val) => val,
-                    Err(_) => (Err(anyhow!("Secondary speculative thread panicked")), Vec::new()),
+                    Err(_) => (
+                        Err(anyhow!("Secondary speculative thread panicked")),
+                        Vec::new(),
+                    ),
                 };
 
                 match result_b {
                     Ok(res_b) => {
-                        log::info!("[SPECULATIVE] Plan B (Secondary) completed successfully! Promoting...");
+                        log::info!(
+                            "[SPECULATIVE] Plan B (Secondary) completed successfully! Promoting..."
+                        );
                         if matches!(self.mode, SpeculativeMode::WorkspaceSandbox) {
                             // Collect sandbox changes and promote them directly to our live workspace root
-                            let b_sandbox_snapshot = agent.snapshot_store.snapshot_dir(&sandbox_dir).await?;
-                            agent.snapshot_store.restore_dir(&workspace_root, &b_sandbox_snapshot).await?;
+                            let b_sandbox_snapshot =
+                                agent.snapshot_store.snapshot_dir(&sandbox_dir).await?;
+                            agent
+                                .snapshot_store
+                                .restore_dir(&workspace_root, &b_sandbox_snapshot)
+                                .await?;
                             let _ = std::fs::remove_dir_all(&sandbox_dir);
                         }
                         Ok(format!("[SPECULATIVE PROMOTE B] {}", res_b))
@@ -164,9 +191,9 @@ impl SpeculativeExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use crate::orchestration::world::PlanNode;
     use crate::model::MockModel;
+    use crate::orchestration::world::PlanNode;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_speculative_executor_dry_run() {
@@ -197,7 +224,8 @@ mod tests {
             }),
         };
 
-        let executor = SpeculativeExecutor::new(SpeculativeMode::DryRun, &std::env::current_dir().unwrap());
+        let executor =
+            SpeculativeExecutor::new(SpeculativeMode::DryRun, &std::env::current_dir().unwrap());
         let res = executor.execute_speculative(&agent, plan_a, plan_b).await;
         if let Err(ref e) = res {
             println!("Speculative run failed with error: {:?}", e);

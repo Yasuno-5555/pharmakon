@@ -10,7 +10,9 @@ pub struct ImageGenTool {
 }
 
 impl Default for ImageGenTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ImageGenTool {
@@ -44,7 +46,9 @@ impl Tool for ImageGenTool {
     }
 
     async fn call(&self, args: Value) -> AgentResult<String> {
-        let prompt = args["prompt"].as_str().ok_or_else(|| AgentError("Missing prompt".into()))?;
+        let prompt = args["prompt"]
+            .as_str()
+            .ok_or_else(|| AgentError("Missing prompt".into()))?;
         let filename = args["filename"].as_str().unwrap_or("generated_asset.svg");
 
         // Ensure output directory exists in frontend public assets if possible
@@ -60,7 +64,8 @@ impl Tool for ImageGenTool {
         let api_key = std::env::var("OPENAI_API_KEY").ok();
 
         if let Some(key) = api_key {
-            let res = self.client
+            let res = self
+                .client
                 .post("https://api.openai.com/v1/images/generations")
                 .header("Authorization", format!("Bearer {}", key))
                 .json(&json!({
@@ -74,15 +79,29 @@ impl Tool for ImageGenTool {
                 .map_err(|e| AgentError(format!("OpenAI request failed: {}", e)))?;
 
             if res.status().is_success() {
-                let body: Value = res.json().await.map_err(|e| AgentError(format!("Failed to parse OpenAI JSON: {}", e)))?;
+                let body: Value = res
+                    .json()
+                    .await
+                    .map_err(|e| AgentError(format!("Failed to parse OpenAI JSON: {}", e)))?;
                 if let Some(url) = body["data"][0]["url"].as_str() {
-                    let img_data = self.client.get(url).send().await
-                        .map_err(|e| AgentError(format!("Failed to download generated image: {}", e)))?
-                        .bytes().await
+                    let img_data = self
+                        .client
+                        .get(url)
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            AgentError(format!("Failed to download generated image: {}", e))
+                        })?
+                        .bytes()
+                        .await
                         .map_err(|e| AgentError(format!("Failed to read image bytes: {}", e)))?;
 
-                    fs::write(&out_path, img_data).map_err(|e| AgentError(format!("Failed to write file to disk: {}", e)))?;
-                    return Ok(format!("Successfully generated image via OpenAI DALL-E 3 and saved to {:?}", out_path));
+                    fs::write(&out_path, img_data)
+                        .map_err(|e| AgentError(format!("Failed to write file to disk: {}", e)))?;
+                    return Ok(format!(
+                        "Successfully generated image via OpenAI DALL-E 3 and saved to {:?}",
+                        out_path
+                    ));
                 }
             }
         }
@@ -135,7 +154,10 @@ impl Tool for ImageGenTool {
   <rect x="280" y="390" width="240" height="38" rx="8" fill="url(#btn-grad)" filter="url(#glow)" />
   <text x="400" y="413" font-family="sans-serif" font-size="14" font-weight="bold" fill="white" text-anchor="middle">Sign In</text>
 </svg>"##.to_string()
-        } else if prompt_lower.contains("dashboard") || prompt_lower.contains("chart") || prompt_lower.contains("graph") {
+        } else if prompt_lower.contains("dashboard")
+            || prompt_lower.contains("chart")
+            || prompt_lower.contains("graph")
+        {
             r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -175,8 +197,12 @@ impl Tool for ImageGenTool {
   <path d="M 260 500 L 320 420 L 380 460 L 440 330 L 500 380 L 560 270 L 620 290 L 680 220 L 740 240" fill="none" stroke="#6366f1" stroke-width="3" />
 </svg>"##.to_string()
         } else {
-            let escaped_prompt = prompt.replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;");
-            format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%">
+            let escaped_prompt = prompt
+                .replace("\"", "&quot;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#1e1b4b" />
@@ -198,10 +224,16 @@ impl Tool for ImageGenTool {
   <text x="400" y="270" font-family="sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">Visual Asset Mockup</text>
   <text x="400" y="320" font-family="sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">{}</text>
   <text x="400" y="380" font-family="sans-serif" font-size="11" fill="#6366f1" text-anchor="middle" font-weight="bold">PHARMAKON COGNITIVE VISUAL SUBSYSTEM</text>
-</svg>"##, escaped_prompt)
+</svg>"##,
+                escaped_prompt
+            )
         };
 
-        fs::write(&final_path, svg_content).map_err(|e| AgentError(format!("Failed to write SVG: {}", e)))?;
-        Ok(format!("Successfully generated beautiful SVG placeholder mockup for prompt '{}' and saved to {:?}", prompt, final_path))
+        fs::write(&final_path, svg_content)
+            .map_err(|e| AgentError(format!("Failed to write SVG: {}", e)))?;
+        Ok(format!(
+            "Successfully generated beautiful SVG placeholder mockup for prompt '{}' and saved to {:?}",
+            prompt, final_path
+        ))
     }
 }

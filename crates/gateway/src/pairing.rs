@@ -47,14 +47,15 @@ impl PairingManager {
 
     pub fn approve(&mut self, channel_id: &str, code: &str) -> Result<()> {
         if let Some(expected_code) = self.pending_pairings.get(channel_id)
-            && expected_code == code {
-                if !self.approved_users.contains(&channel_id.to_string()) {
-                    self.approved_users.push(channel_id.to_string());
-                    self.save()?;
-                }
-                self.pending_pairings.remove(channel_id);
-                return Ok(());
+            && expected_code == code
+        {
+            if !self.approved_users.contains(&channel_id.to_string()) {
+                self.approved_users.push(channel_id.to_string());
+                self.save()?;
             }
+            self.pending_pairings.remove(channel_id);
+            return Ok(());
+        }
         Err(anyhow!("Invalid pairing code"))
     }
 

@@ -24,7 +24,7 @@ impl RlfcTool {
             .arg("--allow-staged")
             .output()
             .await?;
-        
+
         let success = output.status.success();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         Ok((success, stderr))
@@ -68,43 +68,59 @@ impl Tool for RlfcTool {
                 current_iteration += 1;
                 log::info!("RLFC: Iteration {} for {}", current_iteration, path);
 
-                let (success, stderr) = self.run_linter(path).await.map_err(|e| AgentError(e.to_string()))?;
+                let (success, stderr) = self
+                    .run_linter(path)
+                    .await
+                    .map_err(|e| AgentError(e.to_string()))?;
 
                 if success {
-                    let success_msg = format!("RLFC: Successfully optimized {} after {} iterations.", path, current_iteration);
-                    
+                    let success_msg = format!(
+                        "RLFC: Successfully optimized {} after {} iterations.",
+                        path, current_iteration
+                    );
+
                     // Record causal edge: error_code → fixed_code (fixed_by)
                     if let Some(nexus) = &agent.knowledge_nexus {
                         // Index the code that was fixed
                         let code_id = format!("rlfc:code:{}", path);
-                        let _ = nexus.remember_batch(vec![(
-                            code_id.clone(),
-                            format!("RLFC-optimized code for {}:\n\n{}", path, initial_code)
-                        )]).await;
+                        let _ = nexus
+                            .remember_batch(vec![(
+                                code_id.clone(),
+                                format!("RLFC-optimized code for {}:\n\n{}", path, initial_code),
+                            )])
+                            .await;
                         let error_id = format!("rlfc:error:{}-iter{}", path, current_iteration);
                         let success_id = format!("rlfc:success:{}", path);
-                        let _ = nexus.record_causal_edge(
-                            &error_id,
-                            &success_id,
-                            pharmakon_memory::graph::Edge::FIXED_BY,
-                            1.0,
-                        ).await;
+                        let _ = nexus
+                            .record_causal_edge(
+                                &error_id,
+                                &success_id,
+                                pharmakon_memory::graph::Edge::FIXED_BY,
+                                1.0,
+                            )
+                            .await;
                     }
 
                     // Index success pattern into Nexus
                     if let Some(nexus) = &agent.knowledge_nexus {
                         let content = std::fs::read_to_string(path).unwrap_or_default();
-                        let _ = nexus.remember_batch(vec![(
-                            format!("rlfc:success:{}", path),
-                            format!("Success pattern for {}:\n\n{}", path, content)
-                        )]).await;
+                        let _ = nexus
+                            .remember_batch(vec![(
+                                format!("rlfc:success:{}", path),
+                                format!("Success pattern for {}:\n\n{}", path, content),
+                            )])
+                            .await;
                     }
 
                     return Ok(success_msg);
                 }
 
                 last_error = stderr;
-                log::warn!("RLFC: Iteration {} failed. Error: {}", current_iteration, last_error.chars().take(100).collect::<String>());
+                log::warn!(
+                    "RLFC: Iteration {} failed. Error: {}",
+                    current_iteration,
+                    last_error.chars().take(100).collect::<String>()
+                );
 
                 // Ask model to fix based on error
                 let code = std::fs::read_to_string(path).unwrap_or_default();
@@ -115,13 +131,11 @@ impl Tool for RlfcTool {
                 );
 
                 let system_prompt = "You are an expert Rust engineer specializing in Clippy fixes.";
-                let messages = vec![
-                    Message {
-                        role: "user".to_string(),
-                        content: Some(MessageContent::Text(prompt)),
-                        ..Default::default()
-                    },
-                ];
+                let messages = vec![Message {
+                    role: "user".to_string(),
+                    content: Some(MessageContent::Text(prompt)),
+                    ..Default::default()
+                }];
 
                 let model = {
                     let m = agent.model.lock().await;
@@ -137,14 +151,18 @@ impl Tool for RlfcTool {
                     system_instruction: Some(system_prompt.to_string()),
                 };
 
-                let response = model.complete(req).await.map_err(|e| AgentError(e.to_string()))?;
+                let response = model
+                    .complete(req)
+                    .await
+                    .map_err(|e| AgentError(e.to_string()))?;
                 if let Some(fixed_code) = response.content.as_ref().and_then(|c| c.as_text()) {
                     // Extract code block if model wrapped it
                     let mut clean_code = fixed_code.to_string();
                     if let Some(start) = clean_code.find("```rust")
-                        && let Some(end) = clean_code[start+7..].find("```") {
-                            clean_code = clean_code[start+7..start+7+end].trim().to_string();
-                        }
+                        && let Some(end) = clean_code[start + 7..].find("```")
+                    {
+                        clean_code = clean_code[start + 7..start + 7 + end].trim().to_string();
+                    }
                     std::fs::write(path, clean_code).map_err(|e| AgentError(e.to_string()))?;
                 }
             }
@@ -154,16 +172,26 @@ impl Tool for RlfcTool {
                 let code_id = format!("rlfc:code:{}", path);
                 let error_id = format!("rlfc:error:{}", path);
                 // Index the error for future reference
-                let _ = nexus.remember_batch(vec![(
-                    error_id.clone(),
-                    format!("RLFC error for {}:\n\n{}", path, last_error)
-                )]).await;
-                let _ = nexus.record_causal_edge(
-                    &error_id, &code_id, pharmakon_memory::graph::Edge::CAUSED_BY, 0.8,
-                ).await;
+                let _ = nexus
+                    .remember_batch(vec![(
+                        error_id.clone(),
+                        format!("RLFC error for {}:\n\n{}", path, last_error),
+                    )])
+                    .await;
+                let _ = nexus
+                    .record_causal_edge(
+                        &error_id,
+                        &code_id,
+                        pharmakon_memory::graph::Edge::CAUSED_BY,
+                        0.8,
+                    )
+                    .await;
             }
 
-            Err(AgentError(format!("RLFC: Failed to optimize {} after {} iterations. Last error: {}", path, max_iters, last_error)))
+            Err(AgentError(format!(
+                "RLFC: Failed to optimize {} after {} iterations. Last error: {}",
+                path, max_iters, last_error
+            )))
         } else {
             Err(AgentError("Agent reference lost".to_string()))
         }
